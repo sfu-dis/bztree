@@ -13,6 +13,9 @@ include_directories(
   ${PMWCAS_SRC_PATH}/src
 )
 
+# Define PMEM for PMwCAS
+add_definitions(-DPMEM)
+
 set(PMWCAS_LIB_PATH "" CACHE STRING "PMwCAS shared library path")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
