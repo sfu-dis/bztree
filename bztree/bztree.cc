@@ -2,11 +2,79 @@
 
 namespace bztree {
 
+/*
 InternalNode *InternalNode::New() {
   // FIXME(tzwang): use a better allocator
   InternalNode *node = (InternalNode *)malloc(InternalNode::kNodeSize);
   new (node) InternalNode;
   return node;
+}
+*/
+
+bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t payload,
+                      pmwcas::DescriptorPool *pmwcas_pool) {
+retry:
+  NodeHeader::StatusWord expected_status = header.status;
+
+  // If frozon then retry
+  if (expected_status.IsFrozen()) {
+    return false;
+  }
+
+  // Now try to reserve space in the free space region using a PMwCAS. Two steps:
+  // Step 1. Incrementing the record count and block size fields in [status] 
+  // Step 2. Flip the record metadata entry's high order bit and fill in global
+  // epoch
+  NodeHeader::StatusWord desired_status = expected_status;
+
+  // Block size includes both key and payload sizes
+  uint64_t total_size = key_size + sizeof(payload);
+  desired_status.PrepareForInsert(total_size);
+
+  // Get the tentative metadata entry (again, make a local copy to work on it)
+  RecordMetadata *meta_ptr = &record_metadata[desired_status.GetRecordCount()];
+  RecordMetadata expected_meta = *meta_ptr;
+  if (!expected_meta.IsVacant()) {
+    goto retry;
+  }
+
+  RecordMetadata desired_meta;
+  desired_meta.PrepareForInsert(epoch);
+
+  // Now do the PMwCAS
+  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
+  pd->AddEntry(&header.status.word, expected_status.word, desired_status.word);
+  pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
+  if (!pd->MwCAS()) {
+    return false;
+  }
+
+  // Reserved space! Now copy data
+  uint64_t offset = kNodeSize - desired_status.GetBlockSize();
+  char *ptr = &((char*)this)[offset];
+  memcpy(ptr, key, key_size);
+  memcpy(ptr + key_size, &payload, sizeof(payload));
+
+  // Flush the word
+  pmwcas::NVRAM::Flush(key_size + sizeof(payload), ptr);
+
+  // Re-check if the node is frozen
+  NodeHeader::StatusWord s = header.status;
+  if (s.IsFrozen()) {
+    return false;
+  } else {
+    // Final step: make the new record visible, a 2-word PMwCAS:
+    // 1. Metadata - set the visible bit and actual block offset
+    // 2. Status word - set to the initial value read above (s) to detect
+    // conflicting threads that are trying to set the frozen bit
+    expected_meta = desired_meta;
+    desired_meta.FinalizeForInsert(offset, key_size, total_size);
+
+    pd = pmwcas_pool->AllocateDescriptor();
+    pd->AddEntry(&header.status.word, s.word, s.word);
+    pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
+    return pd->MwCAS();
+  }
 }
 
 }  // namespace bztree
