@@ -1,0 +1,3 @@
+[submodule "pmwcas"]
+	path = pmwcas
+	url = git@github.com:Microsoft/pmwcas.git
