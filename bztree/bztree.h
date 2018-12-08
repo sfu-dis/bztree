@@ -15,6 +15,7 @@ struct NodeHeader {
   // first two (control and frozen) while leaf nodes use all the five.
   struct StatusWord {
     uint64_t word;
+    StatusWord() : word(0) {}
 
     static const uint64_t kControlMask = 0x7;                         // Bits 1-3
     static const uint64_t kFrozenMask = 0x8;                          // Bit 4
@@ -41,6 +42,7 @@ class BaseNode {
 public:
   struct RecordMetadata {
     uint64_t meta;
+    RecordMetadata() : meta(0) {}
 
     static const uint64_t kControlMask = 0x7;                        // Bits 1-3
     static const uint64_t kVisibleMask = 0x8;                        // Bit 4
