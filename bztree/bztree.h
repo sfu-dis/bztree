@@ -25,6 +25,9 @@ struct NodeHeader {
     static const uint64_t kBlockSizeMask = uint64_t{0x3FFFFF} << 20;  // Bits 21-42
     static const uint64_t kDeleteSizeMask = uint64_t{0x3FFFFF} << 42; // Bits 43-64
 
+    static const uint64_t kFrozenFlag = 0x8;
+
+    inline void Freeze() { word |= kFrozenFlag; }
     inline bool IsFrozen() { return word & kFrozenMask; }
     inline uint64_t GetRecordCount() { return (word & kRecordCountMask) >> 4; }
     inline uint64_t GetBlockSize() { return (word & kBlockSizeMask) >> 20; }
@@ -82,6 +85,10 @@ protected:
   NodeHeader header;
   RecordMetadata record_metadata[0];
 
+protected:
+  // Set the frozen bit to prevent future modifications to the node
+  bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
+
 public:
   BaseNode() {}
 };
@@ -109,6 +116,9 @@ public:
   bool Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
 
+  // Consolidate all records in sorted order
+  LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
+
   // Get the key (return value) and payload (8-byte)
   inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
     if (!meta.IsVisible()) {
@@ -118,6 +128,14 @@ public:
     char *data = &((char*)this + kNodeSize)[meta.GetOffset()];
     payload = *(uint64_t*)(&data[meta.GetKeyLength()]);
     return data;
+  }
+
+  inline char *GetKey(RecordMetadata meta) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+    uint64_t offset = meta.GetOffset();
+    return &((char*)this + kNodeSize)[meta.GetOffset()];
   }
 
   void Dump();

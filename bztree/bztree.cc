@@ -129,4 +129,79 @@ retry:
   }
 }
 
+bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
+  NodeHeader::StatusWord expected = header.status;
+  if (expected.IsFrozen()) {
+    return false;
+  }
+  NodeHeader::StatusWord desired = expected;
+  desired.Freeze();
+
+  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
+  pd->AddEntry(&header.status.word, expected.word, desired.word);
+  return pd->MwCAS();
+}
+
+LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
+  thread_local std::vector<RecordMetadata> meta_vec;
+  meta_vec.clear();
+
+  // Freeze the node to prevent new modifications first
+  if (!Freeze(pmwcas_pool)) {
+    return nullptr;
+  }
+
+  uint64_t total_size = 0;
+  for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
+    // TODO(tzwang): handle deletes
+    if (record_metadata[i].IsVisible()) {
+      auto meta = record_metadata[i];
+      meta_vec.emplace_back(meta);
+      total_size += (meta.GetTotalLength());
+    }
+  }
+
+  // Lambda for comparing two keys
+  auto key_cmp = [this](RecordMetadata &m1, RecordMetadata &m2) -> int {
+    uint64_t l1 = m1.GetKeyLength();
+    uint64_t l2 = m2.GetKeyLength();
+    char *k1 = GetKey(m1);
+    char *k2 = GetKey(m2);
+    int cmp = memcmp(k1, k2, std::min<uint64_t>(l1, l2));
+    if (cmp == 0) {
+      return l1 - l2;
+    }
+    return cmp;
+  };
+
+  std::sort(meta_vec.begin(), meta_vec.end(), key_cmp);
+
+  // Allocate and populate a new node
+  LeafNode *new_leaf = LeafNode::New();
+
+  // Set proper header fields
+  new_leaf->header.size = total_size;
+  new_leaf->header.status.word = (total_size << 20) | (meta_vec.size() << 4);
+  new_leaf->header.sorted_count = meta_vec.size();
+
+  // Now meta_vec is in sorted order, insert records one by one
+  uint64_t offset = kNodeSize;
+  for (uint32_t i = 0; i < meta_vec.size(); ++i) {
+    auto &meta = meta_vec[i];
+    uint64_t payload = 0;
+    char *key = GetRecord(meta, payload);
+
+    uint64_t total_len = meta.GetTotalLength();
+    offset -= total_len;
+    char *ptr = &((char*)new_leaf+ kNodeSize)[offset];
+    memcpy(ptr, key, total_len);
+
+    BaseNode::RecordMetadata new_meta = meta;
+    new_meta.FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
+    new_leaf->record_metadata[i] = new_meta;
+  }
+
+  return new_leaf;
+}
+
 }  // namespace bztree

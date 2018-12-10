@@ -20,11 +20,16 @@ TEST(LeafNode, Insert) {
 
   pool->GetEpoch()->Protect();
 
-  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool));
   ASSERT_TRUE(node->Insert(0, "def", 3, 100, pool));
+  ASSERT_TRUE(node->Insert(0, "bdef", 4, 100, pool));
+  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool));
+
+  node->Dump();
+
+  auto *new_node = node->Consolidate(pool);
+  new_node->Dump();
 
   pool->GetEpoch()->Unprotect();
-  node->Dump();
 }
 
 int main(int argc, char **argv) {
