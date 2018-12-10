@@ -72,7 +72,8 @@ public:
     }
     inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
       // Set the actual offset, the visible bit, key/total length
-      meta = (offset << 31) | kVisibleFlag | (key_len << 32) | (total_len << 48);
+      meta = (offset << 4) | kVisibleFlag | (key_len << 32) | (total_len << 48);
+      assert(GetKeyLength() == key_len);
     }
   };
 

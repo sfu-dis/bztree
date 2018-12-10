@@ -76,7 +76,7 @@ retry:
   desired_status.PrepareForInsert(total_size);
 
   // Get the tentative metadata entry (again, make a local copy to work on it)
-  RecordMetadata *meta_ptr = &record_metadata[desired_status.GetRecordCount()];
+  RecordMetadata *meta_ptr = &record_metadata[expected_status.GetRecordCount()];
   RecordMetadata expected_meta = *meta_ptr;
   if (!expected_meta.IsVacant()) {
     goto retry;
@@ -95,7 +95,7 @@ retry:
 
   // Reserved space! Now copy data
   uint64_t offset = kNodeSize - desired_status.GetBlockSize();
-  char *ptr = &((char*)this)[offset];
+  char *ptr = &((char*)this + kNodeSize)[offset];
   memcpy(ptr, key, key_size);
   memcpy(ptr + key_size, &payload, sizeof(payload));
 
