@@ -105,6 +105,20 @@ public:
     header.sorted_count = sorted_count;
   }
   ~InternalNode() {}
+
+  BaseNode *GetChild(char *key, uint64_t key_size);
+
+private:
+  // Get the key (return value) and payload (8-byte)
+  inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+    uint64_t offset = meta.GetOffset();
+    char *data = &((char*)this + header.size)[meta.GetOffset()];
+    payload = *(uint64_t*)(&data[meta.GetKeyLength()]);
+    return data;
+  }
 };
 
 class LeafNode : public BaseNode {
@@ -160,9 +174,26 @@ private:
   };
 
 public:
-  BzTree() : epoch(0) {}
+  struct ParameterSet {
+    uint32_t split_threshold;
+    ParameterSet() : split_threshold(3072) {}
+    ParameterSet(uint32_t split_threshold)
+    : split_threshold(split_threshold) {}
+    ~ParameterSet() {}
+  };
+
+  BzTree(ParameterSet param) : parameters(param), epoch(0), root(nullptr) {
+    root = LeafNode::New();
+  }
+  bool Insert(char *key, uint64_t key_size);
+
 private:
+  LeafNode *TraverseToLeaf(Stack &stack, char *key, uint64_t key_size);
+
+private:
+  ParameterSet parameters;
   uint32_t epoch;
+  BaseNode *root;
 };
 
 }  // namespace bztree
