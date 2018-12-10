@@ -55,7 +55,7 @@ void LeafNode::Dump() {
     BaseNode::RecordMetadata meta = record_metadata[i];
     uint64_t payload = 0;
     char *key = GetRecord(meta, payload);
-    std::string keystr(key, key + 3);
+    std::string keystr(key, key + meta.GetKeyLength());
     std::cout << " - record " << i << ": key = " << keystr
               << ", payload = " << payload << std::endl;
   }

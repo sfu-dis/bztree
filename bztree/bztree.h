@@ -9,8 +9,9 @@ struct NodeHeader {
   // |-------64 bits-------|---32 bits---|---32 bits---|
   // |     status word     |     size    | sorted count|
   //
-  // Sorted count is actually the index into the next available metadata array
-  // entry. Following the header is a growing array of record metadata entries.
+  // Sorted count is actually the index into the first metadata entry for
+  // unsorted records. Following the header is a growing array of record metadata
+  // entries.
   
   // 64-bit status word subdivided into five fields. Internal nodes only use the
   // first two (control and frozen) while leaf nodes use all the five.
