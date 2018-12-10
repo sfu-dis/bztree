@@ -146,6 +146,19 @@ public:
 };
 
 class BzTree {
+private:
+  struct Stack {
+    static const uint32_t kMaxFrames = 32;
+    InternalNode *frames[kMaxFrames];
+    uint32_t num_frames;
+
+    Stack() : num_frames(0) {}
+    ~Stack() { num_frames = 0; }
+    inline void Push(InternalNode *node) { frames[num_frames++] = node; }
+    inline InternalNode *Pop() { return num_frames == 0 ? nullptr : frames[--num_frames]; }
+    InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
+  };
+
 public:
   BzTree() : epoch(0) {}
 private:
