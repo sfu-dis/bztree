@@ -201,6 +201,8 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
     new_leaf->record_metadata[i] = new_meta;
   }
 
+  pmwcas::NVRAM::Flush(kNodeSize, new_leaf);
+
   return new_leaf;
 }
 
