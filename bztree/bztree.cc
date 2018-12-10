@@ -13,6 +13,14 @@ InternalNode *InternalNode::New() {
 }
 */
 
+LeafNode *LeafNode::New() {
+  // FIXME(tzwang): use a better allocator
+  LeafNode *node = (LeafNode *)malloc(kNodeSize);
+  memset(node, 0, kNodeSize);
+  new (node) LeafNode;
+  return node;
+}
+
 void LeafNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
   std::cout << " Dumping node: 0x" << this << std::endl;
