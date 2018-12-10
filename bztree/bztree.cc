@@ -4,14 +4,14 @@
 
 namespace bztree {
 
-/*
-InternalNode *InternalNode::New() {
+InternalNode *InternalNode::New(uint32_t data_size, uint32_t sorted_count) {
   // FIXME(tzwang): use a better allocator
-  InternalNode *node = (InternalNode *)malloc(InternalNode::kNodeSize);
-  new (node) InternalNode;
+  uint32_t alloc_size = sizeof(InternalNode) + data_size;
+  InternalNode *node = (InternalNode *)malloc(alloc_size);
+  memset(node, 0, alloc_size);
+  new (node) InternalNode(data_size, sorted_count);
   return node;
 }
-*/
 
 LeafNode *LeafNode::New() {
   // FIXME(tzwang): use a better allocator

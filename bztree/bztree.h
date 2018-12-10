@@ -82,6 +82,7 @@ public:
   };
 
 protected:
+  bool is_leaf;
   NodeHeader header;
   RecordMetadata record_metadata[0];
 
@@ -90,16 +91,19 @@ protected:
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
 
 public:
-  BaseNode() {}
+  BaseNode(bool leaf) : is_leaf(leaf) {}
+  inline bool IsLeaf() { return is_leaf; }
 };
 
-// Internal node: immutable once created, no free space, keys are sorted
+// Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
 public:
-  static const uint32_t kNodeSize = 4096;
-  static InternalNode *New();
+  static InternalNode *New(uint32_t data_size, uint32_t sorted_count);
 
-  InternalNode() : BaseNode() {}
+  InternalNode(uint64_t data_size, uint32_t sorted_count) : BaseNode(false) {
+    header.size = sizeof(*this) + data_size;
+    header.sorted_count = sorted_count;
+  }
   ~InternalNode() {}
 };
 
@@ -110,7 +114,7 @@ public:
 public:
   static LeafNode *New();
 
-  LeafNode() : BaseNode() {}
+  LeafNode() : BaseNode(true) {}
   ~LeafNode() {}
 
   bool Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t payload,
