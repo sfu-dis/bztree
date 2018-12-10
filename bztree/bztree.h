@@ -1,4 +1,5 @@
 #pragma once
+#include "include/pmwcas.h"
 #include "mwcas/mwcas.h"
 
 namespace bztree {
@@ -26,6 +27,7 @@ struct NodeHeader {
     inline bool IsFrozen() { return word & kFrozenMask; }
     inline uint64_t GetRecordCount() { return (word & kRecordCountMask) >> 4; }
     inline uint64_t GetBlockSize() { return (word & kBlockSizeMask) >> 20; }
+    inline uint64_t GetDeleteSize() { return (word & kDeleteSizeMask) >> 42; }
     inline void PrepareForInsert(uint32_t size) {
       // Increment [record count] by one and [block size] by payload size
       word += ((uint64_t{1} << 4) + (uint64_t{size} << 20));
@@ -53,6 +55,10 @@ public:
     static const uint64_t kVisibleFlag = 0x8;
 
     inline bool IsVacant() { return meta == 0; }
+    inline uint64_t GetKeyLength() { return (meta & kKeyLengthMask) >> 32; }
+    inline uint64_t GetTotalLength() { return (meta & kTotalLengthMask) >> 48; }
+    inline uint64_t GetOffset() { return (meta & kOffsetMask) >> 4; }
+    inline bool IsVisible() { return meta & kVisibleMask; }
     inline void PrepareForInsert(uint64_t epoch) {
       assert(IsVacant());
       // This only has to do with the offset field, which serves the dual
@@ -100,6 +106,19 @@ public:
 
   bool Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
+
+  // Get the key (return value) and payload (8-byte)
+  inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+    uint64_t offset = meta.GetOffset();
+    char *data = &((char*)this + kNodeSize)[meta.GetOffset()];
+    payload = *(uint64_t*)(&data[meta.GetKeyLength()]);
+    return data;
+  }
+
+  void Dump();
 };
 
 class BzTree {

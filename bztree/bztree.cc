@@ -1,3 +1,5 @@
+#include <iostream>
+
 #include "bztree.h"
 
 namespace bztree {
@@ -10,6 +12,48 @@ InternalNode *InternalNode::New() {
   return node;
 }
 */
+
+void LeafNode::Dump() {
+  std::cout << "-----------------------------" << std::endl;
+  std::cout << " Dumping node: 0x" << this << std::endl;
+  std::cout << " Header:\n"
+            << " - size: " << header.size << std::endl
+            << " - status: 0x" << std::hex << header.status.word << std::endl
+            << "   (control = 0x" << (header.status.word & NodeHeader::StatusWord::kControlMask)
+                   << std::dec
+                   << ", frozen = " << header.status.IsFrozen()
+                   << ", block size = " << header.status.GetBlockSize()
+                   << ", delete size = " << header.status.GetDeleteSize()
+                   << ", record cout = " << header.status.GetRecordCount() << ")\n"
+            << " - sorted_count: " << header.sorted_count
+            << std::endl;
+
+  std::cout << " Record Metadata Array:" <<std::endl;
+  for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
+    BaseNode::RecordMetadata meta = record_metadata[i];
+    std::cout << " - record " << i << ": meta = 0x" << std::hex << meta.meta << std::endl;
+    std::cout << std::hex;
+    std::cout << "   (control = 0x" << (meta.meta & BaseNode::RecordMetadata::kControlMask)
+                   << std::dec
+                   << ", visible = " << meta.IsVisible()
+                   << ", offset = " << meta.GetOffset()
+                   << ", key length = " << meta.GetKeyLength()
+                   << ", total length = " << meta.GetTotalLength()
+                   << std::endl;
+  }
+
+  std::cout << " Key-Payload Pairs:" <<std::endl;
+  for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
+    BaseNode::RecordMetadata meta = record_metadata[i];
+    uint64_t payload = 0;
+    char *key = GetRecord(meta, payload);
+    std::string keystr(key, key + 3);
+    std::cout << " - record " << i << ": key = " << keystr
+              << ", payload = " << payload << std::endl;
+  }
+
+  std::cout << "-----------------------------" << std::endl;
+}
 
 bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t payload,
                       pmwcas::DescriptorPool *pmwcas_pool) {
