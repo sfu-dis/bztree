@@ -16,13 +16,13 @@ TEST(LeafNode, Insert) {
 
   pmwcas::DescriptorPool *pool =
       (pmwcas::DescriptorPool *) pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool));
-  new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
+  new(pool) pmwcas::DescriptorPool(100, 1, nullptr, false);
 
   pool->GetEpoch()->Protect();
 
   ASSERT_TRUE(node->Insert(0, "def", 3, 100, pool));
-  ASSERT_TRUE(node->Insert(0, "bdef", 4, 100, pool));
-  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool));
+  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool));
+  ASSERT_TRUE(node->Insert(0, "abc", 3, 102, pool));
 
   node->Dump();
 
@@ -43,13 +43,14 @@ TEST(LeafNode, duplicate_insert) {
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
   auto *pool = (pmwcas::DescriptorPool *) pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool));
-  new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
+  new(pool) pmwcas::DescriptorPool(100, 1, nullptr, false);
 
   pool->GetEpoch()->Protect();
 
-  ASSERT_TRUE(node->Insert(0, (char *) "abc", 2, 100, pool));
-  ASSERT_TRUE(node->Insert(0, (char *) "bdef", 4, 100, pool));
   ASSERT_TRUE(node->Insert(0, (char *) "abc", 3, 100, pool));
+  ASSERT_TRUE(node->Insert(0, (char *) "bdef", 4, 101, pool));
+  ASSERT_FALSE(node->Insert(0, (char *) "abc", 3, 102, pool));
+  ASSERT_TRUE(node->Insert(0, (char *) "abcd", 4, 104, pool));
 
   node->Dump();
 

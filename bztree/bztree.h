@@ -153,12 +153,14 @@ class LeafNode : public BaseNode {
       return nullptr;
     }
     uint64_t offset = meta.GetOffset();
-    return &((char *) this + kNodeSize)[meta.GetOffset()];
+    return &((char *) this)[meta.GetOffset()];
   }
 
   void Dump();
  private:
-  bool CheckUnique(char *key);
+  enum Uniqueness { IsUnique, Duplicate, ReCheck };
+  Uniqueness CheckUnique(const char *key);
+  Uniqueness RecheckUnique(const char *key, uint64_t end_pos);
 };
 
 class BzTree {
