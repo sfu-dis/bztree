@@ -55,6 +55,9 @@ TEST(LeafNode, duplicate_insert) {
   node->Dump();
 
   auto *new_node = node->Consolidate(pool);
+
+  ASSERT_FALSE(new_node->Insert(0, (char *) "abcd", 4, 100, pool));
+  ASSERT_TRUE(new_node->Insert(0, (char *) "aaa", 3, 105, pool));
   new_node->Dump();
 
   pool->GetEpoch()->Unprotect();

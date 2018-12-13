@@ -154,9 +154,10 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key) {
     uint64_t payload = 0;
     auto &current = record_metadata[middle];
     auto current_key = GetRecord(current, payload);
-    if (std::strcmp(key, current_key) < 0) {
+    auto cmp_result = memcmp(key, current_key, current.GetKeyLength());
+    if (cmp_result < 0) {
       first = middle + 1;
-    } else if (std::strcmp(key, current_key) == 0) {
+    } else if (cmp_result == 0 && std::strlen(key) == current.GetKeyLength()) {
       return Duplicate;
     } else {
       last = middle - 1;
@@ -249,9 +250,9 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
     char *k2 = GetKey(m2);
     int cmp = memcmp(k1, k2, std::min<uint64_t>(l1, l2));
     if (cmp == 0) {
-      return l1 - l2;
+      return l1 < l2;
     }
-    return cmp;
+    return cmp < 0;
   };
 
   std::sort(meta_vec.begin(), meta_vec.end(), key_cmp);
