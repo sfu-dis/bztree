@@ -12,7 +12,7 @@ struct NodeHeader {
   // Sorted count is actually the index into the first metadata entry for
   // unsorted records. Following the header is a growing array of record metadata
   // entries.
-  
+
   // 64-bit status word subdivided into five fields. Internal nodes only use the
   // first two (control and frozen) while leaf nodes use all the five.
   struct StatusWord {
@@ -45,7 +45,7 @@ struct NodeHeader {
 };
 
 class BaseNode {
-public:
+ public:
   struct RecordMetadata {
     uint64_t meta;
     RecordMetadata() : meta(0) {}
@@ -81,55 +81,55 @@ public:
     }
   };
 
-protected:
+ protected:
   bool is_leaf;
   NodeHeader header;
   RecordMetadata record_metadata[0];
 
-protected:
+ protected:
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
 
-public:
+ public:
   BaseNode(bool leaf) : is_leaf(leaf) {}
   inline bool IsLeaf() { return is_leaf; }
 };
 
 // Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
-public:
+ public:
   static InternalNode *New(uint32_t data_size, uint32_t sorted_count);
 
   InternalNode(uint64_t data_size, uint32_t sorted_count) : BaseNode(false) {
     header.size = sizeof(*this) + data_size;
     header.sorted_count = sorted_count;
   }
-  ~InternalNode() {}
+  ~InternalNode() = default;
 
   BaseNode *GetChild(char *key, uint64_t key_size);
 
-private:
+ private:
   // Get the key (return value) and payload (8-byte)
   inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
     if (!meta.IsVisible()) {
       return nullptr;
     }
     uint64_t offset = meta.GetOffset();
-    char *data = &((char*)this + header.size)[meta.GetOffset()];
-    payload = *(uint64_t*)(&data[meta.GetKeyLength()]);
+    char *data = &((char *) this + header.size)[meta.GetOffset()];
+    payload = *(uint64_t *) (&data[meta.GetKeyLength()]);
     return data;
   }
 };
 
 class LeafNode : public BaseNode {
-public:
+ public:
   static const uint32_t kNodeSize = 4096;
 
-public:
+ public:
   static LeafNode *New();
 
   LeafNode() : BaseNode(true) {}
-  ~LeafNode() {}
+  ~LeafNode() = default;
 
   bool Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
@@ -143,8 +143,8 @@ public:
       return nullptr;
     }
     uint64_t offset = meta.GetOffset();
-    char *data = &((char*)this + kNodeSize)[meta.GetOffset()];
-    payload = *(uint64_t*)(&data[meta.GetKeyLength()]);
+    char *data = &((char *) this)[meta.GetOffset()];
+    payload = *(uint64_t *) (&data[meta.GetKeyLength()]);
     return data;
   }
 
@@ -153,14 +153,16 @@ public:
       return nullptr;
     }
     uint64_t offset = meta.GetOffset();
-    return &((char*)this + kNodeSize)[meta.GetOffset()];
+    return &((char *) this + kNodeSize)[meta.GetOffset()];
   }
 
   void Dump();
+ private:
+  bool CheckUnique(char *key);
 };
 
 class BzTree {
-private:
+ private:
   struct Stack {
     static const uint32_t kMaxFrames = 32;
     InternalNode *frames[kMaxFrames];
@@ -173,12 +175,12 @@ private:
     InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
   };
 
-public:
+ public:
   struct ParameterSet {
     uint32_t split_threshold;
     ParameterSet() : split_threshold(3072) {}
     ParameterSet(uint32_t split_threshold)
-    : split_threshold(split_threshold) {}
+        : split_threshold(split_threshold) {}
     ~ParameterSet() {}
   };
 
@@ -187,10 +189,10 @@ public:
   }
   bool Insert(char *key, uint64_t key_size);
 
-private:
+ private:
   LeafNode *TraverseToLeaf(Stack &stack, char *key, uint64_t key_size);
 
-private:
+ private:
   ParameterSet parameters;
   uint32_t epoch;
   BaseNode *root;
