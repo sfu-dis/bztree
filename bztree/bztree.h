@@ -171,6 +171,16 @@ class LeafNode : public BaseNode {
   bool PrepareForSplit(uint32_t epoch, Stack &stack, InternalNode **parent, LeafNode **left, LeafNode **right,
                        pmwcas::DescriptorPool *pmwcas_pool);
 
+  // Initialize new, empty node with a list of records; no concurrency control;
+  // only useful before any inserts to the node. For now the only users are split
+  // (when preparing a new node) and consolidation.
+  //
+  // The list of records to be inserted is specified through iterators of a
+  // record metadata vector. Recods covered by [begin_it, end_it) will be
+  // inserted to the node. Note end_it is non-inclusive.
+  void Initialize(std::vector<RecordMetadata>::iterator begin_it,
+                  std::vector<RecordMetadata>::iterator end_it);
+
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 

@@ -298,32 +298,11 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
 
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
-  uint32_t total_size = SortMetadataByKey(meta_vec, true);
+  SortMetadataByKey(meta_vec, true);
 
   // Allocate and populate a new node
   LeafNode *new_leaf = LeafNode::New();
-
-  // Set proper header fields
-  new_leaf->header.size = total_size;
-  new_leaf->header.status.word = (total_size << 20) | (meta_vec.size() << 4);
-  new_leaf->header.sorted_count = meta_vec.size();
-
-  // Now meta_vec is in sorted order, insert records one by one
-  uint64_t offset = kNodeSize;
-  for (uint32_t i = 0; i < meta_vec.size(); ++i) {
-    auto &meta = meta_vec[i];
-    uint64_t payload = 0;
-    char *key = GetRecord(meta, payload);
-
-    uint64_t total_len = meta.GetTotalLength();
-    offset -= total_len;
-    char *ptr = &((char *) new_leaf)[offset];
-    memcpy(ptr, key, total_len);
-
-    BaseNode::RecordMetadata new_meta = meta;
-    new_meta.FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
-    new_leaf->record_metadata[i] = new_meta;
-  }
+  new_leaf->Initialize(meta_vec.begin(), meta_vec.end());
 
   pmwcas::NVRAM::Flush(kNodeSize, new_leaf);
 
@@ -356,6 +335,37 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visi
 
   std::sort(vec.begin(), vec.end(), key_cmp);
   return total_size;
+}
+
+void LeafNode::Initialize(std::vector<RecordMetadata>::iterator begin_it,
+                          std::vector<RecordMetadata>::iterator end_it) {
+  LOG_IF(FATAL, header.size > 0) << "Cannot initialize a non-empty node";
+
+  // meta_vec is assumed to be in sorted order, insert records one by one
+  uint64_t offset = kNodeSize;
+  uint32_t nrecords = 0;
+  for (auto it = begin_it; it != end_it; ++it) {
+    auto &meta = *it;
+    uint64_t payload = 0;
+    char *key = GetRecord(meta, payload);
+
+    // Copy data
+    uint64_t total_len = meta.GetTotalLength();
+    offset -= total_len;
+    char *ptr = &((char *)this)[offset];
+    memcpy(ptr, key, total_len);
+
+    // Setup new metadata
+    BaseNode::RecordMetadata new_meta = meta;
+    new_meta.FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
+    record_metadata[nrecords] = new_meta;
+    ++nrecords;
+    header.size += total_len;
+  }
+
+  // Finalize header stats
+  header.status.word == ((header.size << 20) | (nrecords << 4));
+  header.sorted_count = nrecords;
 }
 
 BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
@@ -410,26 +420,22 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   uint32_t total_size = SortMetadataByKey(meta_vec, true);
 
   int32_t left_size = total_size / 2;
-  uint32_t separator_idx = 0;
-
+  uint32_t nleft = 0;
   for (uint32_t i = 0; i < meta_vec.size(); ++i) {
     auto &meta = meta_vec[i];
-    LeafNode *node = nullptr;
+    ++nleft;
     if (left_size > 0) {
-      // FIXME(tzwang): we actually don't need pmwcas here
-      node = *left;
       left_size -= meta.GetTotalLength();
-      separator_idx = i;
-    } else {
-      node = *right;
+      break;
     }
-    uint64_t payload = 0;
-    char *key = GetRecord(meta, payload);
-    node->Insert(epoch, key, meta.GetKeyLength(), payload, pmwcas_pool);
   }
 
-  LOG_IF(FATAL, separator_idx == 0);
-  RecordMetadata separatorMeta = meta_vec[separator_idx];
+  auto left_end_it = meta_vec.begin() + nleft;
+  (*left)->Initialize(meta_vec.begin(), left_end_it);
+  (*right)->Initialize(left_end_it, meta_vec.end());
+
+  LOG_IF(FATAL, nleft - 1 == 0);
+  RecordMetadata separatorMeta = meta_vec[nleft - 1];
   InternalNode *old_parent = stack.Top();
   if (old_parent) {
     // Has a parent node
