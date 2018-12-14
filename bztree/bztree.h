@@ -29,9 +29,9 @@ struct NodeHeader {
 
     inline void Freeze() { word |= kFrozenFlag; }
     inline bool IsFrozen() { return word & kFrozenMask; }
-    inline uint64_t GetRecordCount() { return (word & kRecordCountMask) >> 4; }
-    inline uint64_t GetBlockSize() { return (word & kBlockSizeMask) >> 20; }
-    inline uint64_t GetDeleteSize() { return (word & kDeleteSizeMask) >> 42; }
+    inline uint16_t GetRecordCount() { return (uint16_t) ((word & kRecordCountMask) >> 4); }
+    inline uint32_t GetBlockSize() { return (uint32_t) ((word & kBlockSizeMask) >> 20); }
+    inline uint32_t GetDeleteSize() { return (uint32_t) ((word & kDeleteSizeMask) >> 42); }
     inline void PrepareForInsert(uint32_t size) {
       // Increment [record count] by one and [block size] by payload size
       word += ((uint64_t{1} << 4) + (uint64_t{size} << 20));
@@ -156,11 +156,17 @@ class LeafNode : public BaseNode {
     return &((char *) this)[meta.GetOffset()];
   }
 
+  bool Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
+
   void Dump();
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck };
   Uniqueness CheckUnique(const char *key, uint32_t key_size);
-  Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint64_t end_pos);
+  Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
+  LeafNode::RecordMetadata *SearchRecord(const char *key,
+                                         uint32_t key_size,
+                                         uint32_t start_pos = 0,
+                                         uint32_t end_pos = (uint32_t) -1);
 };
 
 class BzTree {

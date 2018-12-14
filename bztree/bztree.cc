@@ -145,69 +145,89 @@ bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t pay
 }
 
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key, uint32_t key_size) {
-//  Binary search on sorted field
-  uint32_t first = 0;
-  uint32_t last = header.sorted_count - 1;
-  uint32_t middle;
-  while (header.sorted_count != 0 && first <= last) {
-    middle = (first + last) / 2;
-    uint64_t payload = 0;
-    auto &current = record_metadata[middle];
-    auto current_key = GetRecord(current, payload);
-    auto cmp_result = memcmp(key, current_key, current.GetKeyLength());
-    if (cmp_result < 0) {
-      first = middle + 1;
-    } else if (cmp_result == 0 && key_size == current.GetKeyLength()) {
-      return Duplicate;
-    } else {
-      last = middle - 1;
-    }
+  auto record = SearchRecord(key, key_size);
+  if (record == nullptr) {
+    return IsUnique;
   }
-
-//  Linear search on unsorted field
-  for (uint32_t i = header.sorted_count; i < header.status.GetRecordCount(); i++) {
-    auto &current = record_metadata[i];
-
-//    Encountered an in-progress insert, recheck later
-    if (current.IsVisible() == 0) {
-      auto offset = current.GetOffset();
-//      FIXME(hao): global epoch may not be zero
-      if ((offset & uint64_t{0xFFFFFFF}) == 0) {
-        return ReCheck;
-      }
-    }
-    uint64_t payload = 0;
-    auto current_key = GetRecord(current, payload);
-    if (key_size == current.GetKeyLength() &&
-        std::strncmp(key, current_key, current.GetKeyLength()) == 0) {
-      return Duplicate;
-    }
+  if (record->IsVisible() == 0) {
+    return ReCheck;
   }
-
-  return IsUnique;
+  return Duplicate;
 }
 
-LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size, uint64_t end_pos) {
-  for (uint32_t i = header.sorted_count; i < end_pos; i++) {
-    retry:
-    auto &current = record_metadata[i];
-
-//    Encountered an operation serialized behind the insert
-//    Must wait for the record to be visible
-    if (current.IsVisible() == 0) {
-      auto offset = current.GetOffset();
-      if ((offset & uint64_t{0xFFFFFFF}) == 0) {
-        goto retry;
-      }
-    }
-    uint64_t payload = 0;
-    auto current_key = GetRecord(current, payload);
-    if (key_size == current.GetKeyLength() &&
-        std::strncmp(key, current_key, current.GetKeyLength()) == 0) {
-      return Duplicate;
+LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos) {
+  retry:
+  auto record = SearchRecord(key, key_size, header.sorted_count, end_pos);
+  if (record == nullptr) {
+    return IsUnique;
+  }
+  if (record->IsVisible() == 0) {
+    //    Encountered an operation serialized behind the insert
+    //    Must wait for the record to be visible
+    auto offset = record->GetOffset();
+    if ((offset & uint64_t{0xFFFFFFF}) == 0) {
+      goto retry;
     }
   }
-  return IsUnique;
+  return Duplicate;
+}
+
+LeafNode::RecordMetadata *LeafNode::SearchRecord(const char *key,
+                                                 uint32_t key_size,
+                                                 uint32_t start_pos,
+                                                 uint32_t end_pos) {
+  if (start_pos < header.sorted_count) {
+//    Binary search on sorted field
+    uint32_t first = start_pos;
+    uint32_t last = std::min<uint32_t>(end_pos, header.sorted_count - 1);
+    uint32_t middle;
+    while (header.sorted_count != 0 && first <= last) {
+      middle = (first + last) / 2;
+      uint64_t payload = 0;
+      auto current = &(record_metadata[middle]);
+      auto current_key = GetRecord(*current, payload);
+      auto cmp_result = memcmp(key, current_key, current->GetKeyLength());
+      if (cmp_result < 0) {
+        first = middle + 1;
+      } else if (cmp_result == 0 && key_size == current->GetKeyLength()) {
+        return current;
+      } else {
+        last = middle - 1;
+      }
+    }
+  }
+  if (end_pos > header.sorted_count) {
+//    Linear search on unsorted field
+    uint32_t linear_end = std::min<uint32_t>(header.status.GetRecordCount(), end_pos);
+    for (uint32_t i = header.sorted_count; i < linear_end; i++) {
+      auto current = &(record_metadata[i]);
+
+//      Encountered an in-progress insert, recheck later
+      if (current->IsVisible() == 0) {
+        return &(record_metadata[i]);
+      }
+
+      uint64_t payload = 0;
+      auto current_key = GetRecord(*current, payload);
+      if (key_size == current->GetKeyLength() &&
+          std::strncmp(key, current_key, current->GetKeyLength()) == 0) {
+        return current;
+      }
+    }
+  }
+  return nullptr;
+}
+
+bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool *pmwcas_pool) {
+  NodeHeader::StatusWord old_status = header.status;
+  if (old_status.IsFrozen()) {
+    return false;
+  }
+  NodeHeader::StatusWord desired = old_status;
+
+  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
+  pd->AddEntry(&header.status.word, old_status.word, desired.word);
+  return pd->MwCAS();
 }
 
 bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
