@@ -389,6 +389,59 @@ BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
   return (BaseNode *) meta_payload;
 }
 
+bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
+                               InternalNode **parent,
+                               LeafNode **left,
+                               LeafNode **right,
+                               pmwcas::DescriptorPool *pmwcas_pool) {
+  LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
+  // Set the frozen bit on the node to be split
+  if (!Freeze(pmwcas_pool)) {
+    return false;
+  }
+
+  // Prepare new nodes: a parent node, a left leaf and a right leaf
+  // FIXME(tzwang): not PM-safe, might leak
+  *left = LeafNode::New();
+  *right = LeafNode::New();
+
+  thread_local std::vector<RecordMetadata> meta_vec;
+  meta_vec.clear();
+  uint32_t total_size = SortMetadataByKey(meta_vec, true);
+
+  int32_t left_size = total_size / 2;
+  uint32_t separator_idx = 0;
+
+  for (uint32_t i = 0; i < meta_vec.size(); ++i) {
+    auto &meta = meta_vec[i];
+    LeafNode *node = nullptr;
+    if (left_size > 0) {
+      // FIXME(tzwang): we actually don't need pmwcas here
+      node = *left;
+      left_size -= meta.GetTotalLength();
+      separator_idx = i;
+    } else {
+      node = *right;
+    }
+    uint64_t payload = 0;
+    char *key = GetRecord(meta, payload);
+    node->Insert(epoch, key, meta.GetKeyLength(), payload, pmwcas_pool);
+  }
+
+  LOG_IF(FATAL, separator_idx == 0);
+  RecordMetadata separatorMeta = meta_vec[separator_idx];
+  InternalNode *old_parent = stack.Top();
+  if (old_parent) {
+    // Has a parent node
+    uint32_t parent_data_size = old_parent->GetHeader()->size + separatorMeta.GetTotalLength();
+    *parent = InternalNode::New(parent_data_size, old_parent->GetHeader()->sorted_count + 1);
+  } else {
+    uint32_t parent_data_size = separatorMeta.GetTotalLength() + sizeof(uint64_t);
+    *parent = InternalNode::New(parent_data_size, 1);
+  }
+  return true;
+}
+
 LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {
   BaseNode *node = root;
   while (!node->IsLeaf()) {

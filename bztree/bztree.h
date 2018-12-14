@@ -129,6 +129,7 @@ class InternalNode : public BaseNode {
   ~InternalNode() = default;
 
   BaseNode *GetChild(char *key, uint64_t key_size);
+  inline NodeHeader *GetHeader() { return &header; }
 
  private:
   // Get the key (return value) and payload (8-byte)
@@ -143,6 +144,18 @@ class InternalNode : public BaseNode {
   }
 };
 
+struct Stack {
+  static const uint32_t kMaxFrames = 32;
+  InternalNode *frames[kMaxFrames];
+  uint32_t num_frames;
+
+  Stack() : num_frames(0) {}
+  ~Stack() { num_frames = 0; }
+  inline void Push(InternalNode *node) { frames[num_frames++] = node; }
+  inline InternalNode *Pop() { return num_frames == 0 ? nullptr : frames[--num_frames]; }
+  InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
+};
+
 class LeafNode : public BaseNode {
  public:
   static const uint32_t kNodeSize = 4096;
@@ -155,6 +168,8 @@ class LeafNode : public BaseNode {
 
   bool Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
+  bool PrepareForSplit(uint32_t epoch, Stack &stack, InternalNode **parent, LeafNode **left, LeafNode **right,
+                       pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
@@ -182,6 +197,7 @@ class LeafNode : public BaseNode {
 
   uint64_t Read(const char *key, uint32_t key_size);
 
+  uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);
   void Dump();
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck };
@@ -198,19 +214,6 @@ class LeafNode : public BaseNode {
 };
 
 class BzTree {
- private:
-  struct Stack {
-    static const uint32_t kMaxFrames = 32;
-    InternalNode *frames[kMaxFrames];
-    uint32_t num_frames;
-
-    Stack() : num_frames(0) {}
-    ~Stack() { num_frames = 0; }
-    inline void Push(InternalNode *node) { frames[num_frames++] = node; }
-    inline InternalNode *Pop() { return num_frames == 0 ? nullptr : frames[--num_frames]; }
-    InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
-  };
-
  public:
   struct ParameterSet {
     uint32_t split_threshold;
