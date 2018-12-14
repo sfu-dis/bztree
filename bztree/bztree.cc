@@ -364,7 +364,7 @@ void LeafNode::Initialize(std::vector<RecordMetadata>::iterator begin_it,
   }
 
   // Finalize header stats
-  header.status.word == ((header.size << 20) | (nrecords << 4));
+  header.status.word = ((header.size << 20) | (nrecords << 4));
   header.sorted_count = nrecords;
 }
 
