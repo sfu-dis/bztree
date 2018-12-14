@@ -139,6 +139,16 @@ TEST(LeafNode, Split) {
   ASSERT_TRUE(node->Insert(0, (char *) "toronto", 7, 106, pool));
 
   node->Dump();
+
+  bztree::Stack stack;
+  bztree::InternalNode *parent = nullptr;
+  bztree::LeafNode *left = nullptr;
+  bztree::LeafNode *right = nullptr;
+  ASSERT_TRUE(node->PrepareForSplit(0, stack, &parent, &left, &right, pool));
+
+  left->Dump();
+  right->Dump();
+  parent->Dump();
   pool->GetEpoch()->Unprotect();
 }
 

@@ -432,8 +432,8 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   for (uint32_t i = 0; i < meta_vec.size(); ++i) {
     auto &meta = meta_vec[i];
     ++nleft;
-    if (left_size > 0) {
-      left_size -= meta.GetTotalLength();
+    left_size -= meta.GetTotalLength();
+    if (left_size <= 0) {
       break;
     }
   }
