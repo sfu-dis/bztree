@@ -161,13 +161,8 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   if (record == nullptr) {
     return IsUnique;
   }
-  if (record->IsVisible() == 0) {
-    //    Encountered an operation serialized behind the insert
-    //    Must wait for the record to be visible
-    auto offset = record->GetOffset();
-    if ((offset & uint64_t{0xFFFFFFF}) == 0) {
-      goto retry;
-    }
+  if (record->IsInserting()) {
+    goto retry;
   }
   return Duplicate;
 }
@@ -223,11 +218,30 @@ bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool
   if (old_status.IsFrozen()) {
     return false;
   }
-  NodeHeader::StatusWord desired = old_status;
+
+  retry:
+  auto record_meta = SearchRecord(key, key_size);
+  if (record_meta == nullptr) {
+    return false;
+  } else if (record_meta->IsInserting()) {
+//    FIXME(hao): not mentioned in the paper, should confirm later;
+    goto retry;
+  }
+
+  auto new_meta = *record_meta;
+  new_meta.SetVisible(false);
+  new_meta.SetOffset(0);
+
+  auto new_status = old_status;
+  auto old_delete_size = old_status.GetDeleteSize();
+  new_status.SetDeleteSize(old_delete_size + record_meta->GetTotalLength());
 
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&header.status.word, old_status.word, desired.word);
-  return pd->MwCAS();
+  pd->AddEntry(&header.status.word, old_status.word, new_status.word);
+  pd->AddEntry(&(record_meta->meta), record_meta->meta, new_meta.meta);
+  if (!pd->MwCAS()) {
+    goto retry;
+  }
 }
 
 bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {

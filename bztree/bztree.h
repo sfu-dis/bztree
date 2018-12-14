@@ -32,6 +32,9 @@ struct NodeHeader {
     inline uint16_t GetRecordCount() { return (uint16_t) ((word & kRecordCountMask) >> 4); }
     inline uint32_t GetBlockSize() { return (uint32_t) ((word & kBlockSizeMask) >> 20); }
     inline uint32_t GetDeleteSize() { return (uint32_t) ((word & kDeleteSizeMask) >> 42); }
+    inline void SetDeleteSize(uint32_t size) {
+      word = (word & (~kDeleteSizeMask)) | (uint64_t{size} << 42);
+    }
     inline void PrepareForInsert(uint32_t size) {
       // Increment [record count] by one and [block size] by payload size
       word += ((uint64_t{1} << 4) + (uint64_t{size} << 20));
@@ -59,10 +62,20 @@ class BaseNode {
     static const uint64_t kVisibleFlag = 0x8;
 
     inline bool IsVacant() { return meta == 0; }
-    inline uint64_t GetKeyLength() { return (meta & kKeyLengthMask) >> 32; }
-    inline uint64_t GetTotalLength() { return (meta & kTotalLengthMask) >> 48; }
-    inline uint64_t GetOffset() { return (meta & kOffsetMask) >> 4; }
+    inline uint16_t GetKeyLength() { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
+    inline uint16_t GetTotalLength() { return (uint16_t) ((meta & kTotalLengthMask) >> 48); }
+    inline uint32_t GetOffset() { return (uint32_t) ((meta & kOffsetMask) >> 4); }
+    inline void SetOffset(uint32_t offset) {
+      meta = (meta & (~kOffsetMask)) | (offset << 4);
+    }
     inline bool IsVisible() { return meta & kVisibleMask; }
+    inline void SetVisible(bool visible) {
+      if (visible) {
+        meta = meta | kVisibleMask;
+      } else {
+        meta = meta & (~kVisibleMask);
+      }
+    }
     inline void PrepareForInsert(uint64_t epoch) {
       assert(IsVacant());
       // This only has to do with the offset field, which serves the dual
@@ -78,6 +91,14 @@ class BaseNode {
       // Set the actual offset, the visible bit, key/total length
       meta = (offset << 4) | kVisibleFlag | (key_len << 32) | (total_len << 48);
       assert(GetKeyLength() == key_len);
+    }
+    inline bool IsInserting() {
+//    record is not visible
+//    and record allocation epoch equal to global index epoch
+//    FIXME(hao): Global index epoch may not be zero
+      auto offset = GetOffset();
+      return IsVisible() == 0 &&
+          ((offset & uint64_t{0xFFFFFFF}) == 0);
     }
   };
 
@@ -167,6 +188,7 @@ class LeafNode : public BaseNode {
                                          uint32_t key_size,
                                          uint32_t start_pos = 0,
                                          uint32_t end_pos = (uint32_t) -1);
+
 };
 
 class BzTree {
