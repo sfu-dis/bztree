@@ -74,7 +74,7 @@ bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t pay
     return false;
   }
 
-  auto uniqueness = CheckUnique(key);
+  auto uniqueness = CheckUnique(key, key_size);
   if (uniqueness == Duplicate) {
     return false;
   }
@@ -108,7 +108,7 @@ bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t pay
   }
 
   // Reserved space! Now copy data
-  uint64_t offset = kNodeSize - expected_status.GetBlockSize() - key_size - sizeof(payload);
+  uint64_t offset = kNodeSize - desired_status.GetBlockSize();
   char *ptr = &((char *) this)[offset];
   memcpy(ptr, key, key_size);
   memcpy(ptr + key_size, &payload, sizeof(payload));
@@ -117,7 +117,7 @@ bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t pay
   pmwcas::NVRAM::Flush(key_size + sizeof(payload), ptr);
 
   if (uniqueness == ReCheck) {
-    uniqueness = RecheckUnique(key, expected_status.GetRecordCount());
+    uniqueness = RecheckUnique(key, key_size, expected_status.GetRecordCount());
     if (uniqueness == Duplicate) {
       memset(ptr, 0, key_size);
       memset(ptr + key_size, 0, sizeof(payload));
@@ -144,7 +144,7 @@ bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t pay
   }
 }
 
-LeafNode::Uniqueness LeafNode::CheckUnique(const char *key) {
+LeafNode::Uniqueness LeafNode::CheckUnique(const char *key, uint32_t key_size) {
 //  Binary search on sorted field
   uint32_t first = 0;
   uint32_t last = header.sorted_count - 1;
@@ -157,7 +157,7 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key) {
     auto cmp_result = memcmp(key, current_key, current.GetKeyLength());
     if (cmp_result < 0) {
       first = middle + 1;
-    } else if (cmp_result == 0 && std::strlen(key) == current.GetKeyLength()) {
+    } else if (cmp_result == 0 && key_size == current.GetKeyLength()) {
       return Duplicate;
     } else {
       last = middle - 1;
@@ -178,7 +178,7 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key) {
     }
     uint64_t payload = 0;
     auto current_key = GetRecord(current, payload);
-    if (std::strlen(key) == current.GetKeyLength() &&
+    if (key_size == current.GetKeyLength() &&
         std::strncmp(key, current_key, current.GetKeyLength()) == 0) {
       return Duplicate;
     }
@@ -187,7 +187,7 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key) {
   return IsUnique;
 }
 
-LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint64_t end_pos) {
+LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size, uint64_t end_pos) {
   for (uint32_t i = header.sorted_count; i < end_pos; i++) {
     retry:
     auto &current = record_metadata[i];
@@ -202,7 +202,7 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint64_t end_pos) 
     }
     uint64_t payload = 0;
     auto current_key = GetRecord(current, payload);
-    if (std::strlen(key) == current.GetKeyLength() &&
+    if (key_size == current.GetKeyLength() &&
         std::strncmp(key, current_key, current.GetKeyLength()) == 0) {
       return Duplicate;
     }
@@ -243,7 +243,7 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
   }
 
   // Lambda for comparing two keys
-  auto key_cmp = [this](RecordMetadata &m1, RecordMetadata &m2) -> int {
+  auto key_cmp = [this](RecordMetadata &m1, RecordMetadata &m2) -> bool {
     uint64_t l1 = m1.GetKeyLength();
     uint64_t l2 = m2.GetKeyLength();
     char *k1 = GetKey(m1);

@@ -159,8 +159,8 @@ class LeafNode : public BaseNode {
   void Dump();
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck };
-  Uniqueness CheckUnique(const char *key);
-  Uniqueness RecheckUnique(const char *key, uint64_t end_pos);
+  Uniqueness CheckUnique(const char *key, uint32_t key_size);
+  Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint64_t end_pos);
 };
 
 class BzTree {
