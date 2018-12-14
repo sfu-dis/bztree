@@ -111,6 +111,7 @@ class BaseNode {
  protected:
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
+  void Dump();
 
  public:
   BaseNode(bool leaf) : is_leaf(leaf) {}
@@ -130,6 +131,7 @@ class InternalNode : public BaseNode {
 
   BaseNode *GetChild(char *key, uint64_t key_size);
   inline NodeHeader *GetHeader() { return &header; }
+  void Dump();
 
  private:
   // Get the key (return value) and payload (8-byte)

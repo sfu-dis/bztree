@@ -22,7 +22,7 @@ LeafNode *LeafNode::New() {
   return node;
 }
 
-void LeafNode::Dump() {
+void BaseNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
   std::cout << " Dumping node: 0x" << this << std::endl;
   std::cout << " Header:\n"
@@ -50,7 +50,10 @@ void LeafNode::Dump() {
               << ", total length = " << meta.GetTotalLength()
               << std::endl;
   }
+}
 
+void LeafNode::Dump() {
+  BaseNode::Dump();
   std::cout << " Key-Payload Pairs:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     BaseNode::RecordMetadata meta = record_metadata[i];
@@ -62,6 +65,10 @@ void LeafNode::Dump() {
   }
 
   std::cout << "-----------------------------" << std::endl;
+}
+
+void InternalNode::Dump() {
+  BaseNode::Dump();
 }
 
 bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
