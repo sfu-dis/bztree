@@ -165,7 +165,9 @@ class LeafNode : public BaseNode {
  public:
   static LeafNode *New();
 
-  LeafNode() : BaseNode(true) {}
+  LeafNode() : BaseNode(true) {
+    header.size = sizeof(*this);
+  }
   ~LeafNode() = default;
 
   bool Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
