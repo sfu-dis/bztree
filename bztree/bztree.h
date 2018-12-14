@@ -152,7 +152,7 @@ class LeafNode : public BaseNode {
   LeafNode() : BaseNode(true) {}
   ~LeafNode() = default;
 
-  bool Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t payload,
+  bool Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
@@ -179,15 +179,20 @@ class LeafNode : public BaseNode {
 
   bool Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
 
+  uint64_t Read(const char *key, uint32_t key_size);
+
   void Dump();
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck };
   Uniqueness CheckUnique(const char *key, uint32_t key_size);
   Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
-  LeafNode::RecordMetadata *SearchRecord(const char *key,
-                                         uint32_t key_size,
-                                         uint32_t start_pos = 0,
-                                         uint32_t end_pos = (uint32_t) -1);
+
+//
+  LeafNode::RecordMetadata *SearchRecordMeta(const char *key,
+                                             uint32_t key_size,
+                                             uint32_t start_pos = 0,
+                                             uint32_t end_pos = (uint32_t) -1,
+                                             bool check_concurrency = true);
 
 };
 

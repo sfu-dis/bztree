@@ -64,7 +64,7 @@ void LeafNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
 }
 
-bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t payload,
+bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
                       pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
   NodeHeader::StatusWord expected_status = header.status;
@@ -145,7 +145,7 @@ bool LeafNode::Insert(uint32_t epoch, char *key, uint32_t key_size, uint64_t pay
 }
 
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key, uint32_t key_size) {
-  auto record = SearchRecord(key, key_size);
+  auto record = SearchRecordMeta(key, key_size);
   if (record == nullptr) {
     return IsUnique;
   }
@@ -157,7 +157,7 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key, uint32_t key_size) {
 
 LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos) {
   retry:
-  auto record = SearchRecord(key, key_size, header.sorted_count, end_pos);
+  auto record = SearchRecordMeta(key, key_size, header.sorted_count, end_pos);
   if (record == nullptr) {
     return IsUnique;
   }
@@ -167,10 +167,11 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   return Duplicate;
 }
 
-LeafNode::RecordMetadata *LeafNode::SearchRecord(const char *key,
-                                                 uint32_t key_size,
-                                                 uint32_t start_pos,
-                                                 uint32_t end_pos) {
+LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
+                                                     uint32_t key_size,
+                                                     uint32_t start_pos,
+                                                     uint32_t end_pos,
+                                                     bool check_concurrency) {
   if (start_pos < header.sorted_count) {
 //    Binary search on sorted field
     uint32_t first = start_pos;
@@ -198,8 +199,10 @@ LeafNode::RecordMetadata *LeafNode::SearchRecord(const char *key,
       auto current = &(record_metadata[i]);
 
 //      Encountered an in-progress insert, recheck later
-      if (current->IsVisible() == 0) {
+      if (current->IsVisible() == 0 && check_concurrency) {
         return &(record_metadata[i]);
+      } else if (current->IsVisible() == 0 && !check_concurrency) {
+        continue;
       }
 
       uint64_t payload = 0;
@@ -220,7 +223,7 @@ bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool
   }
 
   retry:
-  auto record_meta = SearchRecord(key, key_size);
+  auto record_meta = SearchRecordMeta(key, key_size);
   if (record_meta == nullptr) {
     return false;
   } else if (record_meta->IsInserting()) {
@@ -242,6 +245,15 @@ bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool
   if (!pd->MwCAS()) {
     goto retry;
   }
+}
+uint64_t LeafNode::Read(const char *key, uint32_t key_size) {
+  auto meta = SearchRecordMeta(key, key_size, 0, (uint32_t) -1, false);
+  if (meta == nullptr) {
+    return 0;
+  }
+  uint64_t payload = 0;
+  GetRecord(*meta, payload);
+  return payload;
 }
 
 bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {

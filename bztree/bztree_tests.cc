@@ -24,10 +24,14 @@ TEST(LeafNode, Insert) {
   ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool));
   ASSERT_TRUE(node->Insert(0, "abc", 3, 102, pool));
 
+  ASSERT_EQ(node->Read("def", 3), 100);
+  ASSERT_EQ(node->Read("abc", 3), 102);
+
   node->Dump();
 
   auto *new_node = node->Consolidate(pool);
   new_node->Dump();
+  ASSERT_EQ(new_node->Read("bdef", 4), 101);
 
   pool->GetEpoch()->Unprotect();
 }
@@ -47,18 +51,21 @@ TEST(LeafNode, duplicate_insert) {
 
   pool->GetEpoch()->Protect();
 
-  ASSERT_TRUE(node->Insert(0, (char *) "abc", 3, 100, pool));
-  ASSERT_TRUE(node->Insert(0, (char *) "bdef", 4, 101, pool));
-  ASSERT_FALSE(node->Insert(0, (char *) "abc", 3, 102, pool));
-  ASSERT_TRUE(node->Insert(0, (char *) "abcd", 4, 104, pool));
+  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool));
+  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool));
+  ASSERT_FALSE(node->Insert(0, "abc", 3, 102, pool));
+  ASSERT_TRUE(node->Insert(0, "abcd", 4, 104, pool));
 
-  node->Dump();
+  ASSERT_EQ(node->Read("abc", 3), 100);
+  ASSERT_EQ(node->Read("bdef", 4), 101);
 
   auto *new_node = node->Consolidate(pool);
 
-  ASSERT_FALSE(new_node->Insert(0, (char *) "abcd", 4, 100, pool));
-  ASSERT_TRUE(new_node->Insert(0, (char *) "aaa", 3, 105, pool));
-  new_node->Dump();
+  ASSERT_FALSE(new_node->Insert(0, "abcd", 4, 100, pool));
+  ASSERT_TRUE(new_node->Insert(0, "aaa", 3, 105, pool));
+
+  ASSERT_EQ(new_node->Read("aaa", 3), 105);
+  ASSERT_EQ(new_node->Read("abcd", 4), 104);
 
   pool->GetEpoch()->Unprotect();
 }
