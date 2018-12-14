@@ -65,9 +65,9 @@ TEST_F(LeafNodeFixtures, Read) {
 TEST_F(LeafNodeFixtures, Insert) {
   pool->GetEpoch()->Protect();
 
-  ASSERT_TRUE(node->Insert(0, "def", 3, 100, pool));
-  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool));
-  ASSERT_TRUE(node->Insert(0, "abc", 3, 102, pool));
+  ASSERT_TRUE(node->Insert(0, (char *)"def", 3, 100, pool));
+  ASSERT_TRUE(node->Insert(0, (char *)"bdef", 4, 101, pool));
+  ASSERT_TRUE(node->Insert(0, (char *)"abc", 3, 102, pool));
   ASSERT_EQ(node->Read("def", 3), 100);
   ASSERT_EQ(node->Read("abc", 3), 102);
 
