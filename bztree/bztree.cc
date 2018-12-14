@@ -302,7 +302,7 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
 
   // Allocate and populate a new node
   LeafNode *new_leaf = LeafNode::New();
-  new_leaf->Initialize(meta_vec.begin(), meta_vec.end());
+  new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end());
 
   pmwcas::NVRAM::Flush(kNodeSize, new_leaf);
 
@@ -337,17 +337,18 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visi
   return total_size;
 }
 
-void LeafNode::Initialize(std::vector<RecordMetadata>::iterator begin_it,
-                          std::vector<RecordMetadata>::iterator end_it) {
+void LeafNode::CopyFrom(LeafNode *node,
+                        std::vector<RecordMetadata>::iterator begin_it,
+                        std::vector<RecordMetadata>::iterator end_it) {
   LOG_IF(FATAL, header.size > 0) << "Cannot initialize a non-empty node";
 
   // meta_vec is assumed to be in sorted order, insert records one by one
   uint64_t offset = kNodeSize;
   uint32_t nrecords = 0;
   for (auto it = begin_it; it != end_it; ++it) {
-    auto &meta = *it;
+    auto meta = *it;
     uint64_t payload = 0;
-    char *key = GetRecord(meta, payload);
+    char *key = node->GetRecord(meta, payload);
 
     // Copy data
     uint64_t total_len = meta.GetTotalLength();
@@ -431,8 +432,8 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   }
 
   auto left_end_it = meta_vec.begin() + nleft;
-  (*left)->Initialize(meta_vec.begin(), left_end_it);
-  (*right)->Initialize(left_end_it, meta_vec.end());
+  (*left)->CopyFrom(this, meta_vec.begin(), left_end_it);
+  (*right)->CopyFrom(this, left_end_it, meta_vec.end());
 
   LOG_IF(FATAL, nleft - 1 == 0);
   RecordMetadata separatorMeta = meta_vec[nleft - 1];

@@ -118,6 +118,30 @@ TEST_F(LeafNodeFixtures, Delete) {
   pool->GetEpoch()->Unprotect();
 }
 
+TEST(LeafNode, Split) {
+  auto *node = bztree::LeafNode::New();
+
+  pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
+                      pmwcas::TlsAllocator::Destroy,
+                      pmwcas::LinuxEnvironment::Create,
+                      pmwcas::LinuxEnvironment::Destroy);
+  auto *pool = (pmwcas::DescriptorPool *) pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool));
+  new(pool) pmwcas::DescriptorPool(100, 1, nullptr, false);
+
+  pool->GetEpoch()->Protect();
+
+  ASSERT_TRUE(node->Insert(0, (char *) "abc", 3, 100, pool));
+  ASSERT_TRUE(node->Insert(0, (char *) "bdef", 4, 101, pool));
+  ASSERT_TRUE(node->Insert(0, (char *) "abcd", 4, 102, pool));
+  ASSERT_TRUE(node->Insert(0, (char *) "deadbeef", 8, 103, pool));
+  ASSERT_TRUE(node->Insert(0, (char *) "parker", 6, 104, pool));
+  ASSERT_TRUE(node->Insert(0, (char *) "deadpork", 8, 105, pool));
+  ASSERT_TRUE(node->Insert(0, (char *) "toronto", 7, 106, pool));
+
+  node->Dump();
+  pool->GetEpoch()->Unprotect();
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

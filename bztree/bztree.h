@@ -178,8 +178,9 @@ class LeafNode : public BaseNode {
   // The list of records to be inserted is specified through iterators of a
   // record metadata vector. Recods covered by [begin_it, end_it) will be
   // inserted to the node. Note end_it is non-inclusive.
-  void Initialize(std::vector<RecordMetadata>::iterator begin_it,
-                  std::vector<RecordMetadata>::iterator end_it);
+  void CopyFrom(LeafNode *node,
+                std::vector<RecordMetadata>::iterator begin_it,
+                std::vector<RecordMetadata>::iterator end_it);
 
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
