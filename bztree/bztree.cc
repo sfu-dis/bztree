@@ -291,38 +291,14 @@ bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
 }
 
 LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
-  thread_local std::vector<RecordMetadata> meta_vec;
-  meta_vec.clear();
-
   // Freeze the node to prevent new modifications first
   if (!Freeze(pmwcas_pool)) {
     return nullptr;
   }
 
-  uint32_t total_size = 0;
-  for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
-    // TODO(tzwang): handle deletes
-    if (record_metadata[i].IsVisible()) {
-      auto meta = record_metadata[i];
-      meta_vec.emplace_back(meta);
-      total_size += (meta.GetTotalLength());
-    }
-  }
-
-  // Lambda for comparing two keys
-  auto key_cmp = [this](RecordMetadata &m1, RecordMetadata &m2) -> bool {
-    uint64_t l1 = m1.GetKeyLength();
-    uint64_t l2 = m2.GetKeyLength();
-    char *k1 = GetKey(m1);
-    char *k2 = GetKey(m2);
-    int cmp = memcmp(k1, k2, std::min<uint64_t>(l1, l2));
-    if (cmp == 0) {
-      return l1 < l2;
-    }
-    return cmp < 0;
-  };
-
-  std::sort(meta_vec.begin(), meta_vec.end(), key_cmp);
+  thread_local std::vector<RecordMetadata> meta_vec;
+  meta_vec.clear();
+  uint32_t total_size = SortMetadataByKey(meta_vec, true);
 
   // Allocate and populate a new node
   LeafNode *new_leaf = LeafNode::New();
@@ -352,6 +328,34 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
   pmwcas::NVRAM::Flush(kNodeSize, new_leaf);
 
   return new_leaf;
+}
+
+uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only) {
+  uint32_t total_size = 0;
+  for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
+    // TODO(tzwang): handle deletes
+    if (record_metadata[i].IsVisible()) {
+      auto meta = record_metadata[i];
+      vec.emplace_back(meta);
+      total_size += (meta.GetTotalLength());
+    }
+  }
+
+  // Lambda for comparing two keys
+  auto key_cmp = [this](RecordMetadata &m1, RecordMetadata &m2) -> bool {
+    uint64_t l1 = m1.GetKeyLength();
+    uint64_t l2 = m2.GetKeyLength();
+    char *k1 = GetKey(m1);
+    char *k2 = GetKey(m2);
+    int cmp = memcmp(k1, k2, std::min<uint64_t>(l1, l2));
+    if (cmp == 0) {
+      return l1 < l2;
+    }
+    return cmp < 0;
+  };
+
+  std::sort(vec.begin(), vec.end(), key_cmp);
+  return total_size;
 }
 
 BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
