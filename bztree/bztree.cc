@@ -33,7 +33,7 @@ void BaseNode::Dump() {
             << ", frozen = " << header.status.IsFrozen()
             << ", block size = " << header.status.GetBlockSize()
             << ", delete size = " << header.status.GetDeleteSize()
-            << ", record cout = " << header.status.GetRecordCount() << ")\n"
+            << ", record count = " << header.status.GetRecordCount() << ")\n"
             << " - sorted_count: " << header.sorted_count
             << std::endl;
 
