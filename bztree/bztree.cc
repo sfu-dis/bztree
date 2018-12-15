@@ -1,5 +1,12 @@
+// Copyright (c) Simon Fraser University
+//
+// Authors:
+// Tianzheng Wang <tzwang@sfu.ca>
+// Xiangpeng Hao <xiangpeng_hao@sfu.ca>
+
+#include <algorithm>
 #include <iostream>
-#include <cstring>
+#include <string>
 
 #include "bztree.h"
 
@@ -11,9 +18,10 @@ InternalNode *InternalNode::New(InternalNode *src_node,
                                 uint64_t left_child_addr,
                                 uint64_t right_child_addr) {
   // FIXME(tzwang): use a better allocator
-  uint32_t data_size = src_node->GetHeader()->size + key_size + sizeof(right_child_addr) + sizeof(RecordMetadata);
+  uint32_t data_size = src_node->GetHeader()->size + key_size +
+                       sizeof(right_child_addr) + sizeof(RecordMetadata);
   uint32_t alloc_size = sizeof(InternalNode) + data_size;
-  InternalNode *node = (InternalNode *) malloc(alloc_size);
+  InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
   new(node) InternalNode(src_node, key, key_size, left_child_addr, right_child_addr);
   return node;
@@ -23,9 +31,10 @@ InternalNode *InternalNode::New(char *key,
                                 uint32_t key_size,
                                 uint64_t left_child_addr,
                                 uint64_t right_child_addr) {
-  uint32_t data_size = key_size + sizeof(left_child_addr) + sizeof(right_child_addr) + sizeof(RecordMetadata) * 2;
+  uint32_t data_size = key_size + sizeof(left_child_addr) + sizeof(right_child_addr) +
+                       sizeof(RecordMetadata) * 2;
   uint32_t alloc_size = sizeof(InternalNode) + data_size;
-  InternalNode *node = (InternalNode *)malloc(alloc_size);
+  InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
   new (node) InternalNode(key, key_size, left_child_addr, right_child_addr);
   return node;
@@ -44,13 +53,13 @@ InternalNode::InternalNode(char *key,
   // Fill in left child address, with an empty key
   uint64_t offset = header.size - sizeof(left_child_addr);
   record_metadata[0].FinalizeForInsert(offset, 0, sizeof(left_child_addr));
-  char *ptr = (char *)this + offset;
+  char *ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, &left_child_addr, sizeof(left_child_addr));
 
   // Fill in right child address, with the separator key
   offset -= (key_size + sizeof(right_child_addr));
   record_metadata[1].FinalizeForInsert(offset, key_size, sizeof(right_child_addr));
-  ptr = (char *)this + offset;
+  ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, key, key_size);
   memcpy(ptr + key_size, &right_child_addr, sizeof(right_child_addr));
 }
@@ -78,8 +87,8 @@ InternalNode::InternalNode(InternalNode *src_node,
       meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
       record_metadata[i + 1] = meta;
 
-      memcpy((char *)this + offset, m_key, m_key_size);
-      memcpy((char *)this + offset + m_key_size, &m_payload, sizeof(m_payload));
+      memcpy(reinterpret_cast<char *>(this) + offset, m_key, m_key_size);
+      memcpy(reinterpret_cast<char *>(this) + offset + m_key_size, &m_payload, sizeof(m_payload));
     } else {
       // Compare the two keys to see which one to insert (first)
       int cmp = memcmp(m_key, key, std::min<uint32_t>(m_key_size, key_size));
@@ -92,25 +101,27 @@ InternalNode::InternalNode(InternalNode *src_node,
         record_metadata[i] = new_meta;
 
         // Modify the previous key's payload to left_child_addr
-        memcpy((char *)this + record_metadata[i - 1].GetOffset() + record_metadata[i - 1].GetKeyLength(),
+        auto &prev_meta = record_metadata[i - 1];
+        memcpy(reinterpret_cast<char *>(this) + prev_meta.GetOffset() + prev_meta.GetKeyLength(),
                &left_child_addr, sizeof(left_child_addr));
 
         // Now the new separtor key itself
-        memcpy((char *)this + offset, key, key_size);
-        memcpy((char *)this + offset + key_size, &right_child_addr, sizeof(right_child_addr));
+        memcpy(reinterpret_cast<char *>(this) + offset, key, key_size);
+        memcpy(reinterpret_cast<char *>(this) + offset + key_size,
+               &right_child_addr, sizeof(right_child_addr));
 
         offset -= (meta.GetTotalLength());
         meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
         record_metadata[i + 1] = meta;
 
-        memcpy((char *)this + offset, m_key, m_key_size);
-        memcpy((char *)this + offset + m_key_size, &m_payload, sizeof(m_payload));
+        memcpy(reinterpret_cast<char *>(this) + offset, m_key, m_key_size);
+        memcpy(reinterpret_cast<char *>(this) + offset + m_key_size, &m_payload, sizeof(m_payload));
         inserted_new = true;
       } else {
         record_metadata[i] = meta;
         offset -= (meta.GetTotalLength());
-        memcpy((char *)this + offset, m_key, m_key_size);
-        memcpy((char *)this + offset + m_key_size, &m_payload, sizeof(m_payload));
+        memcpy(reinterpret_cast<char *>(this) + offset, m_key, m_key_size);
+        memcpy(reinterpret_cast<char *>(this) + offset + m_key_size, &m_payload, sizeof(m_payload));
       }
     }
   }
@@ -118,7 +129,7 @@ InternalNode::InternalNode(InternalNode *src_node,
 
 LeafNode *LeafNode::New() {
   // FIXME(tzwang): use a better allocator
-  LeafNode *node = (LeafNode *) malloc(kNodeSize);
+  LeafNode *node = reinterpret_cast<LeafNode *>(malloc(kNodeSize));
   memset(node, 0, kNodeSize);
   new(node) LeafNode;
   return node;
@@ -203,7 +214,7 @@ bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64
   }
 
   // Now try to reserve space in the free space region using a PMwCAS. Two steps:
-  // Step 1. Incrementing the record count and block size fields in [status] 
+  // Step 1. Incrementing the record count and block size fields in [status]
   // Step 2. Flip the record metadata entry's high order bit and fill in global
   // epoch
   NodeHeader::StatusWord desired_status = expected_status;
@@ -232,7 +243,7 @@ bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64
 
   // Reserved space! Now copy data
   uint64_t offset = kNodeSize - desired_status.GetBlockSize();
-  char *ptr = &((char *) this)[offset];
+  char *ptr = &(reinterpret_cast<char *>(this))[offset];
   memcpy(ptr, key, key_size);
   memcpy(ptr + key_size, &payload, sizeof(payload));
 
@@ -296,25 +307,26 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
                                                      uint32_t end_pos,
                                                      bool check_concurrency) {
   if (start_pos < header.sorted_count) {
-//    Binary search on sorted field
+    // Binary search on sorted field
     int64_t first = start_pos;
     int64_t last = std::min<uint32_t>(end_pos, header.sorted_count - 1);
     int64_t middle;
     while (header.sorted_count != 0 && first <= last) {
       middle = (first + last) / 2;
 
-//      Encountered a deleted record
-//      Try to adjust the middle to left ones
+      // Encountered a deleted record
+      // Try to adjust the middle to left ones
       while (!record_metadata[middle].IsVisible() && first < middle) {
         middle -= 1;
       }
 
-//      Every record on the left is deleted, now try right ones
+      // Every record on the left is deleted, now try right ones
       middle = (first + last) / 2;
       while (!record_metadata[middle].IsVisible() && middle < last) {
         middle += 1;
       }
-//      Every record in the sorted field is deleted
+
+      // Every record in the sorted field is deleted
       if (!record_metadata[middle].IsVisible()) {
         break;
       }
@@ -334,12 +346,12 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
     }
   }
   if (end_pos > header.sorted_count) {
-//    Linear search on unsorted field
+    // Linear search on unsorted field
     uint32_t linear_end = std::min<uint32_t>(header.status.GetRecordCount(), end_pos);
     for (uint32_t i = header.sorted_count; i < linear_end; i++) {
       auto current = &(record_metadata[i]);
 
-//      Encountered an in-progress insert, recheck later
+      // Encountered an in-progress insert, recheck later
       if (current->IsInserting() && check_concurrency) {
         return &(record_metadata[i]);
       } else if (current->IsInserting() && !check_concurrency) {
@@ -350,7 +362,7 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
       auto current_key = GetRecord(*current, payload);
       if (current->IsVisible() &&
           key_size == current->GetKeyLength() &&
-          std::strncmp(key, current_key, current->GetKeyLength()) == 0) {
+          strncmp(key, current_key, current->GetKeyLength()) == 0) {
         return current;
       }
     }
@@ -369,7 +381,7 @@ bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool
   if (record_meta == nullptr) {
     return false;
   } else if (record_meta->IsInserting()) {
-//    FIXME(hao): not mentioned in the paper, should confirm later;
+    // FIXME(hao): not mentioned in the paper, should confirm later;
     goto retry;
   }
 
@@ -476,7 +488,7 @@ void LeafNode::CopyFrom(LeafNode *node,
     // Copy data
     uint64_t total_len = meta.GetTotalLength();
     offset -= total_len;
-    char *ptr = &((char *)this)[offset];
+    char *ptr = &(reinterpret_cast<char *>(this))[offset];
     memcpy(ptr, key, total_len);
 
     // Setup new metadata
@@ -520,7 +532,7 @@ BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
   auto meta = record_metadata[left];
   uint64_t meta_payload = 0;
   GetRecord(meta, meta_payload);
-  return (BaseNode *) meta_payload;
+  return reinterpret_cast<BaseNode *>(meta_payload);
 }
 
 bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
@@ -569,7 +581,8 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
     *parent = InternalNode::New(
       old_parent, key, separator_meta.GetKeyLength(), (uint64_t)*left, (uint64_t)*right);
   } else {
-    *parent = InternalNode::New(key, separator_meta.GetKeyLength(), (uint64_t)*left, (uint64_t)*right);
+    *parent = InternalNode::New(
+      key, separator_meta.GetKeyLength(), (uint64_t)*left, (uint64_t)*right);
   }
   return true;
 }
@@ -577,10 +590,10 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {
   BaseNode *node = root;
   while (!node->IsLeaf()) {
-    stack.Push((InternalNode *) node);
-    node = ((InternalNode *) node)->GetChild(key, key_size);
+    stack.Push(reinterpret_cast<InternalNode *>(node));
+    node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size);
   }
-  return (LeafNode *) node;
+  return reinterpret_cast<LeafNode *>(node);
 }
 
 bool BzTree::Insert(char *key, uint64_t key_size) {

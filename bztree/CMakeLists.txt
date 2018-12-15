@@ -41,6 +41,7 @@ add_custom_target(
   cpplint ALL
   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/third-party/cpplint/cpplint.py
     --linelength=100
+    --filter=-runtime/references,-build/header_guard,-build/include
     ${CMAKE_CURRENT_SOURCE_DIR}/bztree.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bztree.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/bztree_tests.cc

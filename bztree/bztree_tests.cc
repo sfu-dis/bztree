@@ -1,3 +1,9 @@
+// Copyright (c) Simon Fraser University
+//
+// Authors:
+// Tianzheng Wang <tzwang@sfu.ca>
+// Xiangpeng Hao <xiangpeng_hao@sfu.ca>
+
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
@@ -12,9 +18,9 @@ class LeafNodeFixtures : public ::testing::Test {
     new(node) bztree::LeafNode;
   }
 
-//  Dummy value:
-//  sorted -> 0:10:100
-//  unsorted -> 200:10:300
+  // Dummy value:
+  // sorted -> 0:10:100
+  // unsorted -> 200:10:300
   void InsertDummy() {
     for (uint32_t i = 0; i < 100; i += 10) {
       auto str = std::to_string(i);
@@ -28,6 +34,7 @@ class LeafNodeFixtures : public ::testing::Test {
     delete node;
     node = new_node;
   }
+
  protected:
   pmwcas::DescriptorPool *pool;
   bztree::LeafNode *node;
@@ -36,7 +43,8 @@ class LeafNodeFixtures : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = (pmwcas::DescriptorPool *) pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool));
+    pool = reinterpret_cast<pmwcas::DescriptorPool *>(
+      pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
     new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
 
     node = (bztree::LeafNode *) malloc(bztree::LeafNode::kNodeSize);
