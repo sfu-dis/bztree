@@ -65,6 +65,9 @@ class BaseNode {
     inline uint16_t GetKeyLength() { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
     inline uint16_t GetTotalLength() { return (uint16_t) ((meta & kTotalLengthMask) >> 48); }
     inline uint32_t GetOffset() { return (uint32_t) ((meta & kOffsetMask) >> 4); }
+    inline bool OffsetIsEpoch() {
+      return (GetOffset() >> 27) == 1;
+    }
     inline void SetOffset(uint32_t offset) {
       meta = (meta & (~kOffsetMask)) | (offset << 4);
     }
@@ -95,10 +98,9 @@ class BaseNode {
     inline bool IsInserting() {
 //    record is not visible
 //    and record allocation epoch equal to global index epoch
-//    FIXME(hao): Global index epoch may not be zero
+//    FIXME(hao): Check the Global index epoch
       auto offset = GetOffset();
-      return IsVisible() == 0 &&
-          ((offset & uint64_t{0xFFFFFFF}) == 0);
+      return IsVisible() == 0 && OffsetIsEpoch();
     }
   };
 

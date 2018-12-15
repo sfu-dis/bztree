@@ -185,7 +185,7 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
       auto cmp_result = memcmp(key, current_key, current->GetKeyLength());
       if (cmp_result < 0) {
         first = middle + 1;
-      } else if (cmp_result == 0 && key_size == current->GetKeyLength()) {
+      } else if (cmp_result == 0 && key_size == current->GetKeyLength() && current->IsVisible()) {
         return current;
       } else {
         last = middle - 1;
@@ -199,15 +199,16 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
       auto current = &(record_metadata[i]);
 
 //      Encountered an in-progress insert, recheck later
-      if (current->IsVisible() == 0 && check_concurrency) {
+      if (current->IsInserting() && check_concurrency) {
         return &(record_metadata[i]);
-      } else if (current->IsVisible() == 0 && !check_concurrency) {
+      } else if (current->IsInserting() && !check_concurrency) {
         continue;
       }
 
       uint64_t payload = 0;
       auto current_key = GetRecord(*current, payload);
-      if (key_size == current->GetKeyLength() &&
+      if (current->IsVisible() &&
+          key_size == current->GetKeyLength() &&
           std::strncmp(key, current_key, current->GetKeyLength()) == 0) {
         return current;
       }
@@ -245,6 +246,7 @@ bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool
   if (!pd->MwCAS()) {
     goto retry;
   }
+  return true;
 }
 uint64_t LeafNode::Read(const char *key, uint32_t key_size) {
   auto meta = SearchRecordMeta(key, key_size, 0, (uint32_t) -1, false);

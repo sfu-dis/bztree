@@ -89,8 +89,17 @@ TEST_F(LeafNodeFixtures, duplicate_insert) {
   pool->GetEpoch()->Unprotect();
 }
 
-TEST(LeafNode, delete_test) {
+TEST_F(LeafNodeFixtures, delete_test) {
+  pool->GetEpoch()->Protect();
+  insert_dummy();
+  ASSERT_EQ(node->Read("sorted_0", 8), 100);
+  ASSERT_TRUE(node->Delete("sorted_0", 8, pool));
+  ASSERT_EQ(node->Read("sorted_0", 8), 0);
 
+  ASSERT_EQ(node->Read("sorted_4444", 11), 104);
+  ASSERT_TRUE(node->Delete("sorted_4444", 11, pool));
+  ASSERT_EQ(node->Read("sorted_4444", 11), 0);
+  pool->GetEpoch()->Unprotect();
 }
 
 int main(int argc, char **argv) {
