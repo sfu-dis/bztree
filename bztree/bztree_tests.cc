@@ -118,17 +118,9 @@ TEST_F(LeafNodeFixtures, Delete) {
   pool->GetEpoch()->Unprotect();
 }
 
-TEST(LeafNode, Split) {
-  auto *node = bztree::LeafNode::New();
-
-  pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
-                      pmwcas::TlsAllocator::Destroy,
-                      pmwcas::LinuxEnvironment::Create,
-                      pmwcas::LinuxEnvironment::Destroy);
-  auto *pool = (pmwcas::DescriptorPool *) pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool));
-  new(pool) pmwcas::DescriptorPool(100, 1, nullptr, false);
-
+TEST_F(LeafNodeFixtures, SplitPrep) {
   pool->GetEpoch()->Protect();
+  InsertDummy();
 
   ASSERT_TRUE(node->Insert(0, (char *) "abc", 3, 100, pool));
   ASSERT_TRUE(node->Insert(0, (char *) "bdef", 4, 101, pool));
