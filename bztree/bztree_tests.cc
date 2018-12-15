@@ -5,22 +5,28 @@
 
 class LeafNodeFixtures : public ::testing::Test {
  public:
-  void empty_node() {
+  void EmptyNode() {
     delete node;
     node = (bztree::LeafNode *) malloc(bztree::LeafNode::kNodeSize);
     memset(node, 0, bztree::LeafNode::kNodeSize);
     new(node) bztree::LeafNode;
   }
-  void insert_dummy() {
-    node->Insert(0, "sorted_0", 8, 100, pool);
-    node->Insert(0, "sorted_1", 8, 101, pool);
-    node->Insert(0, "sorted_22", 9, 102, pool);
-    node->Insert(0, "sorted_333", 10, 103, pool);
-    node->Insert(0, "sorted_4444", 11, 104, pool);
-    node->Insert(0, "unsorted_d", 10, 900, pool);
-    node->Insert(0, "unsorted_b", 10, 901, pool);
-    node->Insert(0, "unsorted_c", 10, 902, pool);
-    node->Insert(0, "unsorted_a", 10, 903, pool);
+
+//  Dummy value:
+//  sorted -> 0:10:100
+//  unsorted -> 200:10:300
+  void InsertDummy() {
+    for (uint32_t i = 0; i < 100; i += 10) {
+      auto str = std::to_string(i);
+      node->Insert(0, str.c_str(), (uint32_t) str.length(), i, pool);
+    }
+    auto *new_node = node->Consolidate(pool);
+    for (uint32_t i = 200; i < 300; i += 10) {
+      auto str = std::to_string(i);
+      new_node->Insert(0, str.c_str(), (uint32_t) str.length(), i, pool);
+    }
+    delete node;
+    node = new_node;
   }
  protected:
   pmwcas::DescriptorPool *pool;
@@ -44,15 +50,14 @@ class LeafNodeFixtures : public ::testing::Test {
 };
 TEST_F(LeafNodeFixtures, read_test) {
   pool->GetEpoch()->Protect();
+  InsertDummy();
+  ASSERT_EQ(node->Read("0", 1), 0);
+  ASSERT_EQ(node->Read("10", 2), 10);
+  ASSERT_EQ(node->Read("100", 3), 0);
 
-  insert_dummy();
-  ASSERT_EQ(node->Read("sorted_0", 8), 100);
-  ASSERT_EQ(node->Read("sorted_22", 9), 102);
-  ASSERT_EQ(node->Read("sorted_4444", 11), 104);
-
-  ASSERT_EQ(node->Read("unsorted_a", 10), 903);
-  ASSERT_EQ(node->Read("unsorted_b", 10), 901);
-  ASSERT_EQ(node->Read("unsorted_c", 10), 902);
+  ASSERT_EQ(node->Read("200", 3), 200);
+  ASSERT_EQ(node->Read("210", 3), 210);
+  ASSERT_EQ(node->Read("280", 3), 280);
 
   pool->GetEpoch()->Unprotect();
 }
@@ -79,26 +84,37 @@ TEST_F(LeafNodeFixtures, Insert) {
 
 TEST_F(LeafNodeFixtures, duplicate_insert) {
   pool->GetEpoch()->Protect();
-  insert_dummy();
-  ASSERT_FALSE(node->Insert(0, "sorted_0", 8, 200, pool));
-  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool));
+  InsertDummy();
+  ASSERT_FALSE(node->Insert(0, "10", 2, 111, pool));
+  ASSERT_TRUE(node->Insert(0, "11", 2, 1212, pool));
 
-  ASSERT_EQ(node->Read("sorted_0", 8), 100);
-  ASSERT_EQ(node->Read("abc", 3), 100);
+  ASSERT_EQ(node->Read("10", 2), 10);
+  ASSERT_EQ(node->Read("11", 2), 1212);
+
+  auto *new_node = node->Consolidate(pool);
+
+  ASSERT_FALSE(new_node->Insert(0, "11", 2, 1213, pool));
+  ASSERT_EQ(new_node->Read("11", 2), 1212);
+
+  ASSERT_TRUE(new_node->Insert(0, "201", 3, 201, pool));
+  ASSERT_EQ(new_node->Read("201", 3), 201);
 
   pool->GetEpoch()->Unprotect();
 }
 
 TEST_F(LeafNodeFixtures, delete_test) {
   pool->GetEpoch()->Protect();
-  insert_dummy();
-  ASSERT_EQ(node->Read("sorted_0", 8), 100);
-  ASSERT_TRUE(node->Delete("sorted_0", 8, pool));
-  ASSERT_EQ(node->Read("sorted_0", 8), 0);
+  InsertDummy();
+  ASSERT_EQ(node->Read("40", 2), 40);
+  ASSERT_TRUE(node->Delete("40", 2, pool));
+  ASSERT_EQ(node->Read("40", 2), 0);
 
-  ASSERT_EQ(node->Read("sorted_4444", 11), 104);
-  ASSERT_TRUE(node->Delete("sorted_4444", 11, pool));
-  ASSERT_EQ(node->Read("sorted_4444", 11), 0);
+  auto new_node = node->Consolidate(pool);
+
+  ASSERT_EQ(new_node->Read("200", 3), 200);
+  ASSERT_TRUE(new_node->Delete("200", 3, pool));
+  ASSERT_EQ(new_node->Read("200", 3), 0);
+
   pool->GetEpoch()->Unprotect();
 }
 

@@ -174,21 +174,39 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
                                                      bool check_concurrency) {
   if (start_pos < header.sorted_count) {
 //    Binary search on sorted field
-    uint32_t first = start_pos;
-    uint32_t last = std::min<uint32_t>(end_pos, header.sorted_count - 1);
-    uint32_t middle;
+    int64_t first = start_pos;
+    int64_t last = std::min<uint32_t>(end_pos, header.sorted_count - 1);
+    int64_t middle;
     while (header.sorted_count != 0 && first <= last) {
       middle = (first + last) / 2;
+
+//      Encountered a deleted record
+//      Try to adjust the middle to left ones
+      while (!record_metadata[middle].IsVisible() && first < middle) {
+        middle -= 1;
+      }
+
+//      Every record on the left is deleted, now try right ones
+      middle = (first + last) / 2;
+      while (!record_metadata[middle].IsVisible() && middle < last) {
+        middle += 1;
+      }
+//      Every record in the sorted field is deleted
+      if (!record_metadata[middle].IsVisible()) {
+        break;
+      }
+
       uint64_t payload = 0;
       auto current = &(record_metadata[middle]);
       auto current_key = GetRecord(*current, payload);
+
       auto cmp_result = memcmp(key, current_key, current->GetKeyLength());
       if (cmp_result < 0) {
-        first = middle + 1;
+        last = middle - 1;
       } else if (cmp_result == 0 && key_size == current->GetKeyLength() && current->IsVisible()) {
         return current;
       } else {
-        last = middle - 1;
+        first = middle + 1;
       }
     }
   }
