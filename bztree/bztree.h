@@ -99,8 +99,7 @@ class BaseNode {
 //    record is not visible
 //    and record allocation epoch equal to global index epoch
 //    FIXME(hao): Check the Global index epoch
-      auto offset = GetOffset();
-      return IsVisible() == 0 && OffsetIsEpoch();
+      return !IsVisible() && OffsetIsEpoch();
     }
   };
 

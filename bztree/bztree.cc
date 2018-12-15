@@ -149,7 +149,7 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key, uint32_t key_size) {
   if (record == nullptr) {
     return IsUnique;
   }
-  if (record->IsVisible() == 0) {
+  if (!record->IsVisible()) {
     return ReCheck;
   }
   return Duplicate;
@@ -250,6 +250,7 @@ bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool
     goto retry;
   }
 
+  auto old_meta = *record_meta;
   auto new_meta = *record_meta;
   new_meta.SetVisible(false);
   new_meta.SetOffset(0);
@@ -260,7 +261,7 @@ bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool
 
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(&header.status.word, old_status.word, new_status.word);
-  pd->AddEntry(&(record_meta->meta), record_meta->meta, new_meta.meta);
+  pd->AddEntry(&(record_meta->meta), old_meta.meta, new_meta.meta);
   if (!pd->MwCAS()) {
     goto retry;
   }

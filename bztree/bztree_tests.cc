@@ -48,7 +48,7 @@ class LeafNodeFixtures : public ::testing::Test {
     delete node;
   }
 };
-TEST_F(LeafNodeFixtures, read_test) {
+TEST_F(LeafNodeFixtures, Read) {
   pool->GetEpoch()->Protect();
   InsertDummy();
   ASSERT_EQ(node->Read("0", 1), 0);
@@ -82,7 +82,7 @@ TEST_F(LeafNodeFixtures, Insert) {
   pool->GetEpoch()->Unprotect();
 }
 
-TEST_F(LeafNodeFixtures, duplicate_insert) {
+TEST_F(LeafNodeFixtures, DuplicateInsert) {
   pool->GetEpoch()->Protect();
   InsertDummy();
   ASSERT_FALSE(node->Insert(0, "10", 2, 111, pool));
@@ -102,7 +102,7 @@ TEST_F(LeafNodeFixtures, duplicate_insert) {
   pool->GetEpoch()->Unprotect();
 }
 
-TEST_F(LeafNodeFixtures, delete_test) {
+TEST_F(LeafNodeFixtures, Delete) {
   pool->GetEpoch()->Protect();
   InsertDummy();
   ASSERT_EQ(node->Read("40", 2), 40);
