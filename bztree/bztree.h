@@ -111,6 +111,7 @@ class BaseNode {
  protected:
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
+  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
   void Dump();
 
  public:
@@ -121,12 +122,15 @@ class BaseNode {
 // Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
  public:
-  static InternalNode *New(uint32_t data_size, uint32_t sorted_count);
+  static InternalNode *New(InternalNode *src_node, char *key, uint32_t key_size,
+                           uint64_t left_child_addr, uint64_t right_child_addr);
+  static InternalNode *New(char *key, uint32_t key_size,
+                           uint64_t left_child_addr, uint64_t right_child_addr);
 
-  InternalNode(uint64_t data_size, uint32_t sorted_count) : BaseNode(false) {
-    header.size = sizeof(*this) + data_size;
-    header.sorted_count = sorted_count;
-  }
+  InternalNode(char *key, uint32_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr);
+  InternalNode(InternalNode *src_node, char *key, uint32_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr);
   ~InternalNode() = default;
 
   BaseNode *GetChild(char *key, uint64_t key_size);
@@ -140,9 +144,10 @@ class InternalNode : public BaseNode {
       return nullptr;
     }
     uint64_t offset = meta.GetOffset();
-    char *data = &((char *) this + header.size)[meta.GetOffset()];
-    payload = *(uint64_t *) (&data[meta.GetKeyLength()]);
-    return data;
+    char *data = &((char *) this)[meta.GetOffset()];
+    auto key_len = meta.GetKeyLength();
+    payload = *(uint64_t *) (&data[key_len]);
+    return key_len ? data : nullptr;
   }
 };
 
@@ -166,7 +171,7 @@ class LeafNode : public BaseNode {
   static LeafNode *New();
 
   LeafNode() : BaseNode(true) {
-    header.size = sizeof(*this);
+    header.size = sizeof(LeafNode);
   }
   ~LeafNode() = default;
 

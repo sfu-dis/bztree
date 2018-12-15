@@ -5,13 +5,115 @@
 
 namespace bztree {
 
-InternalNode *InternalNode::New(uint32_t data_size, uint32_t sorted_count) {
+InternalNode *InternalNode::New(InternalNode *src_node,
+                                char *key,
+                                uint32_t key_size,
+                                uint64_t left_child_addr,
+                                uint64_t right_child_addr) {
   // FIXME(tzwang): use a better allocator
+  uint32_t data_size = src_node->GetHeader()->size + key_size + sizeof(right_child_addr) + sizeof(RecordMetadata);
   uint32_t alloc_size = sizeof(InternalNode) + data_size;
   InternalNode *node = (InternalNode *) malloc(alloc_size);
   memset(node, 0, alloc_size);
-  new(node) InternalNode(data_size, sorted_count);
+  new(node) InternalNode(src_node, key, key_size, left_child_addr, right_child_addr);
   return node;
+}
+
+InternalNode *InternalNode::New(char *key,
+                                uint32_t key_size,
+                                uint64_t left_child_addr,
+                                uint64_t right_child_addr) {
+  uint32_t data_size = key_size + sizeof(left_child_addr) + sizeof(right_child_addr) + sizeof(RecordMetadata) * 2;
+  uint32_t alloc_size = sizeof(InternalNode) + data_size;
+  InternalNode *node = (InternalNode *)malloc(alloc_size);
+  memset(node, 0, alloc_size);
+  new (node) InternalNode(key, key_size, left_child_addr, right_child_addr);
+  return node;
+}
+
+InternalNode::InternalNode(char *key,
+                           uint32_t key_size,
+                           uint64_t left_child_addr,
+                           uint64_t right_child_addr)
+: BaseNode(false) {
+  // Initialize a new internal node with one key only
+  header.size = sizeof(InternalNode) + key_size +
+                sizeof(left_child_addr) + sizeof(right_child_addr) + sizeof(RecordMetadata) * 2;
+  header.sorted_count = 2;  // Includes the null dummy key
+
+  // Fill in left child address, with an empty key
+  uint64_t offset = header.size - sizeof(left_child_addr);
+  record_metadata[0].FinalizeForInsert(offset, 0, sizeof(left_child_addr));
+  char *ptr = (char *)this + offset;
+  memcpy(ptr, &left_child_addr, sizeof(left_child_addr));
+
+  // Fill in right child address, with the separator key
+  offset -= (key_size + sizeof(right_child_addr));
+  record_metadata[1].FinalizeForInsert(offset, key_size, sizeof(right_child_addr));
+  ptr = (char *)this + offset;
+  memcpy(ptr, key, key_size);
+  memcpy(ptr + key_size, &right_child_addr, sizeof(right_child_addr));
+}
+
+InternalNode::InternalNode(InternalNode *src_node,
+                           char *key,
+                           uint32_t key_size,
+                           uint64_t left_child_addr,
+                           uint64_t right_child_addr)
+  : BaseNode(false) {
+  LOG_IF(FATAL, !src_node);
+  header.size = src_node->GetHeader()->size + key_size + sizeof(left_child_addr);
+
+  uint64_t offset = sizeof(*this) + header.size;
+  bool inserted_new = false;
+  for (uint32_t i = 0; i < src_node->GetHeader()->sorted_count; ++i) {
+    RecordMetadata meta = src_node->GetMetadata(i);
+    uint64_t m_payload = 0;
+    char *m_key = src_node->GetRecord(meta, m_payload);
+    uint32_t m_key_size = meta.GetKeyLength();
+
+    if (inserted_new) {
+      // New key already inserted, so directly insert the key from src node
+      offset -= (meta.GetTotalLength());
+      meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
+      record_metadata[i + 1] = meta;
+
+      memcpy((char *)this + offset, m_key, m_key_size);
+      memcpy((char *)this + offset + m_key_size, &m_payload, sizeof(m_payload));
+    } else {
+      // Compare the two keys to see which one to insert (first)
+      int cmp = memcmp(m_key, key, std::min<uint32_t>(m_key_size, key_size));
+      LOG_IF(FATAL, cmp == 0 && key_size == m_key_size);
+
+      if (cmp > 0) {
+        RecordMetadata new_meta;
+        offset -= (key_size + sizeof(left_child_addr));
+        new_meta.FinalizeForInsert(offset, key_size, sizeof(left_child_addr));
+        record_metadata[i] = new_meta;
+
+        // Modify the previous key's payload to left_child_addr
+        memcpy((char *)this + record_metadata[i - 1].GetOffset() + record_metadata[i - 1].GetKeyLength(),
+               &left_child_addr, sizeof(left_child_addr));
+
+        // Now the new separtor key itself
+        memcpy((char *)this + offset, key, key_size);
+        memcpy((char *)this + offset + key_size, &right_child_addr, sizeof(right_child_addr));
+
+        offset -= (meta.GetTotalLength());
+        meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
+        record_metadata[i + 1] = meta;
+
+        memcpy((char *)this + offset, m_key, m_key_size);
+        memcpy((char *)this + offset + m_key_size, &m_payload, sizeof(m_payload));
+        inserted_new = true;
+      } else {
+        record_metadata[i] = meta;
+        offset -= (meta.GetTotalLength());
+        memcpy((char *)this + offset, m_key, m_key_size);
+        memcpy((char *)this + offset + m_key_size, &m_payload, sizeof(m_payload));
+      }
+    }
+  }
 }
 
 LeafNode *LeafNode::New() {
@@ -69,6 +171,20 @@ void LeafNode::Dump() {
 
 void InternalNode::Dump() {
   BaseNode::Dump();
+  std::cout << " Child pointers and separator keys:" << std::endl;
+  assert(header.status.GetRecordCount() == 0);
+  for (uint32_t i = 0; i < header.sorted_count; ++i) {
+    auto &meta = record_metadata[i];
+    assert((i == 0 && meta.GetKeyLength() == 0) || (i > 0 && meta.GetKeyLength() > 0));
+    uint64_t right_child_addr = 0;
+    char *key = GetRecord(meta, right_child_addr);
+    if (key) {
+      std::string keystr(key, key + meta.GetKeyLength());
+      std::cout << keystr << " <- ";
+    }
+    std::cout << std::hex << "0x" << right_child_addr << " -> " << std::dec;
+  }
+  std::cout << std::endl;
 }
 
 bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
@@ -347,7 +463,7 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visi
 void LeafNode::CopyFrom(LeafNode *node,
                         std::vector<RecordMetadata>::iterator begin_it,
                         std::vector<RecordMetadata>::iterator end_it) {
-  LOG_IF(FATAL, header.size > 0) << "Cannot initialize a non-empty node";
+  LOG_IF(FATAL, header.size > sizeof(LeafNode)) << "Cannot initialize a non-empty node";
 
   // meta_vec is assumed to be in sorted order, insert records one by one
   uint64_t offset = kNodeSize;
@@ -443,15 +559,17 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   (*right)->CopyFrom(this, left_end_it, meta_vec.end());
 
   LOG_IF(FATAL, nleft - 1 == 0);
-  RecordMetadata separatorMeta = meta_vec[nleft - 1];
+  RecordMetadata separator_meta = meta_vec[nleft - 1];
+
   InternalNode *old_parent = stack.Top();
+  uint64_t unused = 0;
+  char *key = GetRecord(separator_meta, unused);
   if (old_parent) {
     // Has a parent node
-    uint32_t parent_data_size = old_parent->GetHeader()->size + separatorMeta.GetTotalLength();
-    *parent = InternalNode::New(parent_data_size, old_parent->GetHeader()->sorted_count + 1);
+    *parent = InternalNode::New(
+      old_parent, key, separator_meta.GetKeyLength(), (uint64_t)*left, (uint64_t)*right);
   } else {
-    uint32_t parent_data_size = separatorMeta.GetTotalLength() + sizeof(uint64_t);
-    *parent = InternalNode::New(parent_data_size, 1);
+    *parent = InternalNode::New(key, separator_meta.GetKeyLength(), (uint64_t)*left, (uint64_t)*right);
   }
   return true;
 }
