@@ -180,9 +180,9 @@ void InternalNode::Dump() {
     char *key = GetRecord(meta, right_child_addr);
     if (key) {
       std::string keystr(key, key + meta.GetKeyLength());
-      std::cout << keystr << " <- ";
+      std::cout << " | " << keystr << " | ";
     }
-    std::cout << std::hex << "0x" << right_child_addr << " -> " << std::dec;
+    std::cout << std::hex << "0x" << right_child_addr << std::dec;
   }
   std::cout << std::endl;
 }
