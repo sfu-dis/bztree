@@ -198,19 +198,19 @@ void InternalNode::Dump() {
   std::cout << std::endl;
 }
 
-bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
-                      pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
+                            pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
   NodeHeader::StatusWord expected_status = header.status;
 
   // If frozon then retry
   if (expected_status.IsFrozen()) {
-    return false;
+    return ReturnCode::NodeFrozen();
   }
 
   auto uniqueness = CheckUnique(key, key_size);
   if (uniqueness == Duplicate) {
-    return false;
+    return ReturnCode::KeyExists();
   }
 
   // Now try to reserve space in the free space region using a PMwCAS. Two steps:
@@ -238,7 +238,7 @@ bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64
   pd->AddEntry(&header.status.word, expected_status.word, desired_status.word);
   pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
   if (!pd->MwCAS()) {
-    return false;
+    return ReturnCode::PMWCASFailure();
   }
 
   // Reserved space! Now copy data
@@ -262,7 +262,7 @@ bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64
   // Re-check if the node is frozen
   NodeHeader::StatusWord s = header.status;
   if (s.IsFrozen()) {
-    return false;
+    return ReturnCode::NodeFrozen();
   } else {
     // Final step: make the new record visible, a 2-word PMwCAS:
     // 1. Metadata - set the visible bit and actual block offset
@@ -274,7 +274,7 @@ bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64
     pd = pmwcas_pool->AllocateDescriptor();
     pd->AddEntry(&header.status.word, s.word, s.word);
     pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
-    return pd->MwCAS();
+    return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
   }
 }
 
