@@ -9,54 +9,62 @@
 
 #include "bztree.h"
 
-class LeafNodeFixtures : public ::testing::Test {
- public:
-  void EmptyNode() {
+class LeafNodeFixtures : public ::testing::Test
+{
+public:
+  void EmptyNode()
+  {
     delete node;
-    node = (bztree::LeafNode *) malloc(bztree::LeafNode::kNodeSize);
+    node = (bztree::LeafNode *)malloc(bztree::LeafNode::kNodeSize);
     memset(node, 0, bztree::LeafNode::kNodeSize);
-    new(node) bztree::LeafNode;
+    new (node) bztree::LeafNode;
   }
 
   // Dummy value:
   // sorted -> 0:10:100
   // unsorted -> 200:10:300
-  void InsertDummy() {
-    for (uint32_t i = 0; i < 100; i += 10) {
+  void InsertDummy()
+  {
+    for (uint32_t i = 0; i < 100; i += 10)
+    {
       auto str = std::to_string(i);
-      node->Insert(0, str.c_str(), (uint32_t) str.length(), i, pool);
+      node->Insert(0, str.c_str(), (uint32_t)str.length(), i, pool);
     }
     auto *new_node = node->Consolidate(pool);
-    for (uint32_t i = 200; i < 300; i += 10) {
+    for (uint32_t i = 200; i < 300; i += 10)
+    {
       auto str = std::to_string(i);
-      new_node->Insert(0, str.c_str(), (uint32_t) str.length(), i, pool);
+      new_node->Insert(0, str.c_str(), (uint32_t)str.length(), i, pool);
     }
     delete node;
     node = new_node;
   }
 
- protected:
+protected:
   pmwcas::DescriptorPool *pool;
   bztree::LeafNode *node;
-  void SetUp() override {
+  void SetUp() override
+  {
     pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
     pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-      pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
-    new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
+        pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
+    new (pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
 
-    node = (bztree::LeafNode *) malloc(bztree::LeafNode::kNodeSize);
+    node = (bztree::LeafNode *)malloc(bztree::LeafNode::kNodeSize);
     memset(node, 0, bztree::LeafNode::kNodeSize);
-    new(node) bztree::LeafNode;
+    new (node) bztree::LeafNode;
   }
 
-  void TearDown() override {
+  void TearDown() override
+  {
     delete node;
   }
 };
-TEST_F(LeafNodeFixtures, Read) {
+TEST_F(LeafNodeFixtures, Read)
+{
   pool->GetEpoch()->Protect();
   InsertDummy();
   ASSERT_EQ(node->Read("0", 1), 0);
@@ -70,7 +78,8 @@ TEST_F(LeafNodeFixtures, Read) {
   pool->GetEpoch()->Unprotect();
 }
 
-TEST_F(LeafNodeFixtures, Insert) {
+TEST_F(LeafNodeFixtures, Insert)
+{
   pool->GetEpoch()->Protect();
 
   ASSERT_TRUE(node->Insert(0, "def", 3, 100, pool));
@@ -90,7 +99,8 @@ TEST_F(LeafNodeFixtures, Insert) {
   pool->GetEpoch()->Unprotect();
 }
 
-TEST_F(LeafNodeFixtures, DuplicateInsert) {
+TEST_F(LeafNodeFixtures, DuplicateInsert)
+{
   pool->GetEpoch()->Protect();
   InsertDummy();
   ASSERT_FALSE(node->Insert(0, "10", 2, 111, pool));
@@ -110,7 +120,8 @@ TEST_F(LeafNodeFixtures, DuplicateInsert) {
   pool->GetEpoch()->Unprotect();
 }
 
-TEST_F(LeafNodeFixtures, Delete) {
+TEST_F(LeafNodeFixtures, Delete)
+{
   pool->GetEpoch()->Protect();
   InsertDummy();
   ASSERT_EQ(node->Read("40", 2), 40);
@@ -126,7 +137,8 @@ TEST_F(LeafNodeFixtures, Delete) {
   pool->GetEpoch()->Unprotect();
 }
 
-TEST_F(LeafNodeFixtures, SplitPrep) {
+TEST_F(LeafNodeFixtures, SplitPrep)
+{
   pool->GetEpoch()->Protect();
   InsertDummy();
 
@@ -151,8 +163,18 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   parent->Dump();
   pool->GetEpoch()->Unprotect();
 }
+TEST_F(LeafNodeFixtures, Update)
+{
+  pool->GetEpoch()->Protect();
+  InsertDummy();
+  ASSERT_EQ(node->Read("10", 2), 10);
+  ASSERT_TRUE(node->Update(0, "10", 2, 11, pool));
 
-int main(int argc, char **argv) {
+  ASSERT_EQ(node->Read("10", 2), 11);
+}
+
+int main(int argc, char **argv)
+{
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

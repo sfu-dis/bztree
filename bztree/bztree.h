@@ -201,6 +201,12 @@ class LeafNode : public BaseNode {
                 std::vector<RecordMetadata>::iterator begin_it,
                 std::vector<RecordMetadata>::iterator end_it);
 
+  bool Update(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
+              pmwcas::DescriptorPool *pmwcas_pool);
+
+  bool Upsert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
+              pmwcas::DescriptorPool *pmwcas_pool);
+
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
@@ -214,7 +220,15 @@ class LeafNode : public BaseNode {
     payload = *reinterpret_cast<uint64_t *>(&data[meta.GetKeyLength()]);
     return data;
   }
-
+  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+    if (!meta.IsVisible()) {
+      return false;
+    }
+    uint64_t offset = meta.GetOffset();
+    *key = reinterpret_cast<char *>(this) + meta.GetOffset();
+    *payload = *(reinterpret_cast<uint64_t *> (*key + meta.GetKeyLength()));
+    return true;
+  }
   inline char *GetKey(RecordMetadata meta) {
     if (!meta.IsVisible()) {
       return nullptr;

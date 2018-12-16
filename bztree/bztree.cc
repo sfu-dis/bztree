@@ -246,7 +246,6 @@ bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64
   char *ptr = &(reinterpret_cast<char *>(this))[offset];
   memcpy(ptr, key, key_size);
   memcpy(ptr + key_size, &payload, sizeof(payload));
-
   // Flush the word
   pmwcas::NVRAM::Flush(key_size + sizeof(payload), ptr);
 
@@ -299,6 +298,54 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
     goto retry;
   }
   return Duplicate;
+}
+
+bool LeafNode::Upsert(uint32_t epoch,
+                      const char *key,
+                      uint32_t key_size,
+                      uint64_t payload,
+                      pmwcas::DescriptorPool *pmwcas_pool) {
+
+}
+
+bool LeafNode::Update(uint32_t epoch,
+                      const char *key,
+                      uint32_t key_size,
+                      uint64_t payload,
+                      pmwcas::DescriptorPool *pmwcas_pool) {
+  retry:
+  NodeHeader::StatusWord old_status = header.status;
+  if (old_status.IsFrozen()) {
+    return false;
+  }
+
+  auto *meta_ptr = SearchRecordMeta(key, key_size);
+  if (meta_ptr == nullptr || !meta_ptr->IsVisible()) {
+    return false;
+  } else if (meta_ptr->IsInserting()) {
+    goto retry;
+  }
+  auto old_meta_value = meta_ptr->meta;
+
+  char *record_key;
+  uint64_t record_payload;
+  GetRecord(*meta_ptr, &record_key, &record_payload);
+  if (payload == record_payload) {
+    return true;
+  }
+
+//  1. update the corresponding payload
+//  2. make sure meta data is not changed
+//  3. make sure status word is not changed
+  auto pd = pmwcas_pool->AllocateDescriptor();
+  pd->AddEntry(reinterpret_cast<uint64_t *>(record_key + meta_ptr->GetKeyLength()), record_payload, payload);
+  pd->AddEntry(&meta_ptr->meta, old_meta_value, meta_ptr->meta);
+  pd->AddEntry(&header.status.word, old_status.word, old_status.word);
+
+  if (!pd->MwCAS()) {
+    goto retry;
+  }
+  return true;
 }
 
 LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
