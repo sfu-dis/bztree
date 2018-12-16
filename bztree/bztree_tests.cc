@@ -118,6 +118,32 @@ TEST_F(LeafNodeFixtures, Delete) {
   pool->GetEpoch()->Unprotect();
 }
 
+TEST_F(LeafNodeFixtures, SplitPrep) {
+  pool->GetEpoch()->Protect();
+  InsertDummy();
+
+  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool));
+  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool));
+  ASSERT_TRUE(node->Insert(0, "abcd", 4, 102, pool));
+  ASSERT_TRUE(node->Insert(0, "deadbeef", 8, 103, pool));
+  ASSERT_TRUE(node->Insert(0, "parker", 6, 104, pool));
+  ASSERT_TRUE(node->Insert(0, "deadpork", 8, 105, pool));
+  ASSERT_TRUE(node->Insert(0, "toronto", 7, 106, pool));
+
+  node->Dump();
+
+  bztree::Stack stack;
+  bztree::InternalNode *parent = nullptr;
+  bztree::LeafNode *left = nullptr;
+  bztree::LeafNode *right = nullptr;
+  ASSERT_TRUE(node->PrepareForSplit(0, stack, &parent, &left, &right, pool));
+
+  left->Dump();
+  right->Dump();
+  parent->Dump();
+  pool->GetEpoch()->Unprotect();
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

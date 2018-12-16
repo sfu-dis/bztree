@@ -111,6 +111,8 @@ class BaseNode {
  protected:
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
+  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
+  void Dump();
 
  public:
   BaseNode(bool leaf) : is_leaf(leaf) {}
@@ -120,15 +122,20 @@ class BaseNode {
 // Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
  public:
-  static InternalNode *New(uint32_t data_size, uint32_t sorted_count);
+  static InternalNode *New(InternalNode *src_node, char *key, uint32_t key_size,
+                           uint64_t left_child_addr, uint64_t right_child_addr);
+  static InternalNode *New(char *key, uint32_t key_size,
+                           uint64_t left_child_addr, uint64_t right_child_addr);
 
-  InternalNode(uint64_t data_size, uint32_t sorted_count) : BaseNode(false) {
-    header.size = sizeof(*this) + data_size;
-    header.sorted_count = sorted_count;
-  }
+  InternalNode(char *key, uint32_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr);
+  InternalNode(InternalNode *src_node, char *key, uint32_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr);
   ~InternalNode() = default;
 
   BaseNode *GetChild(char *key, uint64_t key_size);
+  inline NodeHeader *GetHeader() { return &header; }
+  void Dump();
 
  private:
   // Get the key (return value) and payload (8-byte)
@@ -137,10 +144,23 @@ class InternalNode : public BaseNode {
       return nullptr;
     }
     uint64_t offset = meta.GetOffset();
-    char *data = &((char *) this + header.size)[meta.GetOffset()];
-    payload = *(uint64_t *) (&data[meta.GetKeyLength()]);
-    return data;
+    char *data = &((char *) this)[meta.GetOffset()];
+    auto key_len = meta.GetKeyLength();
+    payload = *(uint64_t *) (&data[key_len]);
+    return key_len ? data : nullptr;
   }
+};
+
+struct Stack {
+  static const uint32_t kMaxFrames = 32;
+  InternalNode *frames[kMaxFrames];
+  uint32_t num_frames;
+
+  Stack() : num_frames(0) {}
+  ~Stack() { num_frames = 0; }
+  inline void Push(InternalNode *node) { frames[num_frames++] = node; }
+  inline InternalNode *Pop() { return num_frames == 0 ? nullptr : frames[--num_frames]; }
+  InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
 };
 
 class LeafNode : public BaseNode {
@@ -150,11 +170,26 @@ class LeafNode : public BaseNode {
  public:
   static LeafNode *New();
 
-  LeafNode() : BaseNode(true) {}
+  LeafNode() : BaseNode(true) {
+    header.size = sizeof(LeafNode);
+  }
   ~LeafNode() = default;
 
   bool Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
+  bool PrepareForSplit(uint32_t epoch, Stack &stack, InternalNode **parent, LeafNode **left, LeafNode **right,
+                       pmwcas::DescriptorPool *pmwcas_pool);
+
+  // Initialize new, empty node with a list of records; no concurrency control;
+  // only useful before any inserts to the node. For now the only users are split
+  // (when preparing a new node) and consolidation.
+  //
+  // The list of records to be inserted is specified through iterators of a
+  // record metadata vector. Recods covered by [begin_it, end_it) will be
+  // inserted to the node. Note end_it is non-inclusive.
+  void CopyFrom(LeafNode *node,
+                std::vector<RecordMetadata>::iterator begin_it,
+                std::vector<RecordMetadata>::iterator end_it);
 
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
@@ -182,6 +217,7 @@ class LeafNode : public BaseNode {
 
   uint64_t Read(const char *key, uint32_t key_size);
 
+  uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);
   void Dump();
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck };
@@ -198,19 +234,6 @@ class LeafNode : public BaseNode {
 };
 
 class BzTree {
- private:
-  struct Stack {
-    static const uint32_t kMaxFrames = 32;
-    InternalNode *frames[kMaxFrames];
-    uint32_t num_frames;
-
-    Stack() : num_frames(0) {}
-    ~Stack() { num_frames = 0; }
-    inline void Push(InternalNode *node) { frames[num_frames++] = node; }
-    inline InternalNode *Pop() { return num_frames == 0 ? nullptr : frames[--num_frames]; }
-    InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
-  };
-
  public:
   struct ParameterSet {
     uint32_t split_threshold;
