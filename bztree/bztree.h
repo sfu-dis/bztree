@@ -17,21 +17,22 @@ struct ReturnCode {
   enum RC { RetInvalid, RetOk, RetKeyExists, RetNotFound, RetNodeFrozen, RetPMWCASFail };
   uint8_t rc;
 
-  explicit ReturnCode(uint8_t r) : rc(r) {}
-  ReturnCode() : rc(RetInvalid) {}
-  ~ReturnCode() {}
+  constexpr explicit ReturnCode(uint8_t r) : rc(r) {}
+  constexpr ReturnCode() : rc(RetInvalid) {}
+  ~ReturnCode() = default;
 
-  bool inline IsInvalid() { return rc == RetInvalid; }
-  bool inline IsOk() { return rc == RetOk; }
-  bool inline IsKeyExists() { return rc == RetKeyExists; }
-  bool inline IsNotFound() { return rc == RetNotFound; }
-  bool inline IsNodeFrozen() { return rc == RetNodeFrozen; }
-  bool inline IsPMWCASFailure() { return rc = RetPMWCASFail; }
+  constexpr bool inline IsInvalid() const { return rc == RetInvalid; }
+  constexpr bool inline IsOk() const { return rc == RetOk; }
+  constexpr bool inline IsKeyExists() const { return rc == RetKeyExists; }
+  constexpr bool inline IsNotFound() const { return rc == RetNotFound; }
+  constexpr bool inline IsNodeFrozen() const { return rc == RetNodeFrozen; }
+  constexpr bool inline IsPMWCASFailure() const { return rc == RetPMWCASFail; }
 
   static ReturnCode NodeFrozen() { return ReturnCode(RetNodeFrozen); }
   static ReturnCode KeyExists() { return ReturnCode(RetKeyExists); }
   static ReturnCode PMWCASFailure() { return ReturnCode(RetPMWCASFail); }
   static ReturnCode Ok() { return ReturnCode(RetOk); }
+  static ReturnCode NotFound() { return ReturnCode(RetNotFound); }
 };
 
 struct NodeHeader {
@@ -100,7 +101,7 @@ class BaseNode {
       return PadKeyLength(key_length);
     }
 
-    static inline uint16_t PadKeyLength(uint16_t key_length) {
+    static inline constexpr uint16_t PadKeyLength(uint16_t key_length) {
       return (key_length + sizeof(uint64_t) - 1) / sizeof(uint64_t) * sizeof(uint64_t);
     }
     inline uint16_t GetTotalLength() { return (uint16_t) ((meta & kTotalLengthMask) >> 48); }
@@ -217,9 +218,9 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  bool PrepareForSplit(uint32_t epoch, Stack &stack,
-                       InternalNode **parent, LeafNode **left, LeafNode **right,
-                       pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode PrepareForSplit(uint32_t epoch, Stack &stack,
+                             InternalNode **parent, LeafNode **left, LeafNode **right,
+                             pmwcas::DescriptorPool *pmwcas_pool);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
@@ -232,25 +233,17 @@ class LeafNode : public BaseNode {
                 std::vector<RecordMetadata>::iterator begin_it,
                 std::vector<RecordMetadata>::iterator end_it);
 
-  bool Update(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
-              pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Update(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
+                    pmwcas::DescriptorPool *pmwcas_pool);
 
-  bool Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
-              pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
+                    pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
-  // Get the key (return value) and payload (8-byte)
-  inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
-    if (!meta.IsVisible()) {
-      return nullptr;
-    }
-    uint64_t offset = meta.GetOffset();
-    char *data = &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-    payload = *reinterpret_cast<uint64_t *>(&data[meta.GetPaddedKeyLength()]);
-    return data;
-  }
+  // Get the key and payload (8-byte)
+  // Return status
   inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
     if (!meta.IsVisible()) {
       return false;
@@ -280,6 +273,9 @@ class LeafNode : public BaseNode {
   Uniqueness CheckUnique(const char *key, uint32_t key_size);
   Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
 
+//  Return a meta (not deleted) or nullptr (deleted or not exist)
+//  It's user's responsibility to check IsInserting()
+//  if check_concurrency is false, it will ignore all inserting record
   LeafNode::RecordMetadata *SearchRecordMeta(const char *key,
                                              uint32_t key_size,
                                              uint32_t start_pos = 0,

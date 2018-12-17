@@ -171,7 +171,8 @@ void LeafNode::Dump() {
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     BaseNode::RecordMetadata meta = record_metadata[i];
     uint64_t payload = 0;
-    char *key = GetRecord(meta, payload);
+    char *key;
+    GetRecord(meta, &key, &payload);
     std::string keystr(key, key + meta.GetKeyLength());
     std::cout << " - record " << i << ": key = " << keystr
               << ", payload = " << payload << std::endl;
@@ -302,15 +303,15 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   return Duplicate;
 }
 
-bool LeafNode::Upsert(uint32_t epoch,
-                      const char *key,
-                      uint16_t key_size,
-                      uint64_t payload,
-                      pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::Upsert(uint32_t epoch,
+                            const char *key,
+                            uint16_t key_size,
+                            uint64_t payload,
+                            pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
   auto old_status = header.status;
   if (old_status.IsFrozen()) {
-    return false;
+    return ReturnCode::NodeFrozen();
   }
   auto *meta_ptr = SearchRecordMeta(key, key_size);
   if (meta_ptr == nullptr) {
@@ -319,7 +320,7 @@ bool LeafNode::Upsert(uint32_t epoch,
     if (insert_result.IsPMWCASFailure()) {
       return Update(epoch, key, key_size, payload, pmwcas_pool);
     }
-    return true;
+    return ReturnCode::Ok();
   } else if (meta_ptr->IsInserting()) {
     goto retry;
   } else {
@@ -327,20 +328,20 @@ bool LeafNode::Upsert(uint32_t epoch,
   }
 }
 
-bool LeafNode::Update(uint32_t epoch,
-                      const char *key,
-                      uint16_t key_size,
-                      uint64_t payload,
-                      pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::Update(uint32_t epoch,
+                            const char *key,
+                            uint16_t key_size,
+                            uint64_t payload,
+                            pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
   auto old_status = header.status;
   if (old_status.IsFrozen()) {
-    return false;
+    return ReturnCode::NodeFrozen();
   }
 
   auto *meta_ptr = SearchRecordMeta(key, key_size);
   if (meta_ptr == nullptr || !meta_ptr->IsVisible()) {
-    return false;
+    return ReturnCode::NotFound();
   } else if (meta_ptr->IsInserting()) {
     goto retry;
   }
@@ -350,7 +351,7 @@ bool LeafNode::Update(uint32_t epoch,
   uint64_t record_payload;
   GetRecord(*meta_ptr, &record_key, &record_payload);
   if (payload == record_payload) {
-    return true;
+    return ReturnCode::Ok();
   }
 
 //  1. update the corresponding payload
@@ -365,7 +366,7 @@ bool LeafNode::Update(uint32_t epoch,
   if (!pd->MwCAS()) {
     goto retry;
   }
-  return true;
+  return ReturnCode::Ok();
 }
 
 LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
@@ -399,8 +400,9 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
       }
 
       uint64_t payload = 0;
+      char *current_key;
       auto current = &(record_metadata[middle]);
-      auto current_key = GetRecord(*current, payload);
+      GetRecord(*current, &current_key, &payload);
 
       auto cmp_result = memcmp(key, current_key, current->GetKeyLength());
       if (cmp_result < 0) {
@@ -426,7 +428,8 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
       }
 
       uint64_t payload = 0;
-      auto current_key = GetRecord(*current, payload);
+      char *current_key;
+      GetRecord(*current, &current_key, &payload);
       if (current->IsVisible() &&
           key_size == current->GetKeyLength() &&
           strncmp(key, current_key, current->GetKeyLength()) == 0) {
@@ -475,7 +478,8 @@ uint64_t LeafNode::Read(const char *key, uint32_t key_size) {
     return 0;
   }
   uint64_t payload = 0;
-  GetRecord(*meta, payload);
+  char *unused_key;
+  GetRecord(*meta, &unused_key, &payload);
   return payload;
 }
 
@@ -550,7 +554,8 @@ void LeafNode::CopyFrom(LeafNode *node,
   for (auto it = begin_it; it != end_it; ++it) {
     auto meta = *it;
     uint64_t payload = 0;
-    char *key = node->GetRecord(meta, payload);
+    char *key;
+    node->GetRecord(meta, &key, &payload);
 
     // Copy data
     uint64_t total_len = meta.GetTotalLength();
@@ -602,15 +607,15 @@ BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
   return reinterpret_cast<BaseNode *>(meta_payload);
 }
 
-bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
-                               InternalNode **parent,
-                               LeafNode **left,
-                               LeafNode **right,
-                               pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
+                                     InternalNode **parent,
+                                     LeafNode **left,
+                                     LeafNode **right,
+                                     pmwcas::DescriptorPool *pmwcas_pool) {
   LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
   // Set the frozen bit on the node to be split
   if (!Freeze(pmwcas_pool)) {
-    return false;
+    return ReturnCode::NodeFrozen();
   }
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
@@ -642,7 +647,8 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 
   InternalNode *old_parent = stack.Top();
   uint64_t unused = 0;
-  char *key = GetRecord(separator_meta, unused);
+  char *key;
+  GetRecord(separator_meta, &key, &unused);
   if (old_parent) {
     // Has a parent node
     *parent = InternalNode::New(
@@ -651,7 +657,7 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
     *parent = InternalNode::New(
         key, separator_meta.GetKeyLength(), (uint64_t) *left, (uint64_t) *right);
   }
-  return true;
+  return ReturnCode::Ok();
 }
 
 LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {
