@@ -161,6 +161,30 @@ TEST_F(LeafNodeFixtures, Update) {
   ASSERT_EQ(node->Read("200", 3), 200);
   ASSERT_TRUE(node->Update(0, "200", 3, 201, pool));
   ASSERT_EQ(node->Read("200", 3), 201);
+  pool->GetEpoch()->Unprotect();
+}
+
+TEST_F(LeafNodeFixtures, Upsert) {
+  pool->GetEpoch()->Protect();
+  InsertDummy();
+  ASSERT_EQ(node->Read("20", 2), 20);
+  ASSERT_TRUE(node->Upsert(0, "20", 2, 21, pool));
+  ASSERT_EQ(node->Read("20", 2), 21);
+
+  ASSERT_EQ(node->Read("210", 3), 210);
+  ASSERT_TRUE(node->Upsert(0, "210", 3, 211, pool));
+  ASSERT_EQ(node->Read("210", 3), 211);
+
+//  No-exsiting upsert
+  ASSERT_EQ(node->Read("21", 2), 0);
+  ASSERT_TRUE(node->Upsert(0, "21", 2, 21, pool));
+  ASSERT_EQ(node->Read("21", 2), 21);
+
+  ASSERT_EQ(node->Read("211", 3), 0);
+  ASSERT_TRUE(node->Upsert(0, "211", 3, 211, pool));
+  ASSERT_EQ(node->Read("211", 3), 211);
+
+  pool->GetEpoch()->Unprotect();
 }
 
 int main(int argc, char **argv) {
