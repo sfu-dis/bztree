@@ -19,7 +19,7 @@ InternalNode *InternalNode::New(InternalNode *src_node,
                                 uint64_t right_child_addr) {
   // FIXME(tzwang): use a better allocator
   uint32_t data_size = src_node->GetHeader()->size + key_size +
-                       sizeof(right_child_addr) + sizeof(RecordMetadata);
+      sizeof(right_child_addr) + sizeof(RecordMetadata);
   uint32_t alloc_size = sizeof(InternalNode) + data_size;
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
@@ -32,11 +32,11 @@ InternalNode *InternalNode::New(char *key,
                                 uint64_t left_child_addr,
                                 uint64_t right_child_addr) {
   uint32_t data_size = key_size + sizeof(left_child_addr) + sizeof(right_child_addr) +
-                       sizeof(RecordMetadata) * 2;
+      sizeof(RecordMetadata) * 2;
   uint32_t alloc_size = sizeof(InternalNode) + data_size;
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
-  new (node) InternalNode(key, key_size, left_child_addr, right_child_addr);
+  new(node) InternalNode(key, key_size, left_child_addr, right_child_addr);
   return node;
 }
 
@@ -44,10 +44,10 @@ InternalNode::InternalNode(char *key,
                            uint32_t key_size,
                            uint64_t left_child_addr,
                            uint64_t right_child_addr)
-: BaseNode(false) {
+    : BaseNode(false) {
   // Initialize a new internal node with one key only
   header.size = sizeof(InternalNode) + key_size +
-                sizeof(left_child_addr) + sizeof(right_child_addr) + sizeof(RecordMetadata) * 2;
+      sizeof(left_child_addr) + sizeof(right_child_addr) + sizeof(RecordMetadata) * 2;
   header.sorted_count = 2;  // Includes the null dummy key
 
   // Fill in left child address, with an empty key
@@ -69,7 +69,7 @@ InternalNode::InternalNode(InternalNode *src_node,
                            uint32_t key_size,
                            uint64_t left_child_addr,
                            uint64_t right_child_addr)
-  : BaseNode(false) {
+    : BaseNode(false) {
   LOG_IF(FATAL, !src_node);
   header.size = src_node->GetHeader()->size + key_size + sizeof(left_child_addr);
 
@@ -198,7 +198,7 @@ void InternalNode::Dump() {
   std::cout << std::endl;
 }
 
-bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
+bool LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                       pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
   NodeHeader::StatusWord expected_status = header.status;
@@ -220,7 +220,8 @@ bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64
   NodeHeader::StatusWord desired_status = expected_status;
 
   // Block size includes both key and payload sizes
-  uint64_t total_size = key_size + sizeof(payload);
+  auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
+  auto total_size = padded_key_size + sizeof(payload);
   desired_status.PrepareForInsert(total_size);
 
   // Get the tentative metadata entry (again, make a local copy to work on it)
@@ -242,18 +243,19 @@ bool LeafNode::Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64
   }
 
   // Reserved space! Now copy data
+  // The key size must be padded to 64bit
   uint64_t offset = kNodeSize - desired_status.GetBlockSize();
   char *ptr = &(reinterpret_cast<char *>(this))[offset];
   memcpy(ptr, key, key_size);
-  memcpy(ptr + key_size, &payload, sizeof(payload));
+  memcpy(ptr + padded_key_size, &payload, sizeof(payload));
   // Flush the word
-  pmwcas::NVRAM::Flush(key_size + sizeof(payload), ptr);
+  pmwcas::NVRAM::Flush(total_size, ptr);
 
   if (uniqueness == ReCheck) {
-    uniqueness = RecheckUnique(key, key_size, expected_status.GetRecordCount());
+    uniqueness = RecheckUnique(key, padded_key_size, expected_status.GetRecordCount());
     if (uniqueness == Duplicate) {
       memset(ptr, 0, key_size);
-      memset(ptr + key_size, 0, sizeof(payload));
+      memset(ptr + padded_key_size, 0, sizeof(payload));
       offset = 0;
     }
   }
@@ -305,7 +307,6 @@ bool LeafNode::Upsert(uint32_t epoch,
                       uint32_t key_size,
                       uint64_t payload,
                       pmwcas::DescriptorPool *pmwcas_pool) {
-
 }
 
 bool LeafNode::Update(uint32_t epoch,
@@ -338,7 +339,8 @@ bool LeafNode::Update(uint32_t epoch,
 //  2. make sure meta data is not changed
 //  3. make sure status word is not changed
   auto pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(reinterpret_cast<uint64_t *>(record_key + meta_ptr->GetKeyLength()), record_payload, payload);
+  pd->AddEntry(reinterpret_cast<uint64_t *>(record_key + meta_ptr->GetPaddedKeyLength()),
+               record_payload, payload);
   pd->AddEntry(&meta_ptr->meta, old_meta_value, meta_ptr->meta);
   pd->AddEntry(&header.status.word, old_status.word, old_status.word);
 
@@ -626,10 +628,10 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   if (old_parent) {
     // Has a parent node
     *parent = InternalNode::New(
-      old_parent, key, separator_meta.GetKeyLength(), (uint64_t)*left, (uint64_t)*right);
+        old_parent, key, separator_meta.GetKeyLength(), (uint64_t) *left, (uint64_t) *right);
   } else {
     *parent = InternalNode::New(
-      key, separator_meta.GetKeyLength(), (uint64_t)*left, (uint64_t)*right);
+        key, separator_meta.GetKeyLength(), (uint64_t) *left, (uint64_t) *right);
   }
   return true;
 }
