@@ -80,8 +80,7 @@ class BaseNode {
     }
 
     static inline uint16_t PadKeyLength(uint16_t key_length) {
-      return key_length / sizeof(uint64_t) * sizeof(uint64_t)
-          + (key_length % sizeof(uint64_t) == 0 ? 0 : sizeof(uint64_t));
+      return (key_length + sizeof(uint64_t) - 1) / sizeof(uint64_t) * sizeof(uint64_t);
     }
     inline uint16_t GetTotalLength() { return (uint16_t) ((meta & kTotalLengthMask) >> 48); }
     inline uint32_t GetOffset() { return (uint32_t) ((meta & kOffsetMask) >> 4); }
