@@ -302,15 +302,15 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   return Duplicate;
 }
 
-bool LeafNode::Upsert(uint32_t epoch,
-                      const char *key,
-                      uint16_t key_size,
-                      uint64_t payload,
-                      pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::Upsert(uint32_t epoch,
+                            const char *key,
+                            uint16_t key_size,
+                            uint64_t payload,
+                            pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
   auto old_status = header.status;
   if (old_status.IsFrozen()) {
-    return false;
+    return ReturnCode::NodeFrozen();
   }
   auto *meta_ptr = SearchRecordMeta(key, key_size);
   if (meta_ptr == nullptr) {
@@ -319,7 +319,7 @@ bool LeafNode::Upsert(uint32_t epoch,
     if (insert_result.IsPMWCASFailure()) {
       return Update(epoch, key, key_size, payload, pmwcas_pool);
     }
-    return true;
+    return ReturnCode::Ok();
   } else if (meta_ptr->IsInserting()) {
     goto retry;
   } else {
@@ -327,20 +327,20 @@ bool LeafNode::Upsert(uint32_t epoch,
   }
 }
 
-bool LeafNode::Update(uint32_t epoch,
-                      const char *key,
-                      uint16_t key_size,
-                      uint64_t payload,
-                      pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::Update(uint32_t epoch,
+                            const char *key,
+                            uint16_t key_size,
+                            uint64_t payload,
+                            pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
   auto old_status = header.status;
   if (old_status.IsFrozen()) {
-    return false;
+    return ReturnCode::NodeFrozen();
   }
 
   auto *meta_ptr = SearchRecordMeta(key, key_size);
   if (meta_ptr == nullptr || !meta_ptr->IsVisible()) {
-    return false;
+    return ReturnCode::NotFound();
   } else if (meta_ptr->IsInserting()) {
     goto retry;
   }
@@ -350,7 +350,7 @@ bool LeafNode::Update(uint32_t epoch,
   uint64_t record_payload;
   GetRecord(*meta_ptr, &record_key, &record_payload);
   if (payload == record_payload) {
-    return true;
+    return ReturnCode::Ok();
   }
 
 //  1. update the corresponding payload
@@ -365,7 +365,7 @@ bool LeafNode::Update(uint32_t epoch,
   if (!pd->MwCAS()) {
     goto retry;
   }
-  return true;
+  return ReturnCode::Ok();
 }
 
 LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
@@ -602,15 +602,15 @@ BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
   return reinterpret_cast<BaseNode *>(meta_payload);
 }
 
-bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
-                               InternalNode **parent,
-                               LeafNode **left,
-                               LeafNode **right,
-                               pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
+                                     InternalNode **parent,
+                                     LeafNode **left,
+                                     LeafNode **right,
+                                     pmwcas::DescriptorPool *pmwcas_pool) {
   LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
   // Set the frozen bit on the node to be split
   if (!Freeze(pmwcas_pool)) {
-    return false;
+    return ReturnCode::NodeFrozen();
   }
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
@@ -651,7 +651,7 @@ bool LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
     *parent = InternalNode::New(
         key, separator_meta.GetKeyLength(), (uint64_t) *left, (uint64_t) *right);
   }
-  return true;
+  return ReturnCode::Ok();
 }
 
 LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {

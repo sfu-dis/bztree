@@ -32,6 +32,7 @@ struct ReturnCode {
   static ReturnCode KeyExists() { return ReturnCode(RetKeyExists); }
   static ReturnCode PMWCASFailure() { return ReturnCode(RetPMWCASFail); }
   static ReturnCode Ok() { return ReturnCode(RetOk); }
+  static ReturnCode NotFound() { return ReturnCode(RetNotFound); }
 };
 
 struct NodeHeader {
@@ -217,7 +218,7 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  bool PrepareForSplit(uint32_t epoch, Stack &stack,
+  ReturnCode PrepareForSplit(uint32_t epoch, Stack &stack,
                        InternalNode **parent, LeafNode **left, LeafNode **right,
                        pmwcas::DescriptorPool *pmwcas_pool);
 
@@ -232,11 +233,11 @@ class LeafNode : public BaseNode {
                 std::vector<RecordMetadata>::iterator begin_it,
                 std::vector<RecordMetadata>::iterator end_it);
 
-  bool Update(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
-              pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Update(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
+                    pmwcas::DescriptorPool *pmwcas_pool);
 
-  bool Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
-              pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
+                    pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
