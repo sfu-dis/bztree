@@ -171,7 +171,8 @@ void LeafNode::Dump() {
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     BaseNode::RecordMetadata meta = record_metadata[i];
     uint64_t payload = 0;
-    char *key = GetRecord(meta, payload);
+    char *key;
+    GetRecord(meta, &key, &payload);
     std::string keystr(key, key + meta.GetKeyLength());
     std::cout << " - record " << i << ": key = " << keystr
               << ", payload = " << payload << std::endl;
@@ -399,8 +400,9 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
       }
 
       uint64_t payload = 0;
+      char *current_key;
       auto current = &(record_metadata[middle]);
-      auto current_key = GetRecord(*current, payload);
+      GetRecord(*current, &current_key, &payload);
 
       auto cmp_result = memcmp(key, current_key, current->GetKeyLength());
       if (cmp_result < 0) {
@@ -426,7 +428,8 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
       }
 
       uint64_t payload = 0;
-      auto current_key = GetRecord(*current, payload);
+      char *current_key;
+      GetRecord(*current, &current_key, &payload);
       if (current->IsVisible() &&
           key_size == current->GetKeyLength() &&
           strncmp(key, current_key, current->GetKeyLength()) == 0) {
@@ -475,7 +478,8 @@ uint64_t LeafNode::Read(const char *key, uint32_t key_size) {
     return 0;
   }
   uint64_t payload = 0;
-  GetRecord(*meta, payload);
+  char *unused_key;
+  GetRecord(*meta, &unused_key, &payload);
   return payload;
 }
 
@@ -550,7 +554,8 @@ void LeafNode::CopyFrom(LeafNode *node,
   for (auto it = begin_it; it != end_it; ++it) {
     auto meta = *it;
     uint64_t payload = 0;
-    char *key = node->GetRecord(meta, payload);
+    char *key;
+    node->GetRecord(meta, &key, &payload);
 
     // Copy data
     uint64_t total_len = meta.GetTotalLength();
@@ -642,7 +647,8 @@ ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 
   InternalNode *old_parent = stack.Top();
   uint64_t unused = 0;
-  char *key = GetRecord(separator_meta, unused);
+  char *key;
+  GetRecord(separator_meta, &key, &unused);
   if (old_parent) {
     // Has a parent node
     *parent = InternalNode::New(

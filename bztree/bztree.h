@@ -219,8 +219,8 @@ class LeafNode : public BaseNode {
   ReturnCode Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
   ReturnCode PrepareForSplit(uint32_t epoch, Stack &stack,
-                       InternalNode **parent, LeafNode **left, LeafNode **right,
-                       pmwcas::DescriptorPool *pmwcas_pool);
+                             InternalNode **parent, LeafNode **left, LeafNode **right,
+                             pmwcas::DescriptorPool *pmwcas_pool);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
@@ -242,16 +242,8 @@ class LeafNode : public BaseNode {
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
-  // Get the key (return value) and payload (8-byte)
-  inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
-    if (!meta.IsVisible()) {
-      return nullptr;
-    }
-    uint64_t offset = meta.GetOffset();
-    char *data = &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-    payload = *reinterpret_cast<uint64_t *>(&data[meta.GetPaddedKeyLength()]);
-    return data;
-  }
+  // Get the key and payload (8-byte)
+  // Return status
   inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
     if (!meta.IsVisible()) {
       return false;
