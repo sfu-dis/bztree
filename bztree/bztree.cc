@@ -640,6 +640,7 @@ ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
     }
   }
 
+  // TODO(tzwang): also put the new insert here to save some cycles
   auto left_end_it = meta_vec.begin() + nleft;
   (*left)->CopyFrom(this, meta_vec.begin(), left_end_it);
   (*right)->CopyFrom(this, left_end_it, meta_vec.end());
@@ -664,6 +665,7 @@ ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 
 LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {
   BaseNode *node = root;
+  assert(node);
   while (!node->IsLeaf()) {
     stack.Push(reinterpret_cast<InternalNode *>(node));
     node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size);
@@ -671,7 +673,45 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {
   return reinterpret_cast<LeafNode *>(node);
 }
 
-bool BzTree::Insert(char *key, uint64_t key_size) {
+ReturnCode BzTree::Insert(char *key, uint64_t key_size, uint64_t payload) {
+  thread_local Stack stack;
+  ReturnCode rc;
+  do {
+    stack.Clear();
+    LeafNode *node = TraverseToLeaf(stack, key, key_size);
+
+    // Check space to see if we need to split the node
+    uint32_t new_size = sizeof(BaseNode::RecordMetadata) + node->GetSize() +
+      key_size / 8 * 8 + sizeof(payload);
+    if (new_size >= parameters.split_threshold) {
+      // Should split
+      LeafNode *left = nullptr;
+      LeafNode *right = nullptr;
+      InternalNode *parent = nullptr;
+      if (!node->PrepareForSplit(epoch, stack, &parent, &left, &right, pmwcas_pool)) {
+        continue;
+      }
+      InternalNode *old_root = stack.Pop();  // Pop out the immediate parent
+      InternalNode *grand_parent = stack.Top();
+      if (grand_parent) {
+        // There is a grant parent
+        // TODO(tzwang): update method in internal node
+      } else {
+        // No grand parent, so the new parent node will become the new root
+        pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
+        pd->AddEntry(reinterpret_cast<uint64_t *>(root),
+                     reinterpret_cast<uint64_t>(old_root),
+                     reinterpret_cast<uint64_t>(parent));
+        // TODO(tzwang): specify memory policy for new leaf nodes
+        if (!pd->MwCAS()) {
+          continue;
+        }
+      }
+    } else {
+      rc = node->Insert(epoch, key, key_size, payload, pmwcas_pool);
+    }
+  } while (!rc.IsKeyExists());
+  return rc;
 }
 
 }  // namespace bztree

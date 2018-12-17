@@ -56,6 +56,7 @@ class LeafNodeFixtures : public ::testing::Test {
     delete node;
   }
 };
+
 TEST_F(LeafNodeFixtures, Read) {
   pool->GetEpoch()->Protect();
   InsertDummy();
@@ -185,6 +186,32 @@ TEST_F(LeafNodeFixtures, Upsert) {
   ASSERT_EQ(node->Read("211", 3), 211);
 
   pool->GetEpoch()->Unprotect();
+}
+
+class BzTreeTest: public ::testing::Test {
+ protected:
+  pmwcas::DescriptorPool *pool;
+  bztree::BzTree *tree;
+
+  void SetUp() override {
+    pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
+                        pmwcas::TlsAllocator::Destroy,
+                        pmwcas::LinuxEnvironment::Create,
+                        pmwcas::LinuxEnvironment::Destroy);
+    pool = reinterpret_cast<pmwcas::DescriptorPool *>(
+      pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
+    new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
+
+    bztree::BzTree::ParameterSet param(3072);
+    tree = new bztree::BzTree(param, pool);
+  }
+
+  void TearDown() override {
+    delete tree;
+  }
+};
+
+TEST_F(BzTreeTest, Insert) {
 }
 
 int main(int argc, char **argv) {

@@ -201,7 +201,8 @@ struct Stack {
   ~Stack() { num_frames = 0; }
   inline void Push(InternalNode *node) { frames[num_frames++] = node; }
   inline InternalNode *Pop() { return num_frames == 0 ? nullptr : frames[--num_frames]; }
-  InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
+  inline void Clear() { num_frames = 0; }
+  inline InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
 };
 
 class LeafNode : public BaseNode {
@@ -266,6 +267,7 @@ class LeafNode : public BaseNode {
   }
 
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);
+  inline uint16_t GetSize() { return header.size; }
   void Dump();
 
  private:
@@ -293,10 +295,14 @@ class BzTree {
     ~ParameterSet() {}
   };
 
-  explicit BzTree(ParameterSet param) : parameters(param), epoch(0), root(nullptr) {
+  BzTree(ParameterSet param, pmwcas::DescriptorPool *pool)
+    : parameters(param)
+    , epoch(0)
+    , root(nullptr)
+    , pmwcas_pool(pool) {
     root = LeafNode::New();
   }
-  bool Insert(char *key, uint64_t key_size);
+  ReturnCode Insert(char *key, uint64_t key_size, uint64_t payload);
 
  private:
   LeafNode *TraverseToLeaf(Stack &stack, char *key, uint64_t key_size);
@@ -305,6 +311,7 @@ class BzTree {
   ParameterSet parameters;
   uint32_t epoch;
   BaseNode *root;
+  pmwcas::DescriptorPool *pmwcas_pool;
 };
 
 }  // namespace bztree
