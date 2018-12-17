@@ -578,7 +578,10 @@ void LeafNode::CopyFrom(LeafNode *node,
   header.sorted_count = nrecords;
 }
 
-BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
+ReturnCode InternalNode::Update(RecordMetadata old_meta, InternalNode *new_child) {
+}
+
+BaseNode *InternalNode::GetChild(char *key, uint64_t key_size, RecordMetadata *out_meta) {
   // Keys in internal nodes are always sorted
   int32_t left = 0, right = header.status.GetRecordCount() - 1;
   while (left <= right) {
@@ -606,6 +609,9 @@ BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
   auto meta = record_metadata[left];
   uint64_t meta_payload = 0;
   GetRecord(meta, meta_payload);
+  if (out_meta) {
+    *out_meta = meta;
+  }
   return reinterpret_cast<BaseNode *>(meta_payload);
 }
 
@@ -648,7 +654,7 @@ ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   LOG_IF(FATAL, nleft - 1 == 0);
   RecordMetadata separator_meta = meta_vec[nleft - 1];
 
-  InternalNode *old_parent = stack.Top();
+  InternalNode *old_parent = stack.Top() ? stack.Top()->node : nullptr;
   uint64_t unused = 0;
   char *key;
   GetRecord(separator_meta, &key, &unused);
@@ -665,10 +671,13 @@ ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 
 LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {
   BaseNode *node = root;
+  InternalNode *parent = nullptr;
   assert(node);
   while (!node->IsLeaf()) {
-    stack.Push(reinterpret_cast<InternalNode *>(node));
-    node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size);
+    BaseNode::RecordMetadata meta;
+    parent = reinterpret_cast<InternalNode *>(node);
+    node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta);
+    stack.Push(parent, meta);
   }
   return reinterpret_cast<LeafNode *>(node);
 }
@@ -688,19 +697,26 @@ ReturnCode BzTree::Insert(char *key, uint64_t key_size, uint64_t payload) {
       LeafNode *left = nullptr;
       LeafNode *right = nullptr;
       InternalNode *parent = nullptr;
-      if (!node->PrepareForSplit(epoch, stack, &parent, &left, &right, pmwcas_pool)) {
+      if (!node->PrepareForSplit(epoch, stack, &parent, &left, &right, pmwcas_pool).IsOk()) {
         continue;
       }
-      InternalNode *old_root = stack.Pop();  // Pop out the immediate parent
-      InternalNode *grand_parent = stack.Top();
-      if (grand_parent) {
-        // There is a grant parent
+
+      auto *top = stack.Pop();  // Pop out the immediate parent
+      InternalNode *old_parent = nullptr;
+      if (top) {
+        old_parent = top->node;
+      }
+      top = stack.Top();
+      if (top) {
+        // There is a grant parent. We need to swap out the pointer to the old
+        // parent and install the pointer to the new parent
+        top->node->Update(top->meta, parent);
         // TODO(tzwang): update method in internal node
       } else {
         // No grand parent, so the new parent node will become the new root
         pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
         pd->AddEntry(reinterpret_cast<uint64_t *>(root),
-                     reinterpret_cast<uint64_t>(old_root),
+                     reinterpret_cast<uint64_t>(old_parent),
                      reinterpret_cast<uint64_t>(parent));
         // TODO(tzwang): specify memory policy for new leaf nodes
         if (!pd->MwCAS()) {
