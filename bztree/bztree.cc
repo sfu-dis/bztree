@@ -304,18 +304,37 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
 
 bool LeafNode::Upsert(uint32_t epoch,
                       const char *key,
-                      uint32_t key_size,
+                      uint16_t key_size,
                       uint64_t payload,
                       pmwcas::DescriptorPool *pmwcas_pool) {
+  retry:
+  auto old_status = header.status;
+  if (old_status.IsFrozen()) {
+    return false;
+  }
+  auto *meta_ptr = SearchRecordMeta(key, key_size);
+  if (meta_ptr == nullptr) {
+    auto insert_ok = Insert(epoch, key, key_size, payload, pmwcas_pool);
+
+//    FIXME(hao): only perform update if the failure is caused by concurrent insertion.
+    if (!insert_ok) {
+      return Update(epoch, key, key_size, payload, pmwcas_pool);
+    }
+    return true;
+  } else if (meta_ptr->IsInserting()) {
+    goto retry;
+  } else {
+    return Update(epoch, key, key_size, payload, pmwcas_pool);
+  }
 }
 
 bool LeafNode::Update(uint32_t epoch,
                       const char *key,
-                      uint32_t key_size,
+                      uint16_t key_size,
                       uint64_t payload,
                       pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
-  NodeHeader::StatusWord old_status = header.status;
+  auto old_status = header.status;
   if (old_status.IsFrozen()) {
     return false;
   }

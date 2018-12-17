@@ -212,10 +212,10 @@ class LeafNode : public BaseNode {
                 std::vector<RecordMetadata>::iterator begin_it,
                 std::vector<RecordMetadata>::iterator end_it);
 
-  bool Update(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
+  bool Update(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
 
-  bool Upsert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
+  bool Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
