@@ -24,12 +24,12 @@ class LeafNodeFixtures : public ::testing::Test {
   void InsertDummy() {
     for (uint32_t i = 0; i < 100; i += 10) {
       auto str = std::to_string(i);
-      node->Insert(0, str.c_str(), (uint32_t) str.length(), i, pool);
+      node->Insert(0, str.c_str(), (uint16_t) str.length(), i, pool);
     }
     auto *new_node = node->Consolidate(pool);
     for (uint32_t i = 200; i < 300; i += 10) {
       auto str = std::to_string(i);
-      new_node->Insert(0, str.c_str(), (uint32_t) str.length(), i, pool);
+      new_node->Insert(0, str.c_str(), (uint16_t) str.length(), i, pool);
     }
     delete node;
     node = new_node;
@@ -44,7 +44,7 @@ class LeafNodeFixtures : public ::testing::Test {
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
     pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-      pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
+        pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
     new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
 
     node = (bztree::LeafNode *) malloc(bztree::LeafNode::kNodeSize);
@@ -149,6 +149,41 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   left->Dump();
   right->Dump();
   parent->Dump();
+  pool->GetEpoch()->Unprotect();
+}
+TEST_F(LeafNodeFixtures, Update) {
+  pool->GetEpoch()->Protect();
+  InsertDummy();
+  ASSERT_EQ(node->Read("10", 2), 10);
+  ASSERT_TRUE(node->Update(0, "10", 2, 11, pool));
+  ASSERT_EQ(node->Read("10", 2), 11);
+
+  ASSERT_EQ(node->Read("200", 3), 200);
+  ASSERT_TRUE(node->Update(0, "200", 3, 201, pool));
+  ASSERT_EQ(node->Read("200", 3), 201);
+  pool->GetEpoch()->Unprotect();
+}
+
+TEST_F(LeafNodeFixtures, Upsert) {
+  pool->GetEpoch()->Protect();
+  InsertDummy();
+  ASSERT_EQ(node->Read("20", 2), 20);
+  ASSERT_TRUE(node->Upsert(0, "20", 2, 21, pool));
+  ASSERT_EQ(node->Read("20", 2), 21);
+
+  ASSERT_EQ(node->Read("210", 3), 210);
+  ASSERT_TRUE(node->Upsert(0, "210", 3, 211, pool));
+  ASSERT_EQ(node->Read("210", 3), 211);
+
+//  No-exsiting upsert
+  ASSERT_EQ(node->Read("21", 2), 0);
+  ASSERT_TRUE(node->Upsert(0, "21", 2, 21, pool));
+  ASSERT_EQ(node->Read("21", 2), 21);
+
+  ASSERT_EQ(node->Read("211", 3), 0);
+  ASSERT_TRUE(node->Upsert(0, "211", 3, 211, pool));
+  ASSERT_EQ(node->Read("211", 3), 211);
+
   pool->GetEpoch()->Unprotect();
 }
 

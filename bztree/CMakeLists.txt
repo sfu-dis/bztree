@@ -39,7 +39,7 @@ target_link_libraries(bztree_tests bztree)
 
 add_custom_target(
   cpplint ALL
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/third-party/cpplint/cpplint.py
+  COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/third-party/cpplint/cpplint.py
     --linelength=100
     --filter=-runtime/references,-build/header_guard,-build/include
     ${CMAKE_CURRENT_SOURCE_DIR}/bztree.h

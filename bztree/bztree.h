@@ -72,6 +72,16 @@ class BaseNode {
 
     inline bool IsVacant() { return meta == 0; }
     inline uint16_t GetKeyLength() { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
+
+//    Get the padded key length from accurate key length
+    inline uint16_t GetPaddedKeyLength() {
+      auto key_length = GetKeyLength();
+      return PadKeyLength(key_length);
+    }
+
+    static inline uint16_t PadKeyLength(uint16_t key_length) {
+      return (key_length + sizeof(uint64_t) - 1) / sizeof(uint64_t) * sizeof(uint64_t);
+    }
     inline uint16_t GetTotalLength() { return (uint16_t) ((meta & kTotalLengthMask) >> 48); }
     inline uint32_t GetOffset() { return (uint32_t) ((meta & kOffsetMask) >> 4); }
     inline bool OffsetIsEpoch() {
@@ -154,7 +164,7 @@ class InternalNode : public BaseNode {
     }
     uint64_t offset = meta.GetOffset();
     char *data = &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-    auto key_len = meta.GetKeyLength();
+    auto key_len = meta.GetPaddedKeyLength();
     payload = *reinterpret_cast<uint64_t *>(&data[key_len]);
     return key_len ? data : nullptr;
   }
@@ -184,7 +194,7 @@ class LeafNode : public BaseNode {
   }
   ~LeafNode() = default;
 
-  bool Insert(uint32_t epoch, const char *key, uint32_t key_size, uint64_t payload,
+  bool Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
               pmwcas::DescriptorPool *pmwcas_pool);
   bool PrepareForSplit(uint32_t epoch, Stack &stack,
                        InternalNode **parent, LeafNode **left, LeafNode **right,
@@ -201,6 +211,12 @@ class LeafNode : public BaseNode {
                 std::vector<RecordMetadata>::iterator begin_it,
                 std::vector<RecordMetadata>::iterator end_it);
 
+  bool Update(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
+              pmwcas::DescriptorPool *pmwcas_pool);
+
+  bool Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
+              pmwcas::DescriptorPool *pmwcas_pool);
+
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
@@ -211,10 +227,18 @@ class LeafNode : public BaseNode {
     }
     uint64_t offset = meta.GetOffset();
     char *data = &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-    payload = *reinterpret_cast<uint64_t *>(&data[meta.GetKeyLength()]);
+    payload = *reinterpret_cast<uint64_t *>(&data[meta.GetPaddedKeyLength()]);
     return data;
   }
-
+  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+    if (!meta.IsVisible()) {
+      return false;
+    }
+    uint64_t offset = meta.GetOffset();
+    *key = reinterpret_cast<char *>(this) + meta.GetOffset();
+    *payload = *(reinterpret_cast<uint64_t *> (*key + meta.GetPaddedKeyLength()));
+    return true;
+  }
   inline char *GetKey(RecordMetadata meta) {
     if (!meta.IsVisible()) {
       return nullptr;
