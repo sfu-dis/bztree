@@ -73,9 +73,9 @@ TEST_F(LeafNodeFixtures, Read) {
 TEST_F(LeafNodeFixtures, Insert) {
   pool->GetEpoch()->Protect();
 
-  ASSERT_TRUE(node->Insert(0, "def", 3, 100, pool));
-  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool));
-  ASSERT_TRUE(node->Insert(0, "abc", 3, 102, pool));
+  ASSERT_TRUE(node->Insert(0, "def", 3, 100, pool).IsOk());
+  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool).IsOk());
+  ASSERT_TRUE(node->Insert(0, "abc", 3, 102, pool).IsOk());
   ASSERT_EQ(node->Read("def", 3), 100);
   ASSERT_EQ(node->Read("abc", 3), 102);
 
@@ -83,7 +83,7 @@ TEST_F(LeafNodeFixtures, Insert) {
 
   auto *new_node = node->Consolidate(pool);
   new_node->Dump();
-  ASSERT_TRUE(new_node->Insert(0, "apple", 5, 106, pool));
+  ASSERT_TRUE(new_node->Insert(0, "apple", 5, 106, pool).IsOk());
   ASSERT_EQ(new_node->Read("bdef", 4), 101);
   ASSERT_EQ(new_node->Read("apple", 5), 106);
 
@@ -93,18 +93,18 @@ TEST_F(LeafNodeFixtures, Insert) {
 TEST_F(LeafNodeFixtures, DuplicateInsert) {
   pool->GetEpoch()->Protect();
   InsertDummy();
-  ASSERT_FALSE(node->Insert(0, "10", 2, 111, pool));
-  ASSERT_TRUE(node->Insert(0, "11", 2, 1212, pool));
+  ASSERT_TRUE(node->Insert(0, "10", 2, 111, pool).IsKeyExists());
+  ASSERT_TRUE(node->Insert(0, "11", 2, 1212, pool).IsOk());
 
   ASSERT_EQ(node->Read("10", 2), 10);
   ASSERT_EQ(node->Read("11", 2), 1212);
 
   auto *new_node = node->Consolidate(pool);
 
-  ASSERT_FALSE(new_node->Insert(0, "11", 2, 1213, pool));
+  ASSERT_TRUE(new_node->Insert(0, "11", 2, 1213, pool).IsKeyExists());
   ASSERT_EQ(new_node->Read("11", 2), 1212);
 
-  ASSERT_TRUE(new_node->Insert(0, "201", 3, 201, pool));
+  ASSERT_TRUE(new_node->Insert(0, "201", 3, 201, pool).IsOk());
   ASSERT_EQ(new_node->Read("201", 3), 201);
 
   pool->GetEpoch()->Unprotect();
@@ -130,13 +130,13 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   pool->GetEpoch()->Protect();
   InsertDummy();
 
-  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool));
-  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool));
-  ASSERT_TRUE(node->Insert(0, "abcd", 4, 102, pool));
-  ASSERT_TRUE(node->Insert(0, "deadbeef", 8, 103, pool));
-  ASSERT_TRUE(node->Insert(0, "parker", 6, 104, pool));
-  ASSERT_TRUE(node->Insert(0, "deadpork", 8, 105, pool));
-  ASSERT_TRUE(node->Insert(0, "toronto", 7, 106, pool));
+  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool).IsOk());
+  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool).IsOk());
+  ASSERT_TRUE(node->Insert(0, "abcd", 4, 102, pool).IsOk());
+  ASSERT_TRUE(node->Insert(0, "deadbeef", 8, 103, pool).IsOk());
+  ASSERT_TRUE(node->Insert(0, "parker", 6, 104, pool).IsOk());
+  ASSERT_TRUE(node->Insert(0, "deadpork", 8, 105, pool).IsOk());
+  ASSERT_TRUE(node->Insert(0, "toronto", 7, 106, pool).IsOk());
 
   node->Dump();
 

@@ -13,6 +13,27 @@
 
 namespace bztree {
 
+struct ReturnCode {
+  enum RC { RetInvalid, RetOk, RetKeyExists, RetNotFound, RetNodeFrozen, RetPMWCASFail };
+  uint8_t rc;
+
+  explicit ReturnCode(uint8_t r) : rc(r) {}
+  ReturnCode() : rc(RetInvalid) {}
+  ~ReturnCode() {}
+
+  bool inline IsInvalid() { return rc == RetInvalid; }
+  bool inline IsOk() { return rc == RetOk; }
+  bool inline IsKeyExists() { return rc == RetKeyExists; }
+  bool inline IsNotFound() { return rc == RetNotFound; }
+  bool inline IsNodeFrozen() { return rc == RetNodeFrozen; }
+  bool inline IsPMWCASFailure() { return rc = RetPMWCASFail; }
+
+  static ReturnCode NodeFrozen() { return ReturnCode(RetNodeFrozen); }
+  static ReturnCode KeyExists() { return ReturnCode(RetKeyExists); }
+  static ReturnCode PMWCASFailure() { return ReturnCode(RetPMWCASFail); }
+  static ReturnCode Ok() { return ReturnCode(RetOk); }
+};
+
 struct NodeHeader {
   // Header:
   // |-------64 bits-------|---32 bits---|---32 bits---|
@@ -194,8 +215,8 @@ class LeafNode : public BaseNode {
   }
   ~LeafNode() = default;
 
-  bool Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
-              pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
+                    pmwcas::DescriptorPool *pmwcas_pool);
   bool PrepareForSplit(uint32_t epoch, Stack &stack,
                        InternalNode **parent, LeafNode **left, LeafNode **right,
                        pmwcas::DescriptorPool *pmwcas_pool);
