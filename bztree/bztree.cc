@@ -706,6 +706,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
     stack.Clear();
+    pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
 
     // Check space to see if we need to split the node
@@ -726,7 +727,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       }
       top = stack.Top();
       if (top) {
-        // There is a grant parent. We need to swap out the pointer to the old
+        // There is a grand parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent
         if (top->node->Update(top->meta, old_parent, parent, pmwcas_pool).IsNodeFrozen()) {
           continue;
