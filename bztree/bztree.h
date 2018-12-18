@@ -158,6 +158,21 @@ class BaseNode {
  public:
   explicit BaseNode(bool leaf) : is_leaf(leaf) {}
   inline bool IsLeaf() { return is_leaf; }
+
+  // Get the key and payload (8-byte)
+  // Return status
+  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+    if (!meta.IsVisible()) {
+      return false;
+    }
+    uint64_t offset = meta.GetOffset();
+//    zero key length dummy record
+    *key = meta.GetPaddedKeyLength() == 0 ?
+           nullptr : reinterpret_cast<char *>(this) + meta.GetOffset();
+    *payload = *(reinterpret_cast<uint64_t *> (reinterpret_cast<char *>(this) +
+        meta.GetOffset() + meta.GetPaddedKeyLength()));
+    return true;
+  }
 };
 
 // Internal node: immutable once created, no free space, keys are always sorted
@@ -168,28 +183,15 @@ class InternalNode : public BaseNode {
   static InternalNode *New(char *key, uint32_t key_size,
                            uint64_t left_child_addr, uint64_t right_child_addr);
 
-  InternalNode(char *key, uint32_t key_size,
+  InternalNode(const char *key, const uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
-  InternalNode(InternalNode *src_node, char *key, uint32_t key_size,
+  InternalNode(InternalNode *src_node, const char *key, const uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
   ~InternalNode() = default;
 
   BaseNode *GetChild(char *key, uint64_t key_size);
   inline NodeHeader *GetHeader() { return &header; }
   void Dump();
-
- private:
-  // Get the key (return value) and payload (8-byte)
-  inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
-    if (!meta.IsVisible()) {
-      return nullptr;
-    }
-    uint64_t offset = meta.GetOffset();
-    char *data = &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-    auto key_len = meta.GetPaddedKeyLength();
-    payload = *reinterpret_cast<uint64_t *>(&data[key_len]);
-    return key_len ? data : nullptr;
-  }
 };
 
 struct Stack {
@@ -242,17 +244,6 @@ class LeafNode : public BaseNode {
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
-  // Get the key and payload (8-byte)
-  // Return status
-  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
-    if (!meta.IsVisible()) {
-      return false;
-    }
-    uint64_t offset = meta.GetOffset();
-    *key = reinterpret_cast<char *>(this) + meta.GetOffset();
-    *payload = *(reinterpret_cast<uint64_t *> (*key + meta.GetPaddedKeyLength()));
-    return true;
-  }
   inline char *GetKey(RecordMetadata meta) {
     if (!meta.IsVisible()) {
       return nullptr;

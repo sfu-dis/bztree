@@ -40,13 +40,14 @@ InternalNode *InternalNode::New(char *key,
   return node;
 }
 
-InternalNode::InternalNode(char *key,
-                           uint32_t key_size,
+InternalNode::InternalNode(const char *key,
+                           const uint16_t key_size,
                            uint64_t left_child_addr,
                            uint64_t right_child_addr)
     : BaseNode(false) {
   // Initialize a new internal node with one key only
-  header.size = sizeof(InternalNode) + key_size +
+  auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
+  header.size = sizeof(InternalNode) + padded_key_size +
       sizeof(left_child_addr) + sizeof(right_child_addr) + sizeof(RecordMetadata) * 2;
   header.sorted_count = 2;  // Includes the null dummy key
 
@@ -57,29 +58,32 @@ InternalNode::InternalNode(char *key,
   memcpy(ptr, &left_child_addr, sizeof(left_child_addr));
 
   // Fill in right child address, with the separator key
-  offset -= (key_size + sizeof(right_child_addr));
-  record_metadata[1].FinalizeForInsert(offset, key_size, sizeof(right_child_addr));
+  auto total_len = padded_key_size + sizeof(right_child_addr);
+  offset -= total_len;
+  record_metadata[1].FinalizeForInsert(offset, key_size, total_len);
   ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, key, key_size);
-  memcpy(ptr + key_size, &right_child_addr, sizeof(right_child_addr));
+  memcpy(ptr + padded_key_size, &right_child_addr, sizeof(right_child_addr));
 }
 
 InternalNode::InternalNode(InternalNode *src_node,
-                           char *key,
-                           uint32_t key_size,
+                           const char *key,
+                           const uint16_t key_size,
                            uint64_t left_child_addr,
                            uint64_t right_child_addr)
     : BaseNode(false) {
   LOG_IF(FATAL, !src_node);
-  header.size = src_node->GetHeader()->size + key_size + sizeof(left_child_addr);
+  auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
+  header.size = src_node->GetHeader()->size + padded_key_size + sizeof(left_child_addr);
 
   uint64_t offset = sizeof(*this) + header.size;
   bool inserted_new = false;
   for (uint32_t i = 0; i < src_node->GetHeader()->sorted_count; ++i) {
     RecordMetadata meta = src_node->GetMetadata(i);
     uint64_t m_payload = 0;
-    char *m_key = src_node->GetRecord(meta, m_payload);
-    uint32_t m_key_size = meta.GetKeyLength();
+    char *m_key;
+    src_node->GetRecord(meta, &m_key, &m_payload);
+    auto m_key_size = meta.GetKeyLength();
 
     if (inserted_new) {
       // New key already inserted, so directly insert the key from src node
@@ -87,41 +91,39 @@ InternalNode::InternalNode(InternalNode *src_node,
       meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
       record_metadata[i + 1] = meta;
 
-      memcpy(reinterpret_cast<char *>(this) + offset, m_key, m_key_size);
-      memcpy(reinterpret_cast<char *>(this) + offset + m_key_size, &m_payload, sizeof(m_payload));
+      memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
     } else {
       // Compare the two keys to see which one to insert (first)
-      int cmp = memcmp(m_key, key, std::min<uint32_t>(m_key_size, key_size));
+      int cmp = memcmp(m_key, key, std::min<uint16_t>(m_key_size, key_size));
       LOG_IF(FATAL, cmp == 0 && key_size == m_key_size);
 
       if (cmp > 0) {
         RecordMetadata new_meta;
-        offset -= (key_size + sizeof(left_child_addr));
+        offset -= (padded_key_size + sizeof(left_child_addr));
         new_meta.FinalizeForInsert(offset, key_size, sizeof(left_child_addr));
         record_metadata[i] = new_meta;
 
         // Modify the previous key's payload to left_child_addr
         auto &prev_meta = record_metadata[i - 1];
-        memcpy(reinterpret_cast<char *>(this) + prev_meta.GetOffset() + prev_meta.GetKeyLength(),
+        memcpy(reinterpret_cast<char *>(this) +
+                   prev_meta.GetOffset() + prev_meta.GetPaddedKeyLength(),
                &left_child_addr, sizeof(left_child_addr));
 
         // Now the new separtor key itself
-        memcpy(reinterpret_cast<char *>(this) + offset, key, key_size);
-        memcpy(reinterpret_cast<char *>(this) + offset + key_size,
+        memcpy(reinterpret_cast<char *>(this) + offset, key, new_meta.GetTotalLength());
+        memcpy(reinterpret_cast<char *>(this) + offset + padded_key_size,
                &right_child_addr, sizeof(right_child_addr));
 
         offset -= (meta.GetTotalLength());
         meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
         record_metadata[i + 1] = meta;
+        memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
 
-        memcpy(reinterpret_cast<char *>(this) + offset, m_key, m_key_size);
-        memcpy(reinterpret_cast<char *>(this) + offset + m_key_size, &m_payload, sizeof(m_payload));
         inserted_new = true;
       } else {
         record_metadata[i] = meta;
         offset -= (meta.GetTotalLength());
-        memcpy(reinterpret_cast<char *>(this) + offset, m_key, m_key_size);
-        memcpy(reinterpret_cast<char *>(this) + offset + m_key_size, &m_payload, sizeof(m_payload));
+        memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
       }
     }
   }
@@ -189,7 +191,8 @@ void InternalNode::Dump() {
     auto &meta = record_metadata[i];
     assert((i == 0 && meta.GetKeyLength() == 0) || (i > 0 && meta.GetKeyLength() > 0));
     uint64_t right_child_addr = 0;
-    char *key = GetRecord(meta, right_child_addr);
+    char *key;
+    GetRecord(meta, &key, &right_child_addr);
     if (key) {
       std::string keystr(key, key + meta.GetKeyLength());
       std::cout << " | " << keystr << " | ";
@@ -584,7 +587,8 @@ BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
     auto meta = record_metadata[mid];
     uint64_t meta_key_size = meta.GetKeyLength();
     uint64_t meta_payload = 0;
-    char *meta_key = GetRecord(meta, meta_payload);
+    char *meta_key;
+    GetRecord(meta, &meta_key, &meta_payload);
     int cmp = memcmp(key, meta_key, std::min<uint64_t>(meta_key_size, key_size));
     if (cmp == 0) {
       if (meta_key_size == key_size) {
@@ -603,7 +607,8 @@ BaseNode *InternalNode::GetChild(char *key, uint64_t key_size) {
 
   auto meta = record_metadata[left];
   uint64_t meta_payload = 0;
-  GetRecord(meta, meta_payload);
+  char *unused_key;
+  GetRecord(meta, &unused_key, &meta_payload);
   return reinterpret_cast<BaseNode *>(meta_payload);
 }
 
