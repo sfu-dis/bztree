@@ -180,9 +180,9 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  BaseNode *GetChild(char *key, uint64_t key_size, RecordMetadata *out_meta = nullptr);
+  BaseNode *GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta = nullptr);
   inline NodeHeader *GetHeader() { return &header; }
-  void Dump();
+  void Dump(bool dump_children = false);
 
  private:
   // Get the key (return value) and payload (8-byte)
@@ -318,10 +318,11 @@ class BzTree {
     , pmwcas_pool(pool) {
     root = LeafNode::New();
   }
-  ReturnCode Insert(char *key, uint64_t key_size, uint64_t payload);
+  void Dump();
+  ReturnCode Insert(const char *key, uint64_t key_size, uint64_t payload);
 
  private:
-  LeafNode *TraverseToLeaf(Stack &stack, char *key, uint64_t key_size);
+  LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);
 
  private:
   ParameterSet parameters;

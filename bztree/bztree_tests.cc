@@ -202,7 +202,7 @@ class BzTreeTest: public ::testing::Test {
       pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
     new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
 
-    bztree::BzTree::ParameterSet param(3072);
+    bztree::BzTree::ParameterSet param(256);
     tree = new bztree::BzTree(param, pool);
   }
 
@@ -212,6 +212,13 @@ class BzTreeTest: public ::testing::Test {
 };
 
 TEST_F(BzTreeTest, Insert) {
+  for (uint32_t i = 100; i < 150; ++i) {
+    std::string key = std::to_string(i);
+    auto rc = tree->Insert(key.c_str(), key.length(), 127);
+    ASSERT_TRUE(rc.IsOk());
+  tree->Dump();
+  }
+  tree->Dump();
 }
 
 int main(int argc, char **argv) {

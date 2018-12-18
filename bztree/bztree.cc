@@ -181,7 +181,7 @@ void LeafNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
 }
 
-void InternalNode::Dump() {
+void InternalNode::Dump(bool dump_children) {
   BaseNode::Dump();
   std::cout << " Child pointers and separator keys:" << std::endl;
   assert(header.status.GetRecordCount() == 0);
@@ -197,6 +197,18 @@ void InternalNode::Dump() {
     std::cout << std::hex << "0x" << right_child_addr << std::dec;
   }
   std::cout << std::endl;
+
+  if (dump_children) {
+    for (uint32_t i = 0; i < header.sorted_count; ++i) {
+      uint64_t node_addr = *GetPayloadPtr(record_metadata[i]);
+      BaseNode *node = reinterpret_cast<BaseNode *>(node_addr);
+      if (node->IsLeaf()) {
+        (reinterpret_cast<LeafNode *>(node_addr))->Dump();
+      } else {
+        (reinterpret_cast<InternalNode *>(node_addr))->Dump(true);
+      }
+    }
+  }
 }
 
 ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
@@ -601,7 +613,7 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   }
 }
 
-BaseNode *InternalNode::GetChild(char *key, uint64_t key_size, RecordMetadata *out_meta) {
+BaseNode *InternalNode::GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta) {
   // Keys in internal nodes are always sorted
   int32_t left = 0, right = header.status.GetRecordCount() - 1;
   while (left <= right) {
@@ -689,7 +701,7 @@ ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   return ReturnCode::Ok();
 }
 
-LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {
+LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size) {
   BaseNode *node = root;
   InternalNode *parent = nullptr;
   assert(node);
@@ -702,10 +714,12 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, char *key, uint64_t key_size) {
   return reinterpret_cast<LeafNode *>(node);
 }
 
-ReturnCode BzTree::Insert(char *key, uint64_t key_size, uint64_t payload) {
+ReturnCode BzTree::Insert(const char *key, uint64_t key_size, uint64_t payload) {
   thread_local Stack stack;
   ReturnCode rc;
   do {
+    pmwcas_pool->GetEpoch()->Protect();
+
     stack.Clear();
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
 
@@ -718,6 +732,7 @@ ReturnCode BzTree::Insert(char *key, uint64_t key_size, uint64_t payload) {
       LeafNode *right = nullptr;
       InternalNode *parent = nullptr;
       if (!node->PrepareForSplit(epoch, stack, &parent, &left, &right, pmwcas_pool).IsOk()) {
+        pmwcas_pool->GetEpoch()->Unprotect();
         continue;
       }
 
@@ -731,6 +746,7 @@ ReturnCode BzTree::Insert(char *key, uint64_t key_size, uint64_t payload) {
         // There is a grant parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent
         if (top->node->Update(top->meta, old_parent, parent, pmwcas_pool).IsNodeFrozen()) {
+          pmwcas_pool->GetEpoch()->Unprotect();
           continue;
         }
       } else {
@@ -741,14 +757,27 @@ ReturnCode BzTree::Insert(char *key, uint64_t key_size, uint64_t payload) {
                      reinterpret_cast<uint64_t>(parent));
         // TODO(tzwang): specify memory policy for new leaf nodes
         if (!pd->MwCAS()) {
+          pmwcas_pool->GetEpoch()->Unprotect();
           continue;
         }
       }
     } else {
       rc = node->Insert(epoch, key, key_size, payload, pmwcas_pool);
     }
-  } while (!rc.IsKeyExists());
+    pmwcas_pool->GetEpoch()->Unprotect();
+  } while (!rc.IsOk() && !rc.IsKeyExists());
   return rc;
+}
+
+void BzTree::Dump() {
+  std::cout << "-----------------------------" << std::endl;
+  std::cout << "Dumping tree with root node: " << root << std::endl;
+  // Traverse each level and dump each node
+  if (root->IsLeaf()) {
+    (reinterpret_cast<LeafNode *>(root))->Dump();
+  } else {
+    (reinterpret_cast<InternalNode *>(root))->Dump(true /* inlcude children */);
+  }
 }
 
 }  // namespace bztree
