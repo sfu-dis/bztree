@@ -440,16 +440,18 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
   return nullptr;
 }
 
-bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::Delete(const char *key,
+                            uint32_t key_size,
+                            pmwcas::DescriptorPool *pmwcas_pool) {
   NodeHeader::StatusWord old_status = header.status;
   if (old_status.IsFrozen()) {
-    return false;
+    return ReturnCode::NodeFrozen();
   }
 
   retry:
   auto record_meta = SearchRecordMeta(key, key_size);
   if (record_meta == nullptr) {
-    return false;
+    return ReturnCode::NodeFrozen();
   } else if (record_meta->IsInserting()) {
     // FIXME(hao): not mentioned in the paper, should confirm later;
     goto retry;
@@ -470,7 +472,7 @@ bool LeafNode::Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool
   if (!pd->MwCAS()) {
     goto retry;
   }
-  return true;
+  return ReturnCode::Ok();
 }
 uint64_t LeafNode::Read(const char *key, uint32_t key_size) {
   auto meta = SearchRecordMeta(key, key_size, 0, (uint32_t) -1, false);

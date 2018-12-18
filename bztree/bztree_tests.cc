@@ -114,13 +114,13 @@ TEST_F(LeafNodeFixtures, Delete) {
   pool->GetEpoch()->Protect();
   InsertDummy();
   ASSERT_EQ(node->Read("40", 2), 40);
-  ASSERT_TRUE(node->Delete("40", 2, pool));
+  ASSERT_TRUE(node->Delete("40", 2, pool).IsOk());
   ASSERT_EQ(node->Read("40", 2), 0);
 
   auto new_node = node->Consolidate(pool);
 
   ASSERT_EQ(new_node->Read("200", 3), 200);
-  ASSERT_TRUE(new_node->Delete("200", 3, pool));
+  ASSERT_TRUE(new_node->Delete("200", 3, pool).IsOk());
   ASSERT_EQ(new_node->Read("200", 3), 0);
 
   pool->GetEpoch()->Unprotect();
