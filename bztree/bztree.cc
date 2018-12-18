@@ -644,15 +644,11 @@ BaseNode *InternalNode::GetChild(const char *key, uint64_t key_size, RecordMetad
 
   auto meta = record_metadata[left];
   uint64_t meta_payload = 0;
-<<<<<<< HEAD
   char *unused_key;
   GetRecord(meta, &unused_key, &meta_payload);
-=======
-  GetRecord(meta, meta_payload);
   if (out_meta) {
     *out_meta = meta;
   }
->>>>>>> 30a7702cd9a528ddd8338ec09396e3ab54f3eb2b
   return reinterpret_cast<BaseNode *>(meta_payload);
 }
 
@@ -734,7 +730,7 @@ ReturnCode BzTree::Insert(const char *key, uint64_t key_size, uint64_t payload) 
 
     // Check space to see if we need to split the node
     uint32_t new_size = sizeof(BaseNode::RecordMetadata) + node->GetSize() +
-      key_size / 8 * 8 + sizeof(payload);
+        key_size / 8 * 8 + sizeof(payload);
     if (new_size >= parameters.split_threshold) {
       // Should split
       LeafNode *left = nullptr;

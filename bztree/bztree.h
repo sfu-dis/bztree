@@ -198,19 +198,6 @@ class InternalNode : public BaseNode {
   BaseNode *GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta = nullptr);
   inline NodeHeader *GetHeader() { return &header; }
   void Dump(bool dump_children = false);
-
- private:
-  // Get the key (return value) and payload (8-byte)
-  inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
-    if (!meta.IsVisible()) {
-      return nullptr;
-    }
-    uint64_t offset = meta.GetOffset();
-    char *data = &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-    auto key_len = meta.GetPaddedKeyLength();
-    payload = *reinterpret_cast<uint64_t *>(&data[key_len]);
-    return key_len ? data : nullptr;
-  }
 };
 
 struct Stack {
