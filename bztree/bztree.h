@@ -189,21 +189,51 @@ class InternalNode : public BaseNode {
                uint64_t left_child_addr, uint64_t right_child_addr);
   ~InternalNode() = default;
 
-  BaseNode *GetChild(char *key, uint64_t key_size);
+  inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
+    char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
+    return reinterpret_cast<uint64_t *>(ptr);
+  }
+  ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
+                    pmwcas::DescriptorPool *pmwcas_pool);
+  BaseNode *GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta = nullptr);
   inline NodeHeader *GetHeader() { return &header; }
-  void Dump();
+  void Dump(bool dump_children = false);
+
+ private:
+  // Get the key (return value) and payload (8-byte)
+  inline char *GetRecord(RecordMetadata meta, uint64_t &payload) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+    uint64_t offset = meta.GetOffset();
+    char *data = &(reinterpret_cast<char *>(this))[meta.GetOffset()];
+    auto key_len = meta.GetPaddedKeyLength();
+    payload = *reinterpret_cast<uint64_t *>(&data[key_len]);
+    return key_len ? data : nullptr;
+  }
 };
 
 struct Stack {
+  struct Frame {
+    Frame() : node(nullptr), meta() {}
+    ~Frame() {}
+    InternalNode *node;
+    BaseNode::RecordMetadata meta;
+  };
   static const uint32_t kMaxFrames = 32;
-  InternalNode *frames[kMaxFrames];
+  Frame frames[kMaxFrames];
   uint32_t num_frames;
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
-  inline void Push(InternalNode *node) { frames[num_frames++] = node; }
-  inline InternalNode *Pop() { return num_frames == 0 ? nullptr : frames[--num_frames]; }
-  InternalNode *Top() { return num_frames == 0 ? nullptr : frames[num_frames - 1]; }
+  inline void Push(InternalNode *node, BaseNode::RecordMetadata meta) {
+    auto &frame = frames[num_frames++];
+    frame.node = node;
+    frame.meta = meta;
+  }
+  inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
+  inline void Clear() { num_frames = 0; }
+  inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
 };
 
 class LeafNode : public BaseNode {
@@ -241,8 +271,11 @@ class LeafNode : public BaseNode {
   ReturnCode Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
 
+  ReturnCode Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
+
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
+  uint64_t Read(const char *key, uint32_t key_size);
 
   inline char *GetKey(RecordMetadata meta) {
     if (!meta.IsVisible()) {
@@ -252,11 +285,8 @@ class LeafNode : public BaseNode {
     return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
   }
 
-  bool Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
-
-  uint64_t Read(const char *key, uint32_t key_size);
-
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);
+  inline uint16_t GetSize() { return header.size; }
   void Dump();
 
  private:
@@ -284,18 +314,24 @@ class BzTree {
     ~ParameterSet() {}
   };
 
-  explicit BzTree(ParameterSet param) : parameters(param), epoch(0), root(nullptr) {
+  BzTree(ParameterSet param, pmwcas::DescriptorPool *pool)
+    : parameters(param)
+    , epoch(0)
+    , root(nullptr)
+    , pmwcas_pool(pool) {
     root = LeafNode::New();
   }
-  bool Insert(char *key, uint64_t key_size);
+  void Dump();
+  ReturnCode Insert(const char *key, uint64_t key_size, uint64_t payload);
 
  private:
-  LeafNode *TraverseToLeaf(Stack &stack, char *key, uint64_t key_size);
+  LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);
 
  private:
   ParameterSet parameters;
   uint32_t epoch;
   BaseNode *root;
+  pmwcas::DescriptorPool *pmwcas_pool;
 };
 
 }  // namespace bztree

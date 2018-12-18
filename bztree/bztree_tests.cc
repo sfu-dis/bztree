@@ -56,6 +56,7 @@ class LeafNodeFixtures : public ::testing::Test {
     delete node;
   }
 };
+
 TEST_F(LeafNodeFixtures, Read) {
   pool->GetEpoch()->Protect();
   InsertDummy();
@@ -114,13 +115,13 @@ TEST_F(LeafNodeFixtures, Delete) {
   pool->GetEpoch()->Protect();
   InsertDummy();
   ASSERT_EQ(node->Read("40", 2), 40);
-  ASSERT_TRUE(node->Delete("40", 2, pool));
+  ASSERT_TRUE(node->Delete("40", 2, pool).IsOk());
   ASSERT_EQ(node->Read("40", 2), 0);
 
   auto new_node = node->Consolidate(pool);
 
   ASSERT_EQ(new_node->Read("200", 3), 200);
-  ASSERT_TRUE(new_node->Delete("200", 3, pool));
+  ASSERT_TRUE(new_node->Delete("200", 3, pool).IsOk());
   ASSERT_EQ(new_node->Read("200", 3), 0);
 
   pool->GetEpoch()->Unprotect();
@@ -185,6 +186,39 @@ TEST_F(LeafNodeFixtures, Upsert) {
   ASSERT_EQ(node->Read("211", 3), 211);
 
   pool->GetEpoch()->Unprotect();
+}
+
+class BzTreeTest: public ::testing::Test {
+ protected:
+  pmwcas::DescriptorPool *pool;
+  bztree::BzTree *tree;
+
+  void SetUp() override {
+    pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
+                        pmwcas::TlsAllocator::Destroy,
+                        pmwcas::LinuxEnvironment::Create,
+                        pmwcas::LinuxEnvironment::Destroy);
+    pool = reinterpret_cast<pmwcas::DescriptorPool *>(
+      pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
+    new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
+
+    bztree::BzTree::ParameterSet param(256);
+    tree = new bztree::BzTree(param, pool);
+  }
+
+  void TearDown() override {
+    delete tree;
+  }
+};
+
+TEST_F(BzTreeTest, Insert) {
+  for (uint32_t i = 100; i < 150; ++i) {
+    std::string key = std::to_string(i);
+    auto rc = tree->Insert(key.c_str(), key.length(), 127);
+    ASSERT_TRUE(rc.IsOk());
+  tree->Dump();
+  }
+  tree->Dump();
 }
 
 int main(int argc, char **argv) {
