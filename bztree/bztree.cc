@@ -456,7 +456,7 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
 }
 
 ReturnCode LeafNode::Delete(const char *key,
-                            uint32_t key_size,
+                            uint16_t key_size,
                             pmwcas::DescriptorPool *pmwcas_pool) {
   NodeHeader::StatusWord old_status = header.status;
   if (old_status.IsFrozen()) {
@@ -489,15 +489,17 @@ ReturnCode LeafNode::Delete(const char *key,
   }
   return ReturnCode::Ok();
 }
-uint64_t LeafNode::Read(const char *key, uint32_t key_size) {
+ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload) {
   auto meta = SearchRecordMeta(key, key_size, 0, (uint32_t) -1, false);
   if (meta == nullptr) {
-    return 0;
+    return ReturnCode::NotFound();
   }
-  uint64_t payload = 0;
   char *unused_key;
-  GetRecord(*meta, &unused_key, &payload);
-  return payload;
+  if (GetRecord(*meta, &unused_key, payload)) {
+    return ReturnCode::Ok();
+  } else {
+    return ReturnCode::NotFound();
+  }
 }
 
 bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
@@ -772,6 +774,13 @@ ReturnCode BzTree::Insert(const char *key, uint64_t key_size, uint64_t payload) 
     pmwcas_pool->GetEpoch()->Unprotect();
   } while (!rc.IsOk() && !rc.IsKeyExists());
   return rc;
+}
+
+ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
+//  thread_local Stack stack;
+//  ReturnCode rc;
+//  LeafNode *node = TraverseToLeaf(stack, key, key_size);
+//  *payload = node->Read(key, key_size);
 }
 
 void BzTree::Dump() {

@@ -258,11 +258,11 @@ class LeafNode : public BaseNode {
   ReturnCode Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
 
-  ReturnCode Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Delete(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
 
+  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
-  uint64_t Read(const char *key, uint32_t key_size);
 
   inline char *GetKey(RecordMetadata meta) {
     if (!meta.IsVisible()) {
@@ -302,14 +302,12 @@ class BzTree {
   };
 
   BzTree(ParameterSet param, pmwcas::DescriptorPool *pool)
-    : parameters(param)
-    , epoch(0)
-    , root(nullptr)
-    , pmwcas_pool(pool) {
+      : parameters(param), epoch(0), root(nullptr), pmwcas_pool(pool) {
     root = LeafNode::New();
   }
   void Dump();
   ReturnCode Insert(const char *key, uint64_t key_size, uint64_t payload);
+  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
 
  private:
   LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);
