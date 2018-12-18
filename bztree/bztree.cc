@@ -578,7 +578,27 @@ void LeafNode::CopyFrom(LeafNode *node,
   header.sorted_count = nrecords;
 }
 
-ReturnCode InternalNode::Update(RecordMetadata old_meta, InternalNode *new_child) {
+ReturnCode InternalNode::Update(RecordMetadata meta,
+                                InternalNode *old_child,
+                                InternalNode *new_child,
+                                pmwcas::DescriptorPool *pmwcas_pool) {
+  auto status = header.status;
+  if (status.IsFrozen()) {
+    return ReturnCode::NodeFrozen();
+  }
+
+  // Conduct a 2-word PMwCAS to swap in the new child pointer while ensuring the
+  // node isn't frozen by a concurrent thread
+  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
+  pd->AddEntry(&header.status.word, status.word, status.word);
+  pd->AddEntry(GetPayloadPtr(meta),
+               reinterpret_cast<uint64_t>(old_child),
+               reinterpret_cast<uint64_t>(new_child));
+  if (pd->MwCAS()) {
+    return ReturnCode::Ok();
+  } else {
+    return ReturnCode::PMWCASFailure();
+  }
 }
 
 BaseNode *InternalNode::GetChild(char *key, uint64_t key_size, RecordMetadata *out_meta) {
@@ -710,8 +730,9 @@ ReturnCode BzTree::Insert(char *key, uint64_t key_size, uint64_t payload) {
       if (top) {
         // There is a grant parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent
-        top->node->Update(top->meta, parent);
-        // TODO(tzwang): update method in internal node
+        if (top->node->Update(top->meta, old_parent, parent, pmwcas_pool).IsNodeFrozen()) {
+          continue;
+        }
       } else {
         // No grand parent, so the new parent node will become the new root
         pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();

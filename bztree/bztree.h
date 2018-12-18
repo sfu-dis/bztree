@@ -174,7 +174,12 @@ class InternalNode : public BaseNode {
                uint64_t left_child_addr, uint64_t right_child_addr);
   ~InternalNode() = default;
 
-  ReturnCode Update(RecordMetadata old_meta, InternalNode *new_child);
+  inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
+    char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
+    return reinterpret_cast<uint64_t *>(ptr);
+  }
+  ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
+                    pmwcas::DescriptorPool *pmwcas_pool);
   BaseNode *GetChild(char *key, uint64_t key_size, RecordMetadata *out_meta = nullptr);
   inline NodeHeader *GetHeader() { return &header; }
   void Dump();
