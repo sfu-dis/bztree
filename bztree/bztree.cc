@@ -810,8 +810,17 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
   thread_local Stack stack;
   LeafNode *node = TraverseToLeaf(stack, key, key_size);
   if (node == nullptr) {
-    Insert(key, key_size, payload);
+    return Insert(key, key_size, payload);
   }
+  uint64_t tmp_payload;
+  auto rc = node->Read(key, key_size, &tmp_payload);
+  if (rc.IsNotFound()) {
+    return Insert(key, key_size, payload);
+  }
+  if (tmp_payload == payload) {
+    return ReturnCode::Ok();
+  }
+  return Update(key, key_size, payload);
 }
 
 void BzTree::Dump() {
