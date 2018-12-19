@@ -710,7 +710,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
 
     // Check space to see if we need to split the node
-    auto new_free_space = node->GetFreeSpace() - RecordMetadata::PadKeyLength(key_size);
+    auto new_free_space = node->GetFreeSpace() - RecordMetadata::PadKeyLength(key_size) - sizeof(payload);
     if (new_free_space <= 0) {
       // Should split
       LeafNode *left = nullptr;
