@@ -150,10 +150,12 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   node->Dump();
 
   bztree::Stack stack;
-  bztree::InternalNode *parent = nullptr;
   bztree::LeafNode *left = nullptr;
   bztree::LeafNode *right = nullptr;
-  ASSERT_TRUE(node->PrepareForSplit(0, stack, &parent, &left, &right, pool).IsOk());
+  bztree::InternalNode *parent = node->PrepareForSplit(0, stack, 3000, pool, &left, &right);
+  ASSERT_NE(parent, nullptr);
+  ASSERT_NE(left, nullptr);
+  ASSERT_NE(right, nullptr);
 
   left->Dump();
   right->Dump();

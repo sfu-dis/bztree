@@ -191,6 +191,30 @@ class BaseNode {
   }
 };
 
+class InternalNode;
+struct Stack {
+  struct Frame {
+    Frame() : node(nullptr), meta() {}
+    ~Frame() {}
+    InternalNode *node;
+    BaseNode::RecordMetadata meta;
+  };
+  static const uint32_t kMaxFrames = 32;
+  Frame frames[kMaxFrames];
+  uint32_t num_frames;
+
+  Stack() : num_frames(0) {}
+  ~Stack() { num_frames = 0; }
+  inline void Push(InternalNode *node, BaseNode::RecordMetadata meta) {
+    auto &frame = frames[num_frames++];
+    frame.node = node;
+    frame.meta = meta;
+  }
+  inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
+  inline void Clear() { num_frames = 0; }
+  inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
+};
+
 // Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
  public:
@@ -205,6 +229,9 @@ class InternalNode : public BaseNode {
                uint64_t left_child_addr, uint64_t right_child_addr);
   ~InternalNode() = default;
 
+  InternalNode *PrepareForSplit(uint32_t split_threshold, char *key, uint32_t key_size,
+                                uint64_t left_child_addr, uint64_t right_child_addr);
+
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
     char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
     return reinterpret_cast<uint64_t *>(ptr);
@@ -213,29 +240,6 @@ class InternalNode : public BaseNode {
                     pmwcas::DescriptorPool *pmwcas_pool);
   BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
   void Dump(bool dump_children = false);
-};
-
-struct Stack {
-  struct Frame {
-    Frame() : node(nullptr), meta() {}
-    ~Frame() {}
-    InternalNode *node;
-    RecordMetadata meta;
-  };
-  static const uint32_t kMaxFrames = 32;
-  Frame frames[kMaxFrames];
-  uint32_t num_frames;
-
-  Stack() : num_frames(0) {}
-  ~Stack() { num_frames = 0; }
-  inline void Push(InternalNode *node, RecordMetadata meta) {
-    auto &frame = frames[num_frames++];
-    frame.node = node;
-    frame.meta = meta;
-  }
-  inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
-  inline void Clear() { num_frames = 0; }
-  inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
 };
 
 class LeafNode : public BaseNode {
@@ -249,9 +253,9 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  ReturnCode PrepareForSplit(uint32_t epoch, Stack &stack,
-                             InternalNode **parent, LeafNode **left, LeafNode **right,
-                             pmwcas::DescriptorPool *pmwcas_pool);
+  InternalNode *PrepareForSplit(uint32_t epoch, Stack &stack, uint32_t split_threshold,
+                                pmwcas::DescriptorPool *pmwcas_pool,
+                                LeafNode **left, LeafNode **right);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split

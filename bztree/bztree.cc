@@ -12,6 +12,8 @@
 
 namespace bztree {
 
+// Create an internal node with a new key and associated child pointers inserted
+// based on an existing internal node
 InternalNode *InternalNode::New(InternalNode *src_node,
                                 char *key,
                                 uint32_t key_size,
@@ -27,6 +29,25 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   return node;
 }
 
+InternalNode *InternalNode::PrepareForSplit(uint32_t split_threshold,
+                                            char *key,
+                                            uint32_t key_size,
+                                            uint64_t left_child_addr,
+                                            uint64_t right_child_addr) {
+  uint32_t data_size = header.size + key_size +
+      sizeof(right_child_addr) + sizeof(RecordMetadata);
+  uint32_t new_node_size = sizeof(InternalNode) + data_size;
+  if (new_node_size > split_threshold) {
+    // After adding a key and pointers the new node would be too large. This
+    // means we are effectively 'moving up' the tree the do split
+    // So now we split the node and generate two new internal nodes
+  } else {
+    return InternalNode::New(this, key, key_size, left_child_addr, right_child_addr);
+  }
+}
+
+
+// Create an internal node with a single separator key and two pointers
 InternalNode *InternalNode::New(char *key,
                                 uint32_t key_size,
                                 uint64_t left_child_addr,
@@ -633,15 +654,14 @@ BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetad
   return reinterpret_cast<BaseNode *>(meta_payload);
 }
 
-ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
-                                     InternalNode **parent,
-                                     LeafNode **left,
-                                     LeafNode **right,
-                                     pmwcas::DescriptorPool *pmwcas_pool) {
+InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
+                                        uint32_t split_threshold,
+                                        pmwcas::DescriptorPool *pmwcas_pool,
+                                        LeafNode **left, LeafNode **right) {
   LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
   // Set the frozen bit on the node to be split
   if (!Freeze(pmwcas_pool)) {
-    return ReturnCode::NodeFrozen();
+    return nullptr;
   }
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
@@ -678,13 +698,12 @@ ReturnCode LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   GetRecord(separator_meta, &key, &unused);
   if (old_parent) {
     // Has a parent node
-    *parent = InternalNode::New(
-        old_parent, key, separator_meta.GetKeyLength(), (uint64_t) *left, (uint64_t) *right);
+    return old_parent->PrepareForSplit(split_threshold, key, separator_meta.GetKeyLength(),
+      reinterpret_cast<uint64_t>(*left), reinterpret_cast<uint64_t>(*right));
   } else {
-    *parent = InternalNode::New(
-        key, separator_meta.GetKeyLength(), (uint64_t) *left, (uint64_t) *right);
+    return InternalNode::New(key, separator_meta.GetKeyLength(),
+      reinterpret_cast<uint64_t>(*left), reinterpret_cast<uint64_t>(*right));
   }
-  return ReturnCode::Ok();
 }
 
 LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size) {
@@ -715,8 +734,9 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // Should split
       LeafNode *left = nullptr;
       LeafNode *right = nullptr;
-      InternalNode *parent = nullptr;
-      if (!node->PrepareForSplit(epoch, stack, &parent, &left, &right, pmwcas_pool).IsOk()) {
+      InternalNode *parent =
+        node->PrepareForSplit(epoch, stack, parameters.split_threshold, pmwcas_pool, &left, &right);
+      if (!parent) {
         continue;
       }
 
