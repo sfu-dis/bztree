@@ -203,6 +203,7 @@ class BzTreeTest : public ::testing::Test {
   pmwcas::DescriptorPool *pool;
   bztree::BzTree *tree;
 
+//  Insert 0:10:100
   void InsertDummy() {
     for (uint64_t i = 0; i < 100; i += 10) {
       std::string key = std::to_string(i);
@@ -259,6 +260,19 @@ TEST_F(BzTreeTest, Update) {
 
   ASSERT_TRUE(tree->Update("20", 2, 21).IsOk());
   tree->Read("20", 2, &payload);
+  ASSERT_EQ(payload, 21);
+}
+
+TEST_F(BzTreeTest, Upsert) {
+  uint64_t payload;
+  InsertDummy();
+  ASSERT_TRUE(tree->Read("abc", 3, &payload).IsNotFound());
+  ASSERT_TRUE(tree->Upsert("abc", 3, 42).IsOk());
+  ASSERT_TRUE(tree->Read("abc", 3, &payload).IsOk());
+  ASSERT_EQ(payload, 42);
+
+  ASSERT_TRUE(tree->Upsert("20", 2, 21).IsOk());
+  ASSERT_TRUE(tree->Read("20", 2, &payload).IsOk());
   ASSERT_EQ(payload, 21);
 }
 

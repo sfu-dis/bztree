@@ -158,6 +158,7 @@ class BaseNode {
  public:
   explicit BaseNode(bool leaf) : is_leaf(leaf) {}
   inline bool IsLeaf() { return is_leaf; }
+  inline NodeHeader *GetHeader() { return &header; }
 
   // Get the key and payload (8-byte)
   // Return status
@@ -196,7 +197,6 @@ class InternalNode : public BaseNode {
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
   BaseNode *GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta = nullptr);
-  inline NodeHeader *GetHeader() { return &header; }
   void Dump(bool dump_children = false);
 };
 
@@ -295,9 +295,10 @@ class BzTree {
  public:
   struct ParameterSet {
     uint32_t split_threshold;
-    ParameterSet() : split_threshold(3072) {}
-    explicit ParameterSet(uint32_t split_threshold)
-        : split_threshold(split_threshold) {}
+    uint32_t merge_threshold;
+    ParameterSet() : split_threshold(3072), merge_threshold(1024) {}
+    ParameterSet(uint32_t split_threshold, uint32_t merge_threshold)
+        : split_threshold(split_threshold), merge_threshold(merge_threshold) {}
     ~ParameterSet() {}
   };
 
@@ -310,6 +311,7 @@ class BzTree {
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
+  ReturnCode Delete(const char *key, uint16_t key_size);
 
  private:
   LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);

@@ -816,11 +816,33 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
   auto rc = node->Read(key, key_size, &tmp_payload);
   if (rc.IsNotFound()) {
     return Insert(key, key_size, payload);
+  } else if (rc.IsOk()) {
+    if (tmp_payload == payload) {
+      return ReturnCode::Ok();
+    }
+    return Update(key, key_size, payload);
   }
-  if (tmp_payload == payload) {
-    return ReturnCode::Ok();
-  }
-  return Update(key, key_size, payload);
+}
+
+ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
+  thread_local Stack stack;
+  ReturnCode rc;
+  do {
+    pmwcas_pool->GetEpoch()->Protect();
+    stack.Clear();
+    LeafNode *node = TraverseToLeaf(stack, key, key_size);
+    if (node == nullptr) {
+      pmwcas_pool->GetEpoch()->Unprotect();
+      return ReturnCode::NotFound();
+    }
+    node->Delete(key, key_size, pmwcas_pool);
+    auto new_block_size = node->GetHeader()->status.GetBlockSize();
+    if (new_block_size <= parameters.merge_threshold) {
+      // FIXME(hao): merge the nodes
+    }
+    pmwcas_pool->GetEpoch()->Unprotect();
+  } while (rc.IsNodeFrozen());
+
 }
 
 void BzTree::Dump() {
