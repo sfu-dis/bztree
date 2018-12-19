@@ -308,6 +308,8 @@ class BzTree {
   void Dump();
   ReturnCode Insert(const char *key, uint64_t key_size, uint64_t payload);
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
+  ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
+  ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
 
  private:
   LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);

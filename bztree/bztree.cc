@@ -777,10 +777,41 @@ ReturnCode BzTree::Insert(const char *key, uint64_t key_size, uint64_t payload) 
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
-//  thread_local Stack stack;
-//  ReturnCode rc;
-//  LeafNode *node = TraverseToLeaf(stack, key, key_size);
-//  *payload = node->Read(key, key_size);
+  thread_local Stack stack;
+  LeafNode *node = TraverseToLeaf(stack, key, key_size);
+  if (node == nullptr) {
+    return ReturnCode::NotFound();
+  }
+  uint64_t tmp_payload;
+  auto rc = node->Read(key, key_size, &tmp_payload);
+  if (rc.IsOk()) {
+    *payload = tmp_payload;
+  }
+  return rc;
+}
+
+ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) {
+  thread_local Stack stack;
+  ReturnCode rc;
+  do {
+    pmwcas_pool->GetEpoch()->Protect();
+    stack.Clear();
+    LeafNode *node = TraverseToLeaf(stack, key, key_size);
+    if (node == nullptr) {
+      return ReturnCode::NotFound();
+    }
+    rc = node->Update(epoch, key, key_size, payload, pmwcas_pool);
+    pmwcas_pool->GetEpoch()->Unprotect();
+  } while (rc.IsPMWCASFailure());
+  return rc;
+}
+
+ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
+  thread_local Stack stack;
+  LeafNode *node = TraverseToLeaf(stack, key, key_size);
+  if (node == nullptr) {
+    Insert(key, key_size, payload);
+  }
 }
 
 void BzTree::Dump() {

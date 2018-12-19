@@ -203,6 +203,13 @@ class BzTreeTest : public ::testing::Test {
   pmwcas::DescriptorPool *pool;
   bztree::BzTree *tree;
 
+  void InsertDummy() {
+    for (uint64_t i = 0; i < 100; i += 10) {
+      std::string key = std::to_string(i);
+      tree->Insert(key.c_str(), key.length(), i);
+    }
+  }
+
   void SetUp() override {
     pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
                         pmwcas::TlsAllocator::Destroy,
@@ -229,6 +236,30 @@ TEST_F(BzTreeTest, Insert) {
 //    tree->Dump();
   }
   tree->Dump();
+}
+
+TEST_F(BzTreeTest, Read) {
+  uint64_t payload;
+
+  ASSERT_TRUE(tree->Read("10", 2, &payload).IsNotFound());
+
+  InsertDummy();
+  ASSERT_TRUE(tree->Read("10", 2, &payload).IsOk());
+  ASSERT_EQ(payload, 10);
+
+  ASSERT_TRUE(tree->Read("11", 2, &payload).IsNotFound());
+}
+
+TEST_F(BzTreeTest, Update) {
+  uint64_t payload;
+  InsertDummy();
+
+  tree->Read("20", 2, &payload);
+  ASSERT_EQ(payload, 20);
+
+  ASSERT_TRUE(tree->Update("20", 2, 21).IsOk());
+  tree->Read("20", 2, &payload);
+  ASSERT_EQ(payload, 21);
 }
 
 int main(int argc, char **argv) {
