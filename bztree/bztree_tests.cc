@@ -220,7 +220,7 @@ class BzTreeTest : public ::testing::Test {
         pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
     new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
 
-    bztree::BzTree::ParameterSet param(256);
+    bztree::BzTree::ParameterSet param(256, 128);
     tree = new bztree::BzTree(param, pool);
   }
 
@@ -274,6 +274,14 @@ TEST_F(BzTreeTest, Upsert) {
   ASSERT_TRUE(tree->Upsert("20", 2, 21).IsOk());
   ASSERT_TRUE(tree->Read("20", 2, &payload).IsOk());
   ASSERT_EQ(payload, 21);
+}
+
+TEST_F(BzTreeTest, Delete) {
+  InsertDummy();
+  uint64_t payload;
+  ASSERT_TRUE(tree->Delete("11", 2).IsNotFound());
+  ASSERT_TRUE(tree->Delete("10", 2).IsOk());
+  ASSERT_TRUE(tree->Read("10", 2, &payload).IsNotFound());
 }
 
 int main(int argc, char **argv) {

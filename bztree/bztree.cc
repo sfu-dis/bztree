@@ -466,7 +466,7 @@ ReturnCode LeafNode::Delete(const char *key,
   retry:
   auto record_meta = SearchRecordMeta(key, key_size);
   if (record_meta == nullptr) {
-    return ReturnCode::NodeFrozen();
+    return ReturnCode::NotFound();
   } else if (record_meta->IsInserting()) {
     // FIXME(hao): not mentioned in the paper, should confirm later;
     goto retry;
@@ -721,7 +721,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
   return reinterpret_cast<LeafNode *>(node);
 }
 
-ReturnCode BzTree::Insert(const char *key, uint64_t key_size, uint64_t payload) {
+ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   ReturnCode rc;
   do {
@@ -733,6 +733,8 @@ ReturnCode BzTree::Insert(const char *key, uint64_t key_size, uint64_t payload) 
     // Check space to see if we need to split the node
     uint32_t new_size = sizeof(BaseNode::RecordMetadata) + node->GetSize() +
         key_size / 8 * 8 + sizeof(payload);
+//    auto new_size =
+//        node->GetHeader()->status.GetBlockSize() + BaseNode::RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
     if (new_size >= parameters.split_threshold) {
       // Should split
       LeafNode *left = nullptr;
@@ -835,14 +837,14 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       pmwcas_pool->GetEpoch()->Unprotect();
       return ReturnCode::NotFound();
     }
-    node->Delete(key, key_size, pmwcas_pool);
+    rc = node->Delete(key, key_size, pmwcas_pool);
     auto new_block_size = node->GetHeader()->status.GetBlockSize();
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes
     }
     pmwcas_pool->GetEpoch()->Unprotect();
   } while (rc.IsNodeFrozen());
-
+  return rc;
 }
 
 void BzTree::Dump() {
