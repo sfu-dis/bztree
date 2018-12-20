@@ -733,8 +733,6 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     // Check space to see if we need to split the node
     uint32_t new_size = sizeof(BaseNode::RecordMetadata) + node->GetSize() +
         key_size / 8 * 8 + sizeof(payload);
-//    auto new_size =
-//        node->GetHeader()->status.GetBlockSize() + BaseNode::RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
     if (new_size >= parameters.split_threshold) {
       // Should split
       LeafNode *left = nullptr;
