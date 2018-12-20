@@ -84,72 +84,72 @@ struct NodeHeader {
   uint32_t sorted_count;
   NodeHeader() : size(0), sorted_count(0) {}
 };
+struct RecordMetadata {
+  uint64_t meta;
+  RecordMetadata() : meta(0) {}
+
+  static const uint64_t kControlMask = 0x7;                         // Bits 1-3
+  static const uint64_t kVisibleMask = 0x8;                         // Bit 4
+  static const uint64_t kOffsetMask = uint64_t{0xFFFFFFF} << 4;     // Bits 5-32
+  static const uint64_t kKeyLengthMask = uint64_t{0xFFFF} << 32;    // Bits 33-48
+  static const uint64_t kTotalLengthMask = uint64_t{0xFFFF} << 48;  // Bits 49-64
+
+  static const uint64_t kVisibleFlag = 0x8;
+
+  inline bool IsVacant() { return meta == 0; }
+  inline uint16_t GetKeyLength() { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
+
+//    Get the padded key length from accurate key length
+  inline uint16_t GetPaddedKeyLength() {
+    auto key_length = GetKeyLength();
+    return PadKeyLength(key_length);
+  }
+
+  static inline constexpr uint16_t PadKeyLength(uint16_t key_length) {
+    return (key_length + sizeof(uint64_t) - 1) / sizeof(uint64_t) * sizeof(uint64_t);
+  }
+  inline uint16_t GetTotalLength() { return (uint16_t) ((meta & kTotalLengthMask) >> 48); }
+  inline uint32_t GetOffset() { return (uint32_t) ((meta & kOffsetMask) >> 4); }
+  inline bool OffsetIsEpoch() {
+    return (GetOffset() >> 27) == 1;
+  }
+  inline void SetOffset(uint32_t offset) {
+    meta = (meta & (~kOffsetMask)) | (offset << 4);
+  }
+  inline bool IsVisible() { return meta & kVisibleMask; }
+  inline void SetVisible(bool visible) {
+    if (visible) {
+      meta = meta | kVisibleMask;
+    } else {
+      meta = meta & (~kVisibleMask);
+    }
+  }
+  inline void PrepareForInsert(uint64_t epoch) {
+    assert(IsVacant());
+    // This only has to do with the offset field, which serves the dual
+    // purpose of (1) storing a true record offset, and (2) storing the
+    // allocation epoch used for recovery. The high-order bit of the offset
+    // field indicates whether it is (1) or (2).
+    //
+    // Flip the high order bit of [offset] to indicate this field contains an
+    // allocation epoch and fill in the rest offset bits with global epoch
+    meta = (((uint64_t{1} << 27) | epoch) << 31);
+  }
+  inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
+    // Set the actual offset, the visible bit, key/total length
+    meta = (offset << 4) | kVisibleFlag | (key_len << 32) | (total_len << 48);
+    assert(GetKeyLength() == key_len);
+  }
+  inline bool IsInserting() {
+    // record is not visible
+    // and record allocation epoch equal to global index epoch
+    // FIXME(hao): Check the Global index epoch
+    return !IsVisible() && OffsetIsEpoch();
+  }
+};
 
 class BaseNode {
  public:
-  struct RecordMetadata {
-    uint64_t meta;
-    RecordMetadata() : meta(0) {}
-
-    static const uint64_t kControlMask = 0x7;                         // Bits 1-3
-    static const uint64_t kVisibleMask = 0x8;                         // Bit 4
-    static const uint64_t kOffsetMask = uint64_t{0xFFFFFFF} << 4;     // Bits 5-32
-    static const uint64_t kKeyLengthMask = uint64_t{0xFFFF} << 32;    // Bits 33-48
-    static const uint64_t kTotalLengthMask = uint64_t{0xFFFF} << 48;  // Bits 49-64
-
-    static const uint64_t kVisibleFlag = 0x8;
-
-    inline bool IsVacant() { return meta == 0; }
-    inline uint16_t GetKeyLength() { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
-
-//    Get the padded key length from accurate key length
-    inline uint16_t GetPaddedKeyLength() {
-      auto key_length = GetKeyLength();
-      return PadKeyLength(key_length);
-    }
-
-    static inline constexpr uint16_t PadKeyLength(uint16_t key_length) {
-      return (key_length + sizeof(uint64_t) - 1) / sizeof(uint64_t) * sizeof(uint64_t);
-    }
-    inline uint16_t GetTotalLength() { return (uint16_t) ((meta & kTotalLengthMask) >> 48); }
-    inline uint32_t GetOffset() { return (uint32_t) ((meta & kOffsetMask) >> 4); }
-    inline bool OffsetIsEpoch() {
-      return (GetOffset() >> 27) == 1;
-    }
-    inline void SetOffset(uint32_t offset) {
-      meta = (meta & (~kOffsetMask)) | (offset << 4);
-    }
-    inline bool IsVisible() { return meta & kVisibleMask; }
-    inline void SetVisible(bool visible) {
-      if (visible) {
-        meta = meta | kVisibleMask;
-      } else {
-        meta = meta & (~kVisibleMask);
-      }
-    }
-    inline void PrepareForInsert(uint64_t epoch) {
-      assert(IsVacant());
-      // This only has to do with the offset field, which serves the dual
-      // purpose of (1) storing a true record offset, and (2) storing the
-      // allocation epoch used for recovery. The high-order bit of the offset
-      // field indicates whether it is (1) or (2).
-      //
-      // Flip the high order bit of [offset] to indicate this field contains an
-      // allocation epoch and fill in the rest offset bits with global epoch
-      meta = (((uint64_t{1} << 27) | epoch) << 31);
-    }
-    inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
-      // Set the actual offset, the visible bit, key/total length
-      meta = (offset << 4) | kVisibleFlag | (key_len << 32) | (total_len << 48);
-      assert(GetKeyLength() == key_len);
-    }
-    inline bool IsInserting() {
-      // record is not visible
-      // and record allocation epoch equal to global index epoch
-      // FIXME(hao): Check the Global index epoch
-      return !IsVisible() && OffsetIsEpoch();
-    }
-  };
   static const uint32_t kNodeSize = 4096;
 
  protected:
@@ -225,7 +225,7 @@ struct Stack {
     Frame() : node(nullptr), meta() {}
     ~Frame() {}
     InternalNode *node;
-    BaseNode::RecordMetadata meta;
+    RecordMetadata meta;
   };
   static const uint32_t kMaxFrames = 32;
   Frame frames[kMaxFrames];
@@ -233,7 +233,7 @@ struct Stack {
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
-  inline void Push(InternalNode *node, BaseNode::RecordMetadata meta) {
+  inline void Push(InternalNode *node, RecordMetadata meta) {
     auto &frame = frames[num_frames++];
     frame.node = node;
     frame.meta = meta;

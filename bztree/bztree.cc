@@ -154,10 +154,10 @@ void BaseNode::Dump() {
 
   std::cout << " Record Metadata Array:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
-    BaseNode::RecordMetadata meta = record_metadata[i];
+    RecordMetadata meta = record_metadata[i];
     std::cout << " - record " << i << ": meta = 0x" << std::hex << meta.meta << std::endl;
     std::cout << std::hex;
-    std::cout << "   (control = 0x" << (meta.meta & BaseNode::RecordMetadata::kControlMask)
+    std::cout << "   (control = 0x" << (meta.meta & RecordMetadata::kControlMask)
               << std::dec
               << ", visible = " << meta.IsVisible()
               << ", offset = " << meta.GetOffset()
@@ -171,7 +171,7 @@ void LeafNode::Dump() {
   BaseNode::Dump();
   std::cout << " Key-Payload Pairs:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
-    BaseNode::RecordMetadata meta = record_metadata[i];
+    RecordMetadata meta = record_metadata[i];
     uint64_t payload = 0;
     char *key;
     GetRecord(meta, &key, &payload);
@@ -384,7 +384,7 @@ ReturnCode LeafNode::Update(uint32_t epoch,
   return ReturnCode::Ok();
 }
 
-BaseNode::RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
+RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
                                                      uint32_t key_size,
                                                      uint32_t start_pos,
                                                      uint32_t end_pos,
@@ -581,7 +581,7 @@ void LeafNode::CopyFrom(LeafNode *node,
     memcpy(ptr, key, total_len);
 
     // Setup new metadata
-    BaseNode::RecordMetadata new_meta = meta;
+    RecordMetadata new_meta = meta;
     new_meta.FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
     record_metadata[nrecords] = new_meta;
     ++nrecords;
@@ -686,7 +686,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
   InternalNode *parent = nullptr;
   assert(node);
   while (!node->IsLeaf()) {
-    BaseNode::RecordMetadata meta;
+    RecordMetadata meta;
     parent = reinterpret_cast<InternalNode *>(node);
     node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta);
     stack.Push(parent, meta);
@@ -704,7 +704,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
 
     // Check space to see if we need to split the node
-    auto new_free_space = node->GetFreeSpace() - BaseNode::RecordMetadata::PadKeyLength(key_size);
+    auto new_free_space = node->GetFreeSpace() - RecordMetadata::PadKeyLength(key_size);
     if (new_free_space <= 0) {
       // Should split
       LeafNode *left = nullptr;
