@@ -384,7 +384,7 @@ ReturnCode LeafNode::Update(uint32_t epoch,
   return ReturnCode::Ok();
 }
 
-LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
+BaseNode::RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
                                                      uint32_t key_size,
                                                      uint32_t start_pos,
                                                      uint32_t end_pos,
@@ -618,39 +618,15 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   }
 }
 
-BaseNode *InternalNode::GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta) {
+BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta) {
   // Keys in internal nodes are always sorted
-  int32_t left = 0, right = header.status.GetRecordCount() - 1;
-  while (left <= right) {
-    uint32_t mid = (left + right) / 2;
-    auto meta = record_metadata[mid];
-    uint64_t meta_key_size = meta.GetKeyLength();
-    uint64_t meta_payload = 0;
-    char *meta_key;
-    GetRecord(meta, &meta_key, &meta_payload);
-    int cmp = memcmp(key, meta_key, std::min<uint64_t>(meta_key_size, key_size));
-    if (cmp == 0) {
-      if (meta_key_size == key_size) {
-        // Key exists
-        left = mid;
-        break;
-      }
-    }
-    if (cmp > 0) {
-      right = mid - 1;
-    } else {
-      left = mid + 1;
-    }
+  auto *new_meta = SearchRecordMeta(key, key_size, 0, header.status.GetRecordCount());
+  if (out_meta) {
+    *out_meta = *new_meta;
   }
-  LOG_IF(FATAL, left < 0);
-
-  auto meta = record_metadata[left];
   uint64_t meta_payload = 0;
   char *unused_key;
-  GetRecord(meta, &unused_key, &meta_payload);
-  if (out_meta) {
-    *out_meta = meta;
-  }
+  GetRecord(*new_meta, &unused_key, &meta_payload);
   return reinterpret_cast<BaseNode *>(meta_payload);
 }
 

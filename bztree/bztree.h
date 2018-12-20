@@ -159,7 +159,14 @@ class BaseNode {
   explicit BaseNode(bool leaf) : is_leaf(leaf) {}
   inline bool IsLeaf() { return is_leaf; }
   inline NodeHeader *GetHeader() { return &header; }
-
+//  Return a meta (not deleted) or nullptr (deleted or not exist)
+//  It's user's responsibility to check IsInserting()
+//  if check_concurrency is false, it will ignore all inserting record
+  RecordMetadata *SearchRecordMeta(const char *key,
+                                   uint32_t key_size,
+                                   uint32_t start_pos = 0,
+                                   uint32_t end_pos = (uint32_t) -1,
+                                   bool check_concurrency = true);
   // Get the key and payload (8-byte)
   // Return status
   inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
@@ -196,7 +203,7 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  BaseNode *GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta = nullptr);
+  BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
   void Dump(bool dump_children = false);
 };
 
@@ -281,14 +288,6 @@ class LeafNode : public BaseNode {
   Uniqueness CheckUnique(const char *key, uint32_t key_size);
   Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
 
-//  Return a meta (not deleted) or nullptr (deleted or not exist)
-//  It's user's responsibility to check IsInserting()
-//  if check_concurrency is false, it will ignore all inserting record
-  LeafNode::RecordMetadata *SearchRecordMeta(const char *key,
-                                             uint32_t key_size,
-                                             uint32_t start_pos = 0,
-                                             uint32_t end_pos = (uint32_t) -1,
-                                             bool check_concurrency = true);
 };
 
 class BzTree {
