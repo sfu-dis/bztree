@@ -47,12 +47,10 @@ InternalNode::InternalNode(const char *key,
     : BaseNode(false) {
   // Initialize a new internal node with one key only
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
-  header.size = sizeof(InternalNode) + padded_key_size +
-      sizeof(left_child_addr) + sizeof(right_child_addr) + sizeof(RecordMetadata) * 2;
   header.sorted_count = 2;  // Includes the null dummy key
 
   // Fill in left child address, with an empty key
-  uint64_t offset = header.size - sizeof(left_child_addr);
+  uint64_t offset = kNodeSize - sizeof(left_child_addr);
   record_metadata[0].FinalizeForInsert(offset, 0, sizeof(left_child_addr));
   char *ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, &left_child_addr, sizeof(left_child_addr));
@@ -74,9 +72,8 @@ InternalNode::InternalNode(InternalNode *src_node,
     : BaseNode(false) {
   LOG_IF(FATAL, !src_node);
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
-  header.size = src_node->GetHeader()->size + padded_key_size + sizeof(left_child_addr);
 
-  uint64_t offset = sizeof(*this) + header.size;
+  uint64_t offset = kNodeSize;
   bool inserted_new = false;
   for (uint32_t i = 0; i < src_node->GetHeader()->sorted_count; ++i) {
     RecordMetadata meta = src_node->GetMetadata(i);
@@ -141,7 +138,7 @@ void BaseNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
   std::cout << " Dumping node: 0x" << this << std::endl;
   std::cout << " Header:\n"
-            << " - size: " << header.size << std::endl
+            << " - free space: " << GetFreeSpace() << std::endl
             << " - status: 0x" << std::hex << header.status.word << std::endl
             << "   (control = 0x" << (header.status.word & NodeHeader::StatusWord::kControlMask)
             << std::dec
@@ -385,10 +382,10 @@ ReturnCode LeafNode::Update(uint32_t epoch,
 }
 
 RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
-                                                     uint32_t key_size,
-                                                     uint32_t start_pos,
-                                                     uint32_t end_pos,
-                                                     bool check_concurrency) {
+                                           uint32_t key_size,
+                                           uint32_t start_pos,
+                                           uint32_t end_pos,
+                                           bool check_concurrency) {
   if (start_pos < header.sorted_count) {
     // Binary search on sorted field
     int64_t first = start_pos;

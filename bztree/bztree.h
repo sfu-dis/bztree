@@ -79,10 +79,10 @@ struct NodeHeader {
     }
   };
 
-  uint32_t size;
+  static const uint32_t size = 4096;
   StatusWord status;
   uint32_t sorted_count;
-  NodeHeader() : size(0), sorted_count(0) {}
+  NodeHeader() : sorted_count(0) {}
 };
 struct RecordMetadata {
   uint64_t meta;
@@ -248,7 +248,6 @@ class LeafNode : public BaseNode {
   static LeafNode *New();
 
   LeafNode() : BaseNode(true) {
-    header.size = kNodeSize;
   }
   ~LeafNode() = default;
 
@@ -290,7 +289,6 @@ class LeafNode : public BaseNode {
   }
 
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);
-  inline uint16_t GetSize() { return header.size; }
   void Dump();
 
  private:
