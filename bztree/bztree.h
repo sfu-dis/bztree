@@ -61,11 +61,18 @@ struct NodeHeader {
     inline void Freeze() { word |= kFrozenFlag; }
     inline bool IsFrozen() { return word & kFrozenMask; }
     inline uint16_t GetRecordCount() { return (uint16_t) ((word & kRecordCountMask) >> 4); }
+    inline void SetRecordCount(uint16_t count) {
+      word = (word & (~kRecordCountMask)) | (uint64_t{count} << 4);
+    }
     inline uint32_t GetBlockSize() { return (uint32_t) ((word & kBlockSizeMask) >> 20); }
+    inline void SetBlockSize(uint32_t size) {
+      word = (word & (~kBlockSizeMask)) | (uint64_t{size} << 20);
+    }
     inline uint32_t GetDeleteSize() { return (uint32_t) ((word & kDeleteSizeMask) >> 42); }
     inline void SetDeleteSize(uint32_t size) {
       word = (word & (~kDeleteSizeMask)) | (uint64_t{size} << 42);
     }
+
     inline void PrepareForInsert(uint32_t size) {
       // Increment [record count] by one and [block size] by payload size
       word += ((uint64_t{1} << 4) + (uint64_t{size} << 20));
@@ -143,6 +150,7 @@ class BaseNode {
       return !IsVisible() && OffsetIsEpoch();
     }
   };
+  static const uint32_t kNodeSize = 4096;
 
  protected:
   bool is_leaf;
@@ -180,6 +188,11 @@ class BaseNode {
     *payload = *(reinterpret_cast<uint64_t *> (reinterpret_cast<char *>(this) +
         meta.GetOffset() + meta.GetPaddedKeyLength()));
     return true;
+  }
+
+  inline uint32_t GetFreeSpace() {
+    return BaseNode::kNodeSize - sizeof(BaseNode) - header.status.GetBlockSize()
+        - header.status.GetRecordCount() * sizeof(RecordMetadata);
   }
 };
 
@@ -232,13 +245,10 @@ struct Stack {
 
 class LeafNode : public BaseNode {
  public:
-  static const uint32_t kNodeSize = 4096;
-
- public:
   static LeafNode *New();
 
   LeafNode() : BaseNode(true) {
-    header.size = sizeof(LeafNode);
+    header.size = kNodeSize;
   }
   ~LeafNode() = default;
 
@@ -287,7 +297,6 @@ class LeafNode : public BaseNode {
   enum Uniqueness { IsUnique, Duplicate, ReCheck };
   Uniqueness CheckUnique(const char *key, uint32_t key_size);
   Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
-
 };
 
 class BzTree {

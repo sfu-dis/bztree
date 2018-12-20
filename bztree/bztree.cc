@@ -565,11 +565,9 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visi
 void LeafNode::CopyFrom(LeafNode *node,
                         std::vector<RecordMetadata>::iterator begin_it,
                         std::vector<RecordMetadata>::iterator end_it) {
-  LOG_IF(FATAL, header.size > sizeof(LeafNode)) << "Cannot initialize a non-empty node";
-
   // meta_vec is assumed to be in sorted order, insert records one by one
   uint64_t offset = kNodeSize;
-  uint32_t nrecords = 0;
+  uint16_t nrecords = 0;
   for (auto it = begin_it; it != end_it; ++it) {
     auto meta = *it;
     uint64_t payload = 0;
@@ -587,11 +585,10 @@ void LeafNode::CopyFrom(LeafNode *node,
     new_meta.FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
     record_metadata[nrecords] = new_meta;
     ++nrecords;
-    header.size += total_len;
   }
-
   // Finalize header stats
-  header.status.word = ((header.size << 20) | (nrecords << 4));
+  header.status.SetBlockSize((uint32_t) (kNodeSize - offset));
+  header.status.SetRecordCount(nrecords);
   header.sorted_count = nrecords;
 }
 
@@ -707,9 +704,8 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
 
     // Check space to see if we need to split the node
-    uint32_t new_size = sizeof(BaseNode::RecordMetadata) + node->GetSize() +
-        key_size / 8 * 8 + sizeof(payload);
-    if (new_size >= parameters.split_threshold) {
+    auto new_free_space = node->GetFreeSpace() - BaseNode::RecordMetadata::PadKeyLength(key_size);
+    if (new_free_space <= 0) {
       // Should split
       LeafNode *left = nullptr;
       LeafNode *right = nullptr;
