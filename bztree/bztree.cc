@@ -47,12 +47,10 @@ InternalNode::InternalNode(const char *key,
     : BaseNode(false) {
   // Initialize a new internal node with one key only
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
-  header.size = sizeof(InternalNode) + padded_key_size +
-      sizeof(left_child_addr) + sizeof(right_child_addr) + sizeof(RecordMetadata) * 2;
   header.sorted_count = 2;  // Includes the null dummy key
 
   // Fill in left child address, with an empty key
-  uint64_t offset = header.size - sizeof(left_child_addr);
+  uint64_t offset = kNodeSize - sizeof(left_child_addr);
   record_metadata[0].FinalizeForInsert(offset, 0, sizeof(left_child_addr));
   char *ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, &left_child_addr, sizeof(left_child_addr));
@@ -74,9 +72,8 @@ InternalNode::InternalNode(InternalNode *src_node,
     : BaseNode(false) {
   LOG_IF(FATAL, !src_node);
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
-  header.size = src_node->GetHeader()->size + padded_key_size + sizeof(left_child_addr);
 
-  uint64_t offset = sizeof(*this) + header.size;
+  uint64_t offset = kNodeSize;
   bool inserted_new = false;
   for (uint32_t i = 0; i < src_node->GetHeader()->sorted_count; ++i) {
     RecordMetadata meta = src_node->GetMetadata(i);
@@ -141,7 +138,7 @@ void BaseNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
   std::cout << " Dumping node: 0x" << this << std::endl;
   std::cout << " Header:\n"
-            << " - size: " << header.size << std::endl
+            << " - free space: " << GetFreeSpace() << std::endl
             << " - status: 0x" << std::hex << header.status.word << std::endl
             << "   (control = 0x" << (header.status.word & NodeHeader::StatusWord::kControlMask)
             << std::dec
@@ -154,10 +151,10 @@ void BaseNode::Dump() {
 
   std::cout << " Record Metadata Array:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
-    BaseNode::RecordMetadata meta = record_metadata[i];
+    RecordMetadata meta = record_metadata[i];
     std::cout << " - record " << i << ": meta = 0x" << std::hex << meta.meta << std::endl;
     std::cout << std::hex;
-    std::cout << "   (control = 0x" << (meta.meta & BaseNode::RecordMetadata::kControlMask)
+    std::cout << "   (control = 0x" << (meta.meta & RecordMetadata::kControlMask)
               << std::dec
               << ", visible = " << meta.IsVisible()
               << ", offset = " << meta.GetOffset()
@@ -171,7 +168,7 @@ void LeafNode::Dump() {
   BaseNode::Dump();
   std::cout << " Key-Payload Pairs:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
-    BaseNode::RecordMetadata meta = record_metadata[i];
+    RecordMetadata meta = record_metadata[i];
     uint64_t payload = 0;
     char *key;
     GetRecord(meta, &key, &payload);
@@ -384,11 +381,11 @@ ReturnCode LeafNode::Update(uint32_t epoch,
   return ReturnCode::Ok();
 }
 
-BaseNode::RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
-                                                     uint32_t key_size,
-                                                     uint32_t start_pos,
-                                                     uint32_t end_pos,
-                                                     bool check_concurrency) {
+RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
+                                           uint32_t key_size,
+                                           uint32_t start_pos,
+                                           uint32_t end_pos,
+                                           bool check_concurrency) {
   if (start_pos < header.sorted_count) {
     // Binary search on sorted field
     int64_t first = start_pos;
@@ -565,11 +562,9 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visi
 void LeafNode::CopyFrom(LeafNode *node,
                         std::vector<RecordMetadata>::iterator begin_it,
                         std::vector<RecordMetadata>::iterator end_it) {
-  LOG_IF(FATAL, header.size > sizeof(LeafNode)) << "Cannot initialize a non-empty node";
-
   // meta_vec is assumed to be in sorted order, insert records one by one
   uint64_t offset = kNodeSize;
-  uint32_t nrecords = 0;
+  uint16_t nrecords = 0;
   for (auto it = begin_it; it != end_it; ++it) {
     auto meta = *it;
     uint64_t payload = 0;
@@ -583,15 +578,14 @@ void LeafNode::CopyFrom(LeafNode *node,
     memcpy(ptr, key, total_len);
 
     // Setup new metadata
-    BaseNode::RecordMetadata new_meta = meta;
+    RecordMetadata new_meta = meta;
     new_meta.FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
     record_metadata[nrecords] = new_meta;
     ++nrecords;
-    header.size += total_len;
   }
-
   // Finalize header stats
-  header.status.word = ((header.size << 20) | (nrecords << 4));
+  header.status.SetBlockSize((uint32_t) (kNodeSize - offset));
+  header.status.SetRecordCount(nrecords);
   header.sorted_count = nrecords;
 }
 
@@ -689,7 +683,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
   InternalNode *parent = nullptr;
   assert(node);
   while (!node->IsLeaf()) {
-    BaseNode::RecordMetadata meta;
+    RecordMetadata meta;
     parent = reinterpret_cast<InternalNode *>(node);
     node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta);
     stack.Push(parent, meta);
@@ -700,22 +694,19 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
 ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   ReturnCode rc;
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
-    pmwcas_pool->GetEpoch()->Protect();
-
     stack.Clear();
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
 
     // Check space to see if we need to split the node
-    uint32_t new_size = sizeof(BaseNode::RecordMetadata) + node->GetSize() +
-        key_size / 8 * 8 + sizeof(payload);
-    if (new_size >= parameters.split_threshold) {
+    auto new_free_space = node->GetFreeSpace() - RecordMetadata::PadKeyLength(key_size);
+    if (new_free_space <= 0) {
       // Should split
       LeafNode *left = nullptr;
       LeafNode *right = nullptr;
       InternalNode *parent = nullptr;
       if (!node->PrepareForSplit(epoch, stack, &parent, &left, &right, pmwcas_pool).IsOk()) {
-        pmwcas_pool->GetEpoch()->Unprotect();
         continue;
       }
 
@@ -729,7 +720,6 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         // There is a grant parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent
         if (top->node->Update(top->meta, old_parent, parent, pmwcas_pool).IsNodeFrozen()) {
-          pmwcas_pool->GetEpoch()->Unprotect();
           continue;
         }
       } else {
@@ -740,20 +730,19 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
                      reinterpret_cast<uint64_t>(parent));
         // TODO(tzwang): specify memory policy for new leaf nodes
         if (!pd->MwCAS()) {
-          pmwcas_pool->GetEpoch()->Unprotect();
           continue;
         }
       }
     } else {
       rc = node->Insert(epoch, key, key_size, payload, pmwcas_pool);
     }
-    pmwcas_pool->GetEpoch()->Unprotect();
   } while (!rc.IsOk() && !rc.IsKeyExists());
   return rc;
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
   thread_local Stack stack;
+  stack.Clear();
   LeafNode *node = TraverseToLeaf(stack, key, key_size);
   if (node == nullptr) {
     return ReturnCode::NotFound();
@@ -769,21 +758,21 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
 ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   ReturnCode rc;
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
-    pmwcas_pool->GetEpoch()->Protect();
     stack.Clear();
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
     rc = node->Update(epoch, key, key_size, payload, pmwcas_pool);
-    pmwcas_pool->GetEpoch()->Unprotect();
   } while (rc.IsPMWCASFailure());
   return rc;
 }
 
 ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
+  stack.Clear();
   LeafNode *node = TraverseToLeaf(stack, key, key_size);
   if (node == nullptr) {
     return Insert(key, key_size, payload);
@@ -803,12 +792,11 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
 ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   thread_local Stack stack;
   ReturnCode rc;
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
-    pmwcas_pool->GetEpoch()->Protect();
     stack.Clear();
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
     if (node == nullptr) {
-      pmwcas_pool->GetEpoch()->Unprotect();
       return ReturnCode::NotFound();
     }
     rc = node->Delete(key, key_size, pmwcas_pool);
@@ -816,7 +804,6 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes
     }
-    pmwcas_pool->GetEpoch()->Unprotect();
   } while (rc.IsNodeFrozen());
   return rc;
 }
