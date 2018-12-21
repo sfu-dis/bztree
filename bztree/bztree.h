@@ -158,7 +158,15 @@ class BaseNode {
  public:
   explicit BaseNode(bool leaf) : is_leaf(leaf) {}
   inline bool IsLeaf() { return is_leaf; }
-
+  inline NodeHeader *GetHeader() { return &header; }
+//  Return a meta (not deleted) or nullptr (deleted or not exist)
+//  It's user's responsibility to check IsInserting()
+//  if check_concurrency is false, it will ignore all inserting record
+  RecordMetadata *SearchRecordMeta(const char *key,
+                                   uint32_t key_size,
+                                   uint32_t start_pos = 0,
+                                   uint32_t end_pos = (uint32_t) -1,
+                                   bool check_concurrency = true);
   // Get the key and payload (8-byte)
   // Return status
   inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
@@ -195,8 +203,7 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  BaseNode *GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta = nullptr);
-  inline NodeHeader *GetHeader() { return &header; }
+  BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
   void Dump(bool dump_children = false);
 };
 
@@ -258,11 +265,11 @@ class LeafNode : public BaseNode {
   ReturnCode Upsert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
 
-  ReturnCode Delete(const char *key, uint32_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Delete(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
 
+  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
-  uint64_t Read(const char *key, uint32_t key_size);
 
   inline char *GetKey(RecordMetadata meta) {
     if (!meta.IsVisible()) {
@@ -281,35 +288,29 @@ class LeafNode : public BaseNode {
   Uniqueness CheckUnique(const char *key, uint32_t key_size);
   Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
 
-//  Return a meta (not deleted) or nullptr (deleted or not exist)
-//  It's user's responsibility to check IsInserting()
-//  if check_concurrency is false, it will ignore all inserting record
-  LeafNode::RecordMetadata *SearchRecordMeta(const char *key,
-                                             uint32_t key_size,
-                                             uint32_t start_pos = 0,
-                                             uint32_t end_pos = (uint32_t) -1,
-                                             bool check_concurrency = true);
 };
 
 class BzTree {
  public:
   struct ParameterSet {
     uint32_t split_threshold;
-    ParameterSet() : split_threshold(3072) {}
-    explicit ParameterSet(uint32_t split_threshold)
-        : split_threshold(split_threshold) {}
+    uint32_t merge_threshold;
+    ParameterSet() : split_threshold(3072), merge_threshold(1024) {}
+    ParameterSet(uint32_t split_threshold, uint32_t merge_threshold)
+        : split_threshold(split_threshold), merge_threshold(merge_threshold) {}
     ~ParameterSet() {}
   };
 
   BzTree(ParameterSet param, pmwcas::DescriptorPool *pool)
-    : parameters(param)
-    , epoch(0)
-    , root(nullptr)
-    , pmwcas_pool(pool) {
+      : parameters(param), epoch(0), root(nullptr), pmwcas_pool(pool) {
     root = LeafNode::New();
   }
   void Dump();
-  ReturnCode Insert(const char *key, uint64_t key_size, uint64_t payload);
+  ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload);
+  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
+  ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
+  ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
+  ReturnCode Delete(const char *key, uint16_t key_size);
 
  private:
   LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);

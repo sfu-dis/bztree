@@ -384,7 +384,7 @@ ReturnCode LeafNode::Update(uint32_t epoch,
   return ReturnCode::Ok();
 }
 
-LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
+BaseNode::RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
                                                      uint32_t key_size,
                                                      uint32_t start_pos,
                                                      uint32_t end_pos,
@@ -456,7 +456,7 @@ LeafNode::RecordMetadata *LeafNode::SearchRecordMeta(const char *key,
 }
 
 ReturnCode LeafNode::Delete(const char *key,
-                            uint32_t key_size,
+                            uint16_t key_size,
                             pmwcas::DescriptorPool *pmwcas_pool) {
   NodeHeader::StatusWord old_status = header.status;
   if (old_status.IsFrozen()) {
@@ -466,7 +466,7 @@ ReturnCode LeafNode::Delete(const char *key,
   retry:
   auto record_meta = SearchRecordMeta(key, key_size);
   if (record_meta == nullptr) {
-    return ReturnCode::NodeFrozen();
+    return ReturnCode::NotFound();
   } else if (record_meta->IsInserting()) {
     // FIXME(hao): not mentioned in the paper, should confirm later;
     goto retry;
@@ -489,15 +489,17 @@ ReturnCode LeafNode::Delete(const char *key,
   }
   return ReturnCode::Ok();
 }
-uint64_t LeafNode::Read(const char *key, uint32_t key_size) {
+ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload) {
   auto meta = SearchRecordMeta(key, key_size, 0, (uint32_t) -1, false);
   if (meta == nullptr) {
-    return 0;
+    return ReturnCode::NotFound();
   }
-  uint64_t payload = 0;
   char *unused_key;
-  GetRecord(*meta, &unused_key, &payload);
-  return payload;
+  if (GetRecord(*meta, &unused_key, payload)) {
+    return ReturnCode::Ok();
+  } else {
+    return ReturnCode::NotFound();
+  }
 }
 
 bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
@@ -616,39 +618,15 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   }
 }
 
-BaseNode *InternalNode::GetChild(const char *key, uint64_t key_size, RecordMetadata *out_meta) {
+BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta) {
   // Keys in internal nodes are always sorted
-  int32_t left = 0, right = header.status.GetRecordCount() - 1;
-  while (left <= right) {
-    uint32_t mid = (left + right) / 2;
-    auto meta = record_metadata[mid];
-    uint64_t meta_key_size = meta.GetKeyLength();
-    uint64_t meta_payload = 0;
-    char *meta_key;
-    GetRecord(meta, &meta_key, &meta_payload);
-    int cmp = memcmp(key, meta_key, std::min<uint64_t>(meta_key_size, key_size));
-    if (cmp == 0) {
-      if (meta_key_size == key_size) {
-        // Key exists
-        left = mid;
-        break;
-      }
-    }
-    if (cmp > 0) {
-      right = mid - 1;
-    } else {
-      left = mid + 1;
-    }
+  auto *new_meta = SearchRecordMeta(key, key_size, 0, header.status.GetRecordCount());
+  if (out_meta) {
+    *out_meta = *new_meta;
   }
-  LOG_IF(FATAL, left < 0);
-
-  auto meta = record_metadata[left];
   uint64_t meta_payload = 0;
   char *unused_key;
-  GetRecord(meta, &unused_key, &meta_payload);
-  if (out_meta) {
-    *out_meta = meta;
-  }
+  GetRecord(*new_meta, &unused_key, &meta_payload);
   return reinterpret_cast<BaseNode *>(meta_payload);
 }
 
@@ -719,7 +697,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
   return reinterpret_cast<LeafNode *>(node);
 }
 
-ReturnCode BzTree::Insert(const char *key, uint64_t key_size, uint64_t payload) {
+ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   ReturnCode rc;
   do {
@@ -771,6 +749,75 @@ ReturnCode BzTree::Insert(const char *key, uint64_t key_size, uint64_t payload) 
     }
     pmwcas_pool->GetEpoch()->Unprotect();
   } while (!rc.IsOk() && !rc.IsKeyExists());
+  return rc;
+}
+
+ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
+  thread_local Stack stack;
+  LeafNode *node = TraverseToLeaf(stack, key, key_size);
+  if (node == nullptr) {
+    return ReturnCode::NotFound();
+  }
+  uint64_t tmp_payload;
+  auto rc = node->Read(key, key_size, &tmp_payload);
+  if (rc.IsOk()) {
+    *payload = tmp_payload;
+  }
+  return rc;
+}
+
+ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) {
+  thread_local Stack stack;
+  ReturnCode rc;
+  do {
+    pmwcas_pool->GetEpoch()->Protect();
+    stack.Clear();
+    LeafNode *node = TraverseToLeaf(stack, key, key_size);
+    if (node == nullptr) {
+      return ReturnCode::NotFound();
+    }
+    rc = node->Update(epoch, key, key_size, payload, pmwcas_pool);
+    pmwcas_pool->GetEpoch()->Unprotect();
+  } while (rc.IsPMWCASFailure());
+  return rc;
+}
+
+ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
+  thread_local Stack stack;
+  LeafNode *node = TraverseToLeaf(stack, key, key_size);
+  if (node == nullptr) {
+    return Insert(key, key_size, payload);
+  }
+  uint64_t tmp_payload;
+  auto rc = node->Read(key, key_size, &tmp_payload);
+  if (rc.IsNotFound()) {
+    return Insert(key, key_size, payload);
+  } else if (rc.IsOk()) {
+    if (tmp_payload == payload) {
+      return ReturnCode::Ok();
+    }
+    return Update(key, key_size, payload);
+  }
+}
+
+ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
+  thread_local Stack stack;
+  ReturnCode rc;
+  do {
+    pmwcas_pool->GetEpoch()->Protect();
+    stack.Clear();
+    LeafNode *node = TraverseToLeaf(stack, key, key_size);
+    if (node == nullptr) {
+      pmwcas_pool->GetEpoch()->Unprotect();
+      return ReturnCode::NotFound();
+    }
+    rc = node->Delete(key, key_size, pmwcas_pool);
+    auto new_block_size = node->GetHeader()->status.GetBlockSize();
+    if (new_block_size <= parameters.merge_threshold) {
+      // FIXME(hao): merge the nodes
+    }
+    pmwcas_pool->GetEpoch()->Unprotect();
+  } while (rc.IsNodeFrozen());
   return rc;
 }
 
