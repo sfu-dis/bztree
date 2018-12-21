@@ -694,9 +694,8 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
 ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   ReturnCode rc;
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
-    pmwcas_pool->GetEpoch()->Protect();
-
     stack.Clear();
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
 
@@ -708,7 +707,6 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       LeafNode *right = nullptr;
       InternalNode *parent = nullptr;
       if (!node->PrepareForSplit(epoch, stack, &parent, &left, &right, pmwcas_pool).IsOk()) {
-        pmwcas_pool->GetEpoch()->Unprotect();
         continue;
       }
 
@@ -722,7 +720,6 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         // There is a grant parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent
         if (top->node->Update(top->meta, old_parent, parent, pmwcas_pool).IsNodeFrozen()) {
-          pmwcas_pool->GetEpoch()->Unprotect();
           continue;
         }
       } else {
@@ -733,20 +730,19 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
                      reinterpret_cast<uint64_t>(parent));
         // TODO(tzwang): specify memory policy for new leaf nodes
         if (!pd->MwCAS()) {
-          pmwcas_pool->GetEpoch()->Unprotect();
           continue;
         }
       }
     } else {
       rc = node->Insert(epoch, key, key_size, payload, pmwcas_pool);
     }
-    pmwcas_pool->GetEpoch()->Unprotect();
   } while (!rc.IsOk() && !rc.IsKeyExists());
   return rc;
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
   thread_local Stack stack;
+  stack.Clear();
   LeafNode *node = TraverseToLeaf(stack, key, key_size);
   if (node == nullptr) {
     return ReturnCode::NotFound();
@@ -762,21 +758,21 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
 ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   ReturnCode rc;
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
-    pmwcas_pool->GetEpoch()->Protect();
     stack.Clear();
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
     rc = node->Update(epoch, key, key_size, payload, pmwcas_pool);
-    pmwcas_pool->GetEpoch()->Unprotect();
   } while (rc.IsPMWCASFailure());
   return rc;
 }
 
 ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
+  stack.Clear();
   LeafNode *node = TraverseToLeaf(stack, key, key_size);
   if (node == nullptr) {
     return Insert(key, key_size, payload);
@@ -796,12 +792,11 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
 ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   thread_local Stack stack;
   ReturnCode rc;
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
-    pmwcas_pool->GetEpoch()->Protect();
     stack.Clear();
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
     if (node == nullptr) {
-      pmwcas_pool->GetEpoch()->Unprotect();
       return ReturnCode::NotFound();
     }
     rc = node->Delete(key, key_size, pmwcas_pool);
@@ -809,7 +804,6 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes
     }
-    pmwcas_pool->GetEpoch()->Unprotect();
   } while (rc.IsNodeFrozen());
   return rc;
 }
