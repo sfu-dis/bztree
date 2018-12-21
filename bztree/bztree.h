@@ -150,15 +150,18 @@ struct RecordMetadata {
 };
 
 class BaseNode {
+ public:
+  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
+  static const uint32_t kNodeSize = 4096;
+
  protected:
   bool is_leaf;
   NodeHeader header;
-  RecordMetadata record_metadata[0];
 
+  RecordMetadata record_metadata[0];
  protected:
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
-  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
   void Dump();
 
  public:
@@ -186,6 +189,24 @@ class BaseNode {
     if (!meta.IsVisible()) {
       return false;
     }
+    uint64_t offset = meta.GetOffset();
+    char *tmp_key;
+//    zero key length dummy record
+    tmp_key = meta.GetPaddedKeyLength() == 0 ?
+              nullptr : reinterpret_cast<char *>(this) + meta.GetOffset();
+    if (key != nullptr) {
+      *key = tmp_key;
+    }
+
+    uint64_t tmp_payload;
+    tmp_payload = *(reinterpret_cast<uint64_t *> (reinterpret_cast<char *>(this) +
+        meta.GetOffset() + meta.GetPaddedKeyLength()));
+    if (payload != nullptr) {
+      *payload = tmp_payload;
+    }
+    return true;
+  }
+};
 
     assert(meta.GetTotalLength());
 
@@ -197,6 +218,16 @@ class BaseNode {
     *payload = *reinterpret_cast<uint64_t *>(*data + padded_key_len);
     return true;
   }
+  ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
+                    pmwcas::DescriptorPool *pmwcas_pool);
+  BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
+
+//  return searched metadata
+  RecordMetadata *GetChildren(const char *key,
+                              uint16_t key_size,
+                              BaseNode **left_child,
+                              BaseNode **right_child = nullptr);
+  void Dump(bool dump_children = false);
 };
 
 class InternalNode;

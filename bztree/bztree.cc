@@ -825,11 +825,53 @@ BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetad
   assert(child_node);
   return child_node;
 }
+RecordMetadata *InternalNode::GetChildren(const char *key,
+                                          uint16_t key_size,
+                                          bztree::BaseNode **left_child,
+                                          bztree::BaseNode **right_child) {
+  int32_t left = 0, right = header.status.GetRecordCount() - 1;
+  while (left <= right) {
+    int32_t mid = (left + right) / 2;
+    auto meta = record_metadata[mid];
+    uint64_t meta_key_size = meta.GetKeyLength();
+    uint64_t meta_payload = 0;
+    char *meta_key;
+    GetRecord(meta, &meta_key, &meta_payload);
+    int cmp = memcmp(key, meta_key, std::min<uint64_t>(meta_key_size, key_size));
+    if (cmp == 0) {
+      if (meta_key_size == key_size) {
+        // Key exists
+        left = mid;
+        break;
+      }
+    }
+    if (cmp > 0) {
+      right = mid - 1;
+    } else {
+      left = mid + 1;
+    }
+  }
+  LOG_IF(FATAL, left < 0);
+
+  auto left_meta = record_metadata[left];
+  auto right_meta = record_metadata[left + 1];
+  uint64_t left_payload, right_payload;
+  GetRecord(left_meta, nullptr, &left_payload);
+  GetRecord(right_meta, nullptr, &right_payload);
+  if (left_child != nullptr) {
+    *left_child = reinterpret_cast<BaseNode *> (left_payload);
+  }
+  if (right_child != nullptr) {
+    *right_child = reinterpret_cast<BaseNode *> (right_payload);
+  }
+  return &record_metadata[left];
+}
 
 InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
                                         uint32_t split_threshold,
                                         pmwcas::DescriptorPool *pmwcas_pool,
                                         LeafNode **left, LeafNode **right) {
+
   LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
   // Set the frozen bit on the node to be split
   if (!Freeze(pmwcas_pool)) {
@@ -892,7 +934,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
   while (!node->IsLeaf()) {
     RecordMetadata meta;
     parent = reinterpret_cast<InternalNode *>(node);
-    node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta);
+    meta = *(reinterpret_cast<InternalNode *>(node))->GetChildren(key, key_size, &node);
     assert(node);
     stack.Push(parent, meta);
   }
@@ -1054,6 +1096,12 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     auto new_block_size = node->GetHeader()->status.GetBlockSize();
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes
+      auto parent = stack.Top();
+      auto first_meta = node->GetMetadata(0);
+      char *meta_key;
+      uint64_t payload;
+      node->GetRecord(first_meta, &meta_key, &payload);
+      BaseNode *left_child, *right_child;
     }
   } while (rc.IsNodeFrozen());
   return rc;
