@@ -197,7 +197,7 @@ struct Stack {
     Frame() : node(nullptr), meta() {}
     ~Frame() {}
     InternalNode *node;
-    BaseNode::RecordMetadata meta;
+    RecordMetadata meta;
   };
   static const uint32_t kMaxFrames = 32;
   Frame frames[kMaxFrames];
@@ -205,7 +205,7 @@ struct Stack {
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
-  inline void Push(InternalNode *node, BaseNode::RecordMetadata meta) {
+  inline void Push(InternalNode *node, RecordMetadata meta) {
     auto &frame = frames[num_frames++];
     frame.node = node;
     frame.meta = meta;
@@ -218,18 +218,26 @@ struct Stack {
 // Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
  public:
-  static InternalNode *New(InternalNode *src_node, char *key, uint32_t key_size,
+  static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
                            uint64_t left_child_addr, uint64_t right_child_addr);
-  static InternalNode *New(char *key, uint32_t key_size,
+  static InternalNode *New(const char *key, uint32_t key_size,
                            uint64_t left_child_addr, uint64_t right_child_addr);
+  InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
+                    const char *key, uint32_t key_size,
+                    uint64_t left_child_addr, uint64_t right_child_addr);
 
   InternalNode(uint32_t node_size, const char *key, const uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode(uint32_t node_size, InternalNode *src_node, const char *key, const uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
+  InternalNode(uint32_t node_size, InternalNode *src_node,
+               uint32_t begin_meta_idx, uint32_t nr_records,
+               const char *key, uint32_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr);
   ~InternalNode() = default;
 
-  InternalNode *PrepareForSplit(uint32_t split_threshold, char *key, uint32_t key_size,
+  InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
+                                const char *key, uint32_t key_size,
                                 uint64_t left_child_addr, uint64_t right_child_addr);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
@@ -240,6 +248,15 @@ class InternalNode : public BaseNode {
                     pmwcas::DescriptorPool *pmwcas_pool);
   BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
   void Dump(bool dump_children = false);
+
+ private:
+  inline char *GetKey(RecordMetadata meta) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+    uint64_t offset = meta.GetOffset();
+    return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
+  }
 };
 
 class LeafNode : public BaseNode {
