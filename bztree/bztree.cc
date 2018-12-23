@@ -25,7 +25,8 @@ InternalNode *InternalNode::New(InternalNode *src_node,
                         sizeof(right_child_addr) + sizeof(RecordMetadata);
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
-  new (node) InternalNode(alloc_size, src_node, key, key_size, left_child_addr, right_child_addr);
+  new (node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
+                          key, key_size, left_child_addr, right_child_addr);
   return node;
 }
 
@@ -72,17 +73,6 @@ InternalNode *InternalNode::New(InternalNode *src_node,
                           key, key_size, left_child_addr, right_child_addr);
 }
 
-InternalNode::InternalNode(uint32_t node_size, InternalNode *src_node,
-                           uint32_t begin_meta_idx, uint32_t nr_records,
-                           const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr)
-    : BaseNode(false, node_size) {
-  for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
-    RecordMetadata meta = src_node->GetMetadata(i);
-    // WIP(tzwang): add details
-  }
-}
-
 InternalNode::InternalNode(uint32_t node_size,
                            const char *key,
                            const uint16_t key_size,
@@ -112,6 +102,8 @@ InternalNode::InternalNode(uint32_t node_size,
 
 InternalNode::InternalNode(uint32_t node_size,
                            InternalNode *src_node,
+                           uint32_t begin_meta_idx,
+                           uint32_t nr_records,
                            const char *key,
                            const uint16_t key_size,
                            uint64_t left_child_addr,
@@ -122,7 +114,8 @@ InternalNode::InternalNode(uint32_t node_size,
 
   uint64_t offset = node_size;
   bool inserted_new = false;
-  for (uint32_t i = 0; i < src_node->GetHeader()->sorted_count; ++i) {
+  uint32_t insert_idx = 0;
+  for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
     RecordMetadata meta = src_node->GetMetadata(i);
     uint64_t m_payload = 0;
     char *m_key;
@@ -133,7 +126,7 @@ InternalNode::InternalNode(uint32_t node_size,
       // New key already inserted, so directly insert the key from src node
       offset -= (meta.GetTotalLength());
       meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
-      record_metadata[i + 1] = meta;
+      record_metadata[insert_idx] = meta;
 
       memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
     } else {
@@ -142,34 +135,37 @@ InternalNode::InternalNode(uint32_t node_size,
       LOG_IF(FATAL, cmp == 0 && key_size == m_key_size);
 
       if (cmp > 0) {
+        assert(insert_idx >= 1);
         RecordMetadata new_meta;
         offset -= (padded_key_size + sizeof(left_child_addr));
         new_meta.FinalizeForInsert(offset, key_size, sizeof(left_child_addr));
-        record_metadata[i] = new_meta;
+        record_metadata[insert_idx] = new_meta;
 
         // Modify the previous key's payload to left_child_addr
-        auto &prev_meta = record_metadata[i - 1];
+        auto &prev_meta = record_metadata[insert_idx - 1];
         memcpy(reinterpret_cast<char *>(this) +
                    prev_meta.GetOffset() + prev_meta.GetPaddedKeyLength(),
                &left_child_addr, sizeof(left_child_addr));
 
         // Now the new separtor key itself
+        ++insert_idx;
         memcpy(reinterpret_cast<char *>(this) + offset, key, new_meta.GetTotalLength());
         memcpy(reinterpret_cast<char *>(this) + offset + padded_key_size,
                &right_child_addr, sizeof(right_child_addr));
 
         offset -= (meta.GetTotalLength());
         meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
-        record_metadata[i + 1] = meta;
+        record_metadata[insert_idx] = meta;
         memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
 
         inserted_new = true;
       } else {
-        record_metadata[i] = meta;
+        record_metadata[insert_idx] = meta;
         offset -= (meta.GetTotalLength());
         memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
       }
     }
+    ++insert_idx;
   }
 }
 
