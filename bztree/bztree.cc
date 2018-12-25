@@ -21,12 +21,16 @@ InternalNode *InternalNode::New(InternalNode *src_node,
                                 uint64_t right_child_addr) {
   // FIXME(tzwang): use a better allocator
   uint32_t alloc_size = src_node->GetHeader()->size +
-                        RecordMetadata::PadKeyLength(key_size) +
-                        sizeof(right_child_addr) + sizeof(RecordMetadata);
+      RecordMetadata::PadKeyLength(key_size) +
+      sizeof(right_child_addr) + sizeof(RecordMetadata);
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
+<<<<<<< HEAD
   new (node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                           key, key_size, left_child_addr, right_child_addr);
+=======
+  new(node) InternalNode(alloc_size, src_node, key, key_size, left_child_addr, right_child_addr);
+>>>>>>> Moving to range scan
   return node;
 }
 
@@ -36,13 +40,13 @@ InternalNode *InternalNode::New(const char *key,
                                 uint64_t left_child_addr,
                                 uint64_t right_child_addr) {
   uint32_t alloc_size = sizeof(InternalNode) +
-                        RecordMetadata::PadKeyLength(key_size) +
-                        sizeof(left_child_addr) +
-                        sizeof(right_child_addr) +
-                        sizeof(RecordMetadata) * 2;
+      RecordMetadata::PadKeyLength(key_size) +
+      sizeof(left_child_addr) +
+      sizeof(right_child_addr) +
+      sizeof(RecordMetadata) * 2;
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
-  new (node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
+  new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
   return node;
 }
 
@@ -104,7 +108,7 @@ InternalNode::InternalNode(uint32_t node_size,
   memcpy(ptr, key, key_size);
   memcpy(ptr + padded_key_size, &right_child_addr, sizeof(right_child_addr));
 
-  assert((uint64_t)ptr == (uint64_t)this + sizeof(*this) + 2 * sizeof(RecordMetadata));
+  assert((uint64_t) ptr == (uint64_t) this + sizeof(*this) + 2 * sizeof(RecordMetadata));
 }
 
 InternalNode::InternalNode(uint32_t node_size,
@@ -285,7 +289,7 @@ LeafNode *LeafNode::New() {
   // FIXME(tzwang): use a better allocator
   LeafNode *node = reinterpret_cast<LeafNode *>(malloc(kNodeSize));
   memset(node, 0, kNodeSize);
-  new (node) LeafNode;
+  new(node) LeafNode;
   return node;
 }
 
@@ -829,6 +833,7 @@ RecordMetadata *InternalNode::GetChildren(const char *key,
                                           uint16_t key_size,
                                           bztree::BaseNode **left_child,
                                           bztree::BaseNode **right_child) {
+  // Keys in internal nodes are always sorted, visible
   int32_t left = 0, right = header.status.GetRecordCount() - 1;
   while (left <= right) {
     int32_t mid = (left + right) / 2;
@@ -1096,7 +1101,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     auto new_block_size = node->GetHeader()->status.GetBlockSize();
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes
-      auto parent = stack.Top();
+      auto *parent = stack.Top();
       auto first_meta = node->GetMetadata(0);
       char *meta_key;
       uint64_t payload;
