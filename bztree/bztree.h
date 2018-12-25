@@ -176,10 +176,10 @@ class BaseNode {
                                    uint32_t end_pos = (uint32_t) -1,
                                    bool check_concurrency = true);
   // Get the key and payload (8-byte)
-  // Outputs: 
+  // Outputs:
   // 1. [*data] - pointer to the char string that stores key followed by payload.
   //    If the record has a null key, then this will point directly to the
-  //    payload 
+  //    payload
   // 2. [*key] - pointer to the key (could be nullptr)
   // 3. [payload] - 8-byte payload
   inline bool GetRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload) {
@@ -219,6 +219,7 @@ struct Stack {
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() { num_frames = 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
+  inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
 };
 
 // Internal node: immutable once created, no free space, keys are always sorted
