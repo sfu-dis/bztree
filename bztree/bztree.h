@@ -79,11 +79,12 @@ struct NodeHeader {
     }
   };
 
-  static const uint32_t size = 4096;
+  uint32_t size;
   StatusWord status;
   uint32_t sorted_count;
-  NodeHeader() : sorted_count(0) {}
+  NodeHeader() : size(0), sorted_count(0) {}
 };
+
 struct RecordMetadata {
   uint64_t meta;
   RecordMetadata() : meta(0) {}
@@ -149,9 +150,6 @@ struct RecordMetadata {
 };
 
 class BaseNode {
- public:
-  static const uint32_t kNodeSize = 4096;
-
  protected:
   bool is_leaf;
   NodeHeader header;
@@ -164,7 +162,9 @@ class BaseNode {
   void Dump();
 
  public:
-  explicit BaseNode(bool leaf) : is_leaf(leaf) {}
+  explicit BaseNode(bool leaf, uint32_t size) : is_leaf(leaf) {
+    header.size = size;
+  }
   inline bool IsLeaf() { return is_leaf; }
   inline NodeHeader *GetHeader() { return &header; }
 //  Return a meta (not deleted) or nullptr (deleted or not exist)
@@ -189,11 +189,6 @@ class BaseNode {
         meta.GetOffset() + meta.GetPaddedKeyLength()));
     return true;
   }
-
-  inline uint32_t GetFreeSpace() {
-    return BaseNode::kNodeSize - sizeof(BaseNode) - header.status.GetBlockSize()
-        - header.status.GetRecordCount() * sizeof(RecordMetadata);
-  }
 };
 
 // Internal node: immutable once created, no free space, keys are always sorted
@@ -204,9 +199,9 @@ class InternalNode : public BaseNode {
   static InternalNode *New(char *key, uint32_t key_size,
                            uint64_t left_child_addr, uint64_t right_child_addr);
 
-  InternalNode(const char *key, const uint16_t key_size,
+  InternalNode(uint32_t node_size, const char *key, const uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
-  InternalNode(InternalNode *src_node, const char *key, const uint16_t key_size,
+  InternalNode(uint32_t node_size, InternalNode *src_node, const char *key, const uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
   ~InternalNode() = default;
 
@@ -245,10 +240,11 @@ struct Stack {
 
 class LeafNode : public BaseNode {
  public:
+  static const uint32_t kNodeSize = 4096;
+
   static LeafNode *New();
 
-  LeafNode() : BaseNode(true) {
-  }
+  LeafNode() : BaseNode(true, kNodeSize) {}
   ~LeafNode() = default;
 
   ReturnCode Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
@@ -286,6 +282,11 @@ class LeafNode : public BaseNode {
     }
     uint64_t offset = meta.GetOffset();
     return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
+  }
+
+  inline uint32_t GetFreeSpace() {
+    return kNodeSize - sizeof(*this) - header.status.GetBlockSize()
+        - header.status.GetRecordCount() * sizeof(RecordMetadata);
   }
 
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);

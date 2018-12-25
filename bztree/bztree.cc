@@ -18,12 +18,12 @@ InternalNode *InternalNode::New(InternalNode *src_node,
                                 uint64_t left_child_addr,
                                 uint64_t right_child_addr) {
   // FIXME(tzwang): use a better allocator
-  uint32_t data_size = src_node->GetHeader()->size + key_size +
-      sizeof(right_child_addr) + sizeof(RecordMetadata);
-  uint32_t alloc_size = sizeof(InternalNode) + data_size;
+  uint32_t alloc_size = src_node->GetHeader()->size +
+                        RecordMetadata::PadKeyLength(key_size) +
+                        sizeof(right_child_addr) + sizeof(RecordMetadata);
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
-  new(node) InternalNode(src_node, key, key_size, left_child_addr, right_child_addr);
+  new (node) InternalNode(alloc_size, src_node, key, key_size, left_child_addr, right_child_addr);
   return node;
 }
 
@@ -31,49 +31,55 @@ InternalNode *InternalNode::New(char *key,
                                 uint32_t key_size,
                                 uint64_t left_child_addr,
                                 uint64_t right_child_addr) {
-  uint32_t data_size = key_size + sizeof(left_child_addr) + sizeof(right_child_addr) +
-      sizeof(RecordMetadata) * 2;
-  uint32_t alloc_size = sizeof(InternalNode) + data_size;
+  uint32_t alloc_size = sizeof(InternalNode) +
+                        RecordMetadata::PadKeyLength(key_size) +
+                        sizeof(left_child_addr) +
+                        sizeof(right_child_addr) +
+                        sizeof(RecordMetadata) * 2;
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
-  new(node) InternalNode(key, key_size, left_child_addr, right_child_addr);
+  new (node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
   return node;
 }
 
-InternalNode::InternalNode(const char *key,
+InternalNode::InternalNode(uint32_t node_size,
+                           const char *key,
                            const uint16_t key_size,
                            uint64_t left_child_addr,
                            uint64_t right_child_addr)
-    : BaseNode(false) {
+    : BaseNode(false, node_size) {
   // Initialize a new internal node with one key only
-  auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
   header.sorted_count = 2;  // Includes the null dummy key
 
   // Fill in left child address, with an empty key
-  uint64_t offset = kNodeSize - sizeof(left_child_addr);
+  uint64_t offset = node_size - sizeof(left_child_addr);
   record_metadata[0].FinalizeForInsert(offset, 0, sizeof(left_child_addr));
   char *ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, &left_child_addr, sizeof(left_child_addr));
 
   // Fill in right child address, with the separator key
+  auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
   auto total_len = padded_key_size + sizeof(right_child_addr);
   offset -= total_len;
   record_metadata[1].FinalizeForInsert(offset, key_size, total_len);
   ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, key, key_size);
   memcpy(ptr + padded_key_size, &right_child_addr, sizeof(right_child_addr));
+
+  assert((uint64_t)ptr == (uint64_t)this + sizeof(*this) + 2 * sizeof(RecordMetadata));
 }
 
-InternalNode::InternalNode(InternalNode *src_node,
+InternalNode::InternalNode(uint32_t node_size,
+                           InternalNode *src_node,
                            const char *key,
                            const uint16_t key_size,
                            uint64_t left_child_addr,
                            uint64_t right_child_addr)
-    : BaseNode(false) {
+    : BaseNode(false, node_size) {
   LOG_IF(FATAL, !src_node);
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
 
-  uint64_t offset = kNodeSize;
+  uint64_t offset = node_size;
   bool inserted_new = false;
   for (uint32_t i = 0; i < src_node->GetHeader()->sorted_count; ++i) {
     RecordMetadata meta = src_node->GetMetadata(i);
@@ -130,16 +136,19 @@ LeafNode *LeafNode::New() {
   // FIXME(tzwang): use a better allocator
   LeafNode *node = reinterpret_cast<LeafNode *>(malloc(kNodeSize));
   memset(node, 0, kNodeSize);
-  new(node) LeafNode;
+  new (node) LeafNode;
   return node;
 }
 
 void BaseNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
-  std::cout << " Dumping node: 0x" << this << std::endl;
-  std::cout << " Header:\n"
-            << " - free space: " << GetFreeSpace() << std::endl
-            << " - status: 0x" << std::hex << header.status.word << std::endl
+  std::cout << " Dumping node: 0x" << this << (is_leaf ? " (leaf)" : " (internal)") << std::endl;
+  std::cout << " Header:\n";
+  if (is_leaf) {
+    std::cout << " - free space: " << (reinterpret_cast<LeafNode *>(this))->GetFreeSpace()
+              << std::endl;
+  }
+  std::cout << " - status: 0x" << std::hex << header.status.word << std::endl
             << "   (control = 0x" << (header.status.word & NodeHeader::StatusWord::kControlMask)
             << std::dec
             << ", frozen = " << header.status.IsFrozen()
