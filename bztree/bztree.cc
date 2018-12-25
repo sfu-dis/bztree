@@ -825,6 +825,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
     RecordMetadata meta;
     parent = reinterpret_cast<InternalNode *>(node);
     node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta);
+    assert(node);
     stack.Push(parent, meta);
   }
   return reinterpret_cast<LeafNode *>(node);
@@ -881,6 +882,16 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     }
   } while (!rc.IsOk() && !rc.IsKeyExists());
   return rc;
+}
+
+bool BzTree::ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root) {
+  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
+
+  // TODO(tzwang): specify memory policy for new leaf nodes
+  pd->AddEntry(reinterpret_cast<uint64_t *>(&root),
+               expected_root_addr,
+               reinterpret_cast<uint64_t>(new_root));
+  return pd->MwCAS();
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {

@@ -355,6 +355,7 @@ class BzTree {
 
  private:
   LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);
+  bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
 
  private:
   ParameterSet parameters;
