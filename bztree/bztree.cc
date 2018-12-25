@@ -118,8 +118,9 @@ InternalNode::InternalNode(uint32_t node_size,
   for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
     RecordMetadata meta = src_node->GetMetadata(i);
     uint64_t m_payload = 0;
-    char *m_key;
-    src_node->GetRecord(meta, &m_key, &m_payload);
+    char *m_key = nullptr;
+    char *m_data = nullptr;
+    src_node->GetRecord(meta, &m_data, &m_key, &m_payload);
     auto m_key_size = meta.GetKeyLength();
 
     if (inserted_new) {
@@ -270,7 +271,7 @@ void LeafNode::Dump() {
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     RecordMetadata meta = record_metadata[i];
     uint64_t payload = 0;
-    char *key;
+    char *key = nullptr;
     GetRecord(meta, &key, &payload);
     std::string keystr(key, key + meta.GetKeyLength());
     std::cout << " - record " << i << ": key = " << keystr
@@ -288,8 +289,9 @@ void InternalNode::Dump(bool dump_children) {
     auto &meta = record_metadata[i];
     assert((i == 0 && meta.GetKeyLength() == 0) || (i > 0 && meta.GetKeyLength() > 0));
     uint64_t right_child_addr = 0;
-    char *key;
-    GetRecord(meta, &key, &right_child_addr);
+    char *key = nullptr;
+    char *unused = nullptr;
+    GetRecord(meta, &unused, &key, &right_child_addr);
     if (key) {
       std::string keystr(key, key + meta.GetKeyLength());
       std::cout << " | " << keystr << " | ";
@@ -512,9 +514,10 @@ RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
       }
 
       uint64_t payload = 0;
-      char *current_key;
+      char *current_key = nullptr;
+      char *unused = nullptr;
       auto current = &(record_metadata[middle]);
-      GetRecord(*current, &current_key, &payload);
+      GetRecord(*current, &unused, &current_key, &payload);
 
       auto cmp_result = memcmp(key, current_key, current->GetKeyLength());
       if (cmp_result < 0) {
@@ -540,8 +543,9 @@ RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
       }
 
       uint64_t payload = 0;
-      char *current_key;
-      GetRecord(*current, &current_key, &payload);
+      char *current_key = nullptr;
+      char *unused = nullptr;
+      GetRecord(*current, &unused, &current_key, &payload);
       if (current->IsVisible() &&
           key_size == current->GetKeyLength() &&
           strncmp(key, current_key, current->GetKeyLength()) == 0) {

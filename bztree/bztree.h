@@ -176,17 +176,23 @@ class BaseNode {
                                    uint32_t end_pos = (uint32_t) -1,
                                    bool check_concurrency = true);
   // Get the key and payload (8-byte)
-  // Return status
-  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+  // Outputs: 
+  // 1. [*data] - pointer to the char string that stores key followed by payload.
+  //    If the record has a null key, then this will point directly to the
+  //    payload 
+  // 2. [*key] - pointer to the key (could be nullptr)
+  // 3. [payload] - 8-byte payload
+  inline bool GetRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload) {
     if (!meta.IsVisible()) {
       return false;
     }
-    uint64_t offset = meta.GetOffset();
-//    zero key length dummy record
-    *key = meta.GetPaddedKeyLength() == 0 ?
-           nullptr : reinterpret_cast<char *>(this) + meta.GetOffset();
-    *payload = *(reinterpret_cast<uint64_t *> (reinterpret_cast<char *>(this) +
-        meta.GetOffset() + meta.GetPaddedKeyLength()));
+
+    *data = reinterpret_cast<char *>(this) + meta.GetOffset();
+    uint16_t padded_key_len = meta.GetPaddedKeyLength();
+
+    // Zero key length dummy record
+    *key = (padded_key_len == 0 ? nullptr : *data);
+    *payload = *reinterpret_cast<uint64_t *>(*data + padded_key_len);
     return true;
   }
 };
@@ -303,10 +309,18 @@ class LeafNode : public BaseNode {
     return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
   }
 
-  inline uint32_t GetFreeSpace() {
-    return kNodeSize - sizeof(*this) - header.status.GetBlockSize()
-        - header.status.GetRecordCount() * sizeof(RecordMetadata);
+  // Specialized GetRecord for leaf node only (key can't be nullptr)
+  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+    char *unused = nullptr;
+    return BaseNode::GetRecord(meta, &unused, key, payload);
   }
+
+  inline uint32_t GetUsedSpace() {
+    return sizeof(*this) + header.status.GetBlockSize() +
+           header.status.GetRecordCount() * sizeof(RecordMetadata);
+  }
+
+  inline uint32_t GetFreeSpace() { return kNodeSize - GetUsedSpace(); }
 
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);
   void Dump();
