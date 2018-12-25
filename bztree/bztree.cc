@@ -232,7 +232,7 @@ LeafNode *LeafNode::New() {
 
 void BaseNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
-  std::cout << " Dumping node: 0x" << this << (is_leaf ? " (leaf)" : " (internal)") << std::endl;
+  std::cout << " Dumping node: " << this << (is_leaf ? " (leaf)" : " (internal)") << std::endl;
   std::cout << " Header:\n";
   if (is_leaf) {
     std::cout << " - free space: " << (reinterpret_cast<LeafNode *>(this))->GetFreeSpace()
@@ -249,7 +249,8 @@ void BaseNode::Dump() {
             << std::endl;
 
   std::cout << " Record Metadata Array:" << std::endl;
-  for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
+  uint32_t n_meta = std::max<uint32_t>(header.status.GetRecordCount(), header.sorted_count);
+  for (uint32_t i = 0; i < n_meta; ++i) {
     RecordMetadata meta = record_metadata[i];
     std::cout << " - record " << i << ": meta = 0x" << std::hex << meta.meta << std::endl;
     std::cout << std::hex;
@@ -713,38 +714,49 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
 
 BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta) {
   // Keys in internal nodes are always sorted, visible
-  int32_t left = 0, right = header.status.GetRecordCount() - 1;
-  while (left <= right) {
-    int32_t mid = (left + right) / 2;
-    auto meta = record_metadata[mid];
+  int32_t left = 0, right = header.sorted_count, mid = 0;
+  BaseNode *child_node = nullptr;
+  RecordMetadata meta;
+  while (true) {
+    mid = (left + right) / 2;
+    meta = record_metadata[mid];
     uint64_t meta_key_size = meta.GetKeyLength();
     uint64_t meta_payload = 0;
-    char *meta_key;
-    GetRecord(meta, &meta_key, &meta_payload);
+    char *meta_key = nullptr;
+    char *unused = nullptr;
+    GetRecord(meta, &unused, &meta_key, &meta_payload);
     int cmp = memcmp(key, meta_key, std::min<uint64_t>(meta_key_size, key_size));
     if (cmp == 0) {
       if (meta_key_size == key_size) {
         // Key exists
-        left = mid;
+        meta = record_metadata[mid - 1];
+        GetRecord(meta, &unused, &meta_key, &meta_payload);
+        child_node = reinterpret_cast<BaseNode *>(meta_payload);
         break;
       }
     }
+
     if (cmp > 0) {
-      right = mid - 1;
-    } else {
       left = mid + 1;
+    } else {
+      right = mid - 1;
+    }
+
+    if (left > right) {
+      if (cmp > 0) {
+        child_node = reinterpret_cast<BaseNode *>(meta_payload);
+      } else {
+        meta = record_metadata[mid - 1];
+        GetRecord(meta, &unused, &meta_key, &meta_payload);
+        child_node = reinterpret_cast<BaseNode *>(meta_payload);
+      }
+      break;
     }
   }
-  LOG_IF(FATAL, left < 0);
-
-  auto meta = record_metadata[left];
-  uint64_t meta_payload = 0;
-  char *unused_key;
-  GetRecord(meta, &unused_key, &meta_payload);
   if (out_meta) {
     *out_meta = meta;
   }
-  return reinterpret_cast<BaseNode *>(meta_payload);
+  return child_node;
 }
 
 InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
