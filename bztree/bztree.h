@@ -231,14 +231,16 @@ class InternalNode : public BaseNode {
                            uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
                     const char *key, uint32_t key_size,
-                    uint64_t left_child_addr, uint64_t right_child_addr);
+                    uint64_t left_child_addr, uint64_t right_child_addr,
+                    uint64_t left_most_child_addr = 0);
 
   InternalNode(uint32_t node_size, const char *key, const uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode(uint32_t node_size, InternalNode *src_node,
                uint32_t begin_meta_idx, uint32_t nr_records,
                const char *key, const uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr);
+               uint64_t left_child_addr, uint64_t right_child_addr,
+               uint64_t left_most_child_addr = 0);
   ~InternalNode() = default;
 
   InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,

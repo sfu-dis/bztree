@@ -76,7 +76,7 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
   new (node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
-                          key, key_size, left_child_addr, right_child_addr);
+                          key, key_size, left_child_addr, right_child_addr, left_most_child_addr);
   return node;
 }
 
@@ -114,14 +114,27 @@ InternalNode::InternalNode(uint32_t node_size,
                            const char *key,
                            const uint16_t key_size,
                            uint64_t left_child_addr,
-                           uint64_t right_child_addr)
+                           uint64_t right_child_addr,
+                           uint64_t left_most_child_addr)
     : BaseNode(false, node_size) {
   LOG_IF(FATAL, !src_node);
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
 
   uint64_t offset = node_size;
-  bool inserted_new = false;
+  bool need_insert_new = !key;
   uint32_t insert_idx = 0;
+
+  // See if we need a new left_most_child_addr, i.e., this must be the new node
+  // on the right
+  if (left_most_child_addr) {
+    offset -= sizeof(uint64_t);
+    RecordMetadata meta;
+    meta.FinalizeForInsert(offset, 0, sizeof(uint64_t));
+    record_metadata[0] = meta;
+    memcpy(reinterpret_cast<char *>(this) + offset, &left_most_child_addr, sizeof(uint64_t));
+    ++insert_idx;
+  }
+
   for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
     RecordMetadata meta = src_node->GetMetadata(i);
     uint64_t m_payload = 0;
@@ -130,13 +143,12 @@ InternalNode::InternalNode(uint32_t node_size,
     src_node->GetRecord(meta, &m_data, &m_key, &m_payload);
     auto m_key_size = meta.GetKeyLength();
 
-    if (inserted_new) {
+    if (need_insert_new) {
       // New key already inserted, so directly insert the key from src node
       offset -= (meta.GetTotalLength());
-      meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
+      meta.FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
       record_metadata[insert_idx] = meta;
-
-      memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
+      memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
     } else {
       // Compare the two keys to see which one to insert (first)
       int cmp = memcmp(m_key, key, std::min<uint16_t>(m_key_size, key_size));
@@ -144,10 +156,6 @@ InternalNode::InternalNode(uint32_t node_size,
 
       if (cmp > 0) {
         assert(insert_idx >= 1);
-        RecordMetadata new_meta;
-        offset -= (padded_key_size + sizeof(left_child_addr));
-        new_meta.FinalizeForInsert(offset, key_size, sizeof(left_child_addr));
-        record_metadata[insert_idx] = new_meta;
 
         // Modify the previous key's payload to left_child_addr
         auto &prev_meta = record_metadata[insert_idx - 1];
@@ -156,25 +164,52 @@ InternalNode::InternalNode(uint32_t node_size,
                &left_child_addr, sizeof(left_child_addr));
 
         // Now the new separtor key itself
+        offset -= (padded_key_size + sizeof(right_child_addr));
+        RecordMetadata new_meta;
+        new_meta.FinalizeForInsert(offset, key_size, sizeof(left_child_addr));
+        record_metadata[insert_idx] = new_meta;
+
         ++insert_idx;
-        memcpy(reinterpret_cast<char *>(this) + offset, key, new_meta.GetTotalLength());
+        memcpy(reinterpret_cast<char *>(this) + offset, key, key_size);
         memcpy(reinterpret_cast<char *>(this) + offset + padded_key_size,
                &right_child_addr, sizeof(right_child_addr));
 
         offset -= (meta.GetTotalLength());
-        meta.FinalizeForInsert(offset, meta.GetKeyLength(), meta.GetTotalLength());
+        meta.FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
         record_metadata[insert_idx] = meta;
-        memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
+        memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
 
-        inserted_new = true;
+        need_insert_new = true;
       } else {
-        record_metadata[insert_idx] = meta;
         offset -= (meta.GetTotalLength());
-        memcpy(reinterpret_cast<char *>(this) + offset, m_key, meta.GetTotalLength());
+        meta.FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
+        record_metadata[insert_idx] = meta;
+        memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
       }
     }
     ++insert_idx;
   }
+
+  if (!need_insert_new) {
+    // The new key-payload pair will be the right-most (largest key) element
+    uint32_t total_size = RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t);
+    offset -= total_size;
+    RecordMetadata meta;
+    meta.FinalizeForInsert(offset, key_size, total_size);
+    record_metadata[insert_idx] = meta;
+    memcpy(reinterpret_cast<char *>(this) + offset, key, key_size);
+    memcpy(reinterpret_cast<char *>(this) + offset + RecordMetadata::PadKeyLength(key_size),
+           &right_child_addr, sizeof(right_child_addr));
+
+    // Modify the previous key's payload to left_child_addr
+    auto &prev_meta = record_metadata[insert_idx - 1];
+    memcpy(reinterpret_cast<char *>(this) + prev_meta.GetOffset() + prev_meta.GetPaddedKeyLength(),
+           &left_child_addr, sizeof(left_child_addr));
+
+    ++insert_idx;
+  }
+
+  header.sorted_count = insert_idx;
 }
 
 InternalNode *InternalNode::PrepareForSplit(Stack &stack,
@@ -203,27 +238,45 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
     InternalNode *right = nullptr;
 
     // Figure out where does the new key will go
-    auto meta = GetMetadata(n_left - 1);
-    char *last_key_left = GetKey(meta);
-    int cmp = memcmp(key, last_key_left, std::min<uint32_t>(key_size, meta.GetKeyLength()));
-    if (cmp < 0 || (cmp == 0 && key_size < meta.GetKeyLength())) {
+    auto separator_meta = GetMetadata(n_left);
+    char *separator_key = nullptr;
+    uint32_t separator_key_size = separator_meta.GetKeyLength();
+    uint64_t separator_payload = 0;
+    char *unused = nullptr;
+    bool success = GetRecord(separator_meta, &unused, &separator_key, &separator_payload);
+    LOG_IF(FATAL, !success);
+
+    int cmp = memcmp(key, separator_key, std::min<uint32_t>(key_size, separator_key_size));
+    LOG_IF(FATAL, cmp == 0 && key_size == separator_key_size);
+    if (cmp < 0 || (cmp == 0 && key_size < separator_key_size)) {
       // Should go to left
       left = InternalNode::New(this, 0, n_left, key, key_size, left_child_addr, right_child_addr);
-      right = InternalNode::New(this, 0, header.sorted_count - n_left, nullptr, 0, 0, 0);
+      right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
+                                nullptr, 0, 0, 0, separator_payload);
     } else {
       left = InternalNode::New(this, 0, n_left, nullptr, 0, 0, 0);
-      right = InternalNode::New(this, 0, header.sorted_count - n_left,
-                                key, key_size, left_child_addr, right_child_addr);
+      right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
+                                key, key_size, left_child_addr, right_child_addr,
+                                separator_payload);
     }
-    auto *parent = stack.Top() ? stack.Pop()->node : nullptr;
-    meta = record_metadata[n_left];
+    assert(left);
+    assert(right);
+
+    // Pop here as if this were a leaf node so that when we get back to the
+    // original caller, we get stack top as the "parent"
+    stack.Pop();
+
+    // Now get this internal node's real parent
+    InternalNode *parent = stack.Top() ?
+                           reinterpret_cast<InternalNode *>(stack.Pop()->node) : nullptr;
     if (parent) {
       // Need to insert into this parent, so create a new one
-      return parent->PrepareForSplit(stack, split_threshold, GetKey(meta), meta.GetKeyLength(),
+      return parent->PrepareForSplit(stack, split_threshold,
+                                     separator_key, separator_key_size,
                                      (uint64_t)left, (uint64_t)right);
     } else {
       // New root node
-      return InternalNode::New(GetKey(meta), meta.GetKeyLength(), (uint64_t)left, (uint64_t)right);
+      return InternalNode::New(separator_key, separator_key_size, (uint64_t)left, (uint64_t)right);
     }
   } else {
     return InternalNode::New(this, key, key_size, left_child_addr, right_child_addr);
@@ -805,13 +858,18 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   (*left)->CopyFrom(this, meta_vec.begin(), left_end_it);
   (*right)->CopyFrom(this, left_end_it, meta_vec.end());
 
+  // Separator exists in the new left leaf node, i.e., when traversing the tree,
+  // we go left if <=, and go right if >.
   LOG_IF(FATAL, nleft - 1 == 0);
   RecordMetadata separator_meta = meta_vec[nleft - 1];
 
-  InternalNode *parent = stack.Top() ? stack.Pop()->node : nullptr;
-  uint64_t unused = 0;
-  char *key;
-  GetRecord(separator_meta, &key, &unused);
+  InternalNode *parent = stack.Top() ?
+                         reinterpret_cast<InternalNode *>(stack.Top()->node) : nullptr;
+
+  // The node is already frozen (by us), so we must be able to get a valid key
+  char *key = GetKey(separator_meta);
+  assert(key);
+
   if (parent) {
     // Has a parent node. PrepareForSplit will see if we need to split this
     // parent node as well, and if so, return a new (possibly upper-level) parent
@@ -844,14 +902,38 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
     stack.Clear();
-    pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
     LeafNode *node = TraverseToLeaf(stack, key, key_size);
 
     // Check space to see if we need to split the node
-    auto new_free_space = node->GetFreeSpace() -
-                          RecordMetadata::PadKeyLength(key_size) - sizeof(payload);
-    if (new_free_space <= 0) {
-      // Should split
+    auto new_node_size = node->GetUsedSpace() + sizeof(RecordMetadata) +
+                         RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
+    if (new_node_size > parameters.split_threshold) {
+      // Should split and we have three cases to handle:
+      // 1. Root node is a leaf node - install [parent] as the new root
+      // 2. We have a parent but no grandparent - install [parent] as the new
+      //    root
+      // 3. We have a grandparent - update the child pointer in the grandparent
+      //    to point to the new [parent] (might further cause splits up the tree)
+
+      // Note that when we split internal nodes (if needed), stack will get
+      // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
+      // So we save the root node here in case we need to change root later.
+      uint64_t old_root_addr = reinterpret_cast<uint64_t>(stack.GetRoot());
+      if (!old_root_addr) {
+        old_root_addr = reinterpret_cast<uint64_t>(node);
+      }
+
+      // Now split the leaf node. PrepareForSplit will return the node that we
+      // need to install to the grandparent node (will be stack top, if any). If
+      // it turns out there is no such grandparent, we directly install the
+      // returned node as the new root.
+      //
+      // Note that in internal node's PrepareSplit if the internal node needs to
+      // split we will pop the stack along the way as the split propogates
+      // upward, such that by the time we come back here, the stack will contain
+      // on its top the "parent" node and the "grandparent" node (if any) that
+      // points to the parent node. As a result, we directly install a pointer to
+      // the new parent node returned by leaf.PrepareForSplit to the grandparent.
       LeafNode *left = nullptr;
       LeafNode *right = nullptr;
       InternalNode *parent =
@@ -861,27 +943,28 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         continue;
       }
 
-      auto *top = stack.Pop();  // Pop out the immediate parent
+      auto *top = stack.Pop();
       InternalNode *old_parent = nullptr;
       if (top) {
         old_parent = top->node;
       }
-      top = stack.Top();
+
+      top = stack.Pop();
+      InternalNode *gp = nullptr;
       if (top) {
+        gp = reinterpret_cast<InternalNode *>(top->node);
+      }
+
+      if (gp) {
+        assert(old_parent);
         // There is a grand parent. We need to swap out the pointer to the old
-        // parent and install the pointer to the new parent
-        if (top->node->Update(top->meta, old_parent, parent, pmwcas_pool).IsNodeFrozen()) {
-          continue;
-        }
+        // parent and install the pointer to the new parent. Don't care the
+        // result here - have to retry anyway.
+        gp->Update(top->meta, old_parent, parent, pmwcas_pool);
       } else {
-        // No grand parent, so the new parent node will become the new root
-        pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-        pd->AddEntry(reinterpret_cast<uint64_t *>(root),
-                     reinterpret_cast<uint64_t>(old_parent),
-                     reinterpret_cast<uint64_t>(parent));
-        // TODO(tzwang): specify memory policy for new leaf nodes
-        if (!pd->MwCAS()) {
-          continue;
+        // No grand parent or already popped out by during split propogation
+        if (!ChangeRoot(old_root_addr, parent)) {
+            continue;
         }
       }
     } else {
