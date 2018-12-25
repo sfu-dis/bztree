@@ -51,9 +51,15 @@ InternalNode *InternalNode::New(const char *key,
 InternalNode *InternalNode::New(InternalNode *src_node,
                                 uint32_t begin_meta_idx, uint32_t nr_records,
                                 const char *key, uint32_t key_size,
-                                uint64_t left_child_addr, uint64_t right_child_addr) {
+                                uint64_t left_child_addr, uint64_t right_child_addr,
+                                uint64_t left_most_child_addr) {
   // Figure out how large the new node will be
   uint32_t alloc_size = sizeof(InternalNode);
+  if (begin_meta_idx > 0) {
+    // Will not copy from the first element (dummy key), so add it here
+    alloc_size += (sizeof(uint64_t) + sizeof(RecordMetadata));
+  }
+
   for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
     RecordMetadata meta = src_node->GetMetadata(i);
     alloc_size += meta.GetTotalLength();
@@ -71,6 +77,7 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   memset(node, 0, alloc_size);
   new (node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                           key, key_size, left_child_addr, right_child_addr);
+  return node;
 }
 
 InternalNode::InternalNode(uint32_t node_size,
