@@ -35,13 +35,6 @@ struct ReturnCode {
   static ReturnCode NotFound() { return ReturnCode(RetNotFound); }
 };
 
-
-struct Item {
-  char *key;
-  uint16_t key_size;
-  uint64_t payload;
-};
-
 struct NodeHeader {
   // Header:
   // |-------64 bits-------|---32 bits---|---32 bits---|
@@ -305,6 +298,8 @@ class InternalNode : public BaseNode {
   }
 };
 
+struct Record;
+
 class LeafNode : public BaseNode {
  public:
   static const uint32_t kNodeSize = 4096;
@@ -343,7 +338,7 @@ class LeafNode : public BaseNode {
 
   ReturnCode RangeScan(const std::string &begin_key,
                        const std::string &end_key,
-                       std::vector<RecordMetadata *> *result,
+                       std::vector<Record> *result,
                        pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
@@ -379,6 +374,17 @@ class LeafNode : public BaseNode {
   Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
 };
 
+struct Record {
+  RecordMetadata meta;
+  char data[0];
+  Record *New(RecordMetadata meta, LeafNode *node) {
+    auto item = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
+    new(item) Record;
+    item->meta = meta;
+    memcpy(item + sizeof(meta), reinterpret_cast<char *>(node) + meta.GetOffset(), meta.GetTotalLength());
+    return item;
+  }
+};
 class BzTree {
  public:
   struct ParameterSet {
@@ -431,7 +437,7 @@ class Iterator {
   std::string end_key;
   LeafNode *node;
   Stack stack;
-  std::vector<RecordMetadata *> meta_vec;
+  std::vector<Record *> item_vec;
 };
 
 }  // namespace bztree

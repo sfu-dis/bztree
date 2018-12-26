@@ -667,7 +667,7 @@ ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload)
 
 ReturnCode LeafNode::RangeScan(const std::string &begin_key,
                                const std::string &end_key,
-                               std::vector<bztree::RecordMetadata *> *result,
+                               std::vector<bztree::Record> *result,
                                pmwcas::DescriptorPool *pmwcas_pool) {
   // entering a new epoch and copying the data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
