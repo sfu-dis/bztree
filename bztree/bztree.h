@@ -187,6 +187,8 @@ class BaseNode {
       return false;
     }
 
+    assert(meta.GetTotalLength());
+
     *data = reinterpret_cast<char *>(this) + meta.GetOffset();
     uint16_t padded_key_len = meta.GetPaddedKeyLength();
 

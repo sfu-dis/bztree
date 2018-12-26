@@ -143,6 +143,7 @@ InternalNode::InternalNode(uint32_t node_size,
 
     if (!need_insert_new) {
       // New key already inserted, so directly insert the key from src node
+      assert(meta.GetTotalLength() >= sizeof(uint64_t));
       offset -= (meta.GetTotalLength());
       record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
       memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
@@ -162,7 +163,8 @@ InternalNode::InternalNode(uint32_t node_size,
 
         // Now the new separtor key itself
         offset -= (padded_key_size + sizeof(right_child_addr));
-        record_metadata[insert_idx].FinalizeForInsert(offset, key_size, sizeof(left_child_addr));
+        record_metadata[insert_idx].FinalizeForInsert(
+          offset, key_size, padded_key_size + sizeof(left_child_addr));
 
         ++insert_idx;
         memcpy(reinterpret_cast<char *>(this) + offset, key, key_size);
@@ -170,11 +172,13 @@ InternalNode::InternalNode(uint32_t node_size,
                &right_child_addr, sizeof(right_child_addr));
 
         offset -= (meta.GetTotalLength());
+        assert(meta.GetTotalLength() >= sizeof(uint64_t));
         record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
         memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
 
         need_insert_new = false;
       } else {
+        assert(meta.GetTotalLength() >= sizeof(uint64_t));
         offset -= (meta.GetTotalLength());
         record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
         memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
@@ -238,8 +242,11 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
     LOG_IF(FATAL, !success);
 
     int cmp = memcmp(key, separator_key, std::min<uint32_t>(key_size, separator_key_size));
-    LOG_IF(FATAL, cmp == 0 && key_size == separator_key_size);
-    if (cmp < 0 || (cmp == 0 && key_size < separator_key_size)) {
+    if (cmp == 0) {
+      cmp = key_size - separator_key_size;
+    }
+    LOG_IF(FATAL, cmp == 0);
+    if (cmp < 0) {
       // Should go to left
       left = InternalNode::New(this, 0, n_left, key, key_size, left_child_addr, right_child_addr);
       right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
@@ -727,6 +734,7 @@ void LeafNode::CopyFrom(LeafNode *node,
     node->GetRecord(meta, &key, &payload);
 
     // Copy data
+    assert(meta.GetTotalLength() >= sizeof(uint64_t));
     uint64_t total_len = meta.GetTotalLength();
     offset -= total_len;
     char *ptr = &(reinterpret_cast<char *>(this))[offset];
@@ -767,7 +775,7 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
 
 BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta) {
   // Keys in internal nodes are always sorted, visible
-  int32_t left = 0, right = header.sorted_count, mid = 0;
+  int32_t left = 0, right = header.sorted_count - 1, mid = 0;
   BaseNode *child_node = nullptr;
   RecordMetadata meta;
   while (true) {
@@ -780,35 +788,41 @@ BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetad
     GetRecord(meta, &unused, &meta_key, &meta_payload);
     int cmp = memcmp(key, meta_key, std::min<uint64_t>(meta_key_size, key_size));
     if (cmp == 0) {
-      if (meta_key_size == key_size) {
-        // Key exists
-        meta = record_metadata[mid - 1];
-        GetRecord(meta, &unused, &meta_key, &meta_payload);
-        child_node = reinterpret_cast<BaseNode *>(meta_payload);
-        break;
-      }
+      cmp = key_size - meta_key_size;
     }
 
-    if (cmp > 0) {
-      left = mid + 1;
-    } else {
-      right = mid - 1;
-    }
-
-    if (left > right) {
-      if (cmp > 0) {
-        child_node = reinterpret_cast<BaseNode *>(meta_payload);
-      } else {
-        meta = record_metadata[mid - 1];
-        GetRecord(meta, &unused, &meta_key, &meta_payload);
-        child_node = reinterpret_cast<BaseNode *>(meta_payload);
-      }
+    if (cmp == 0) {
+      // Key exists
+      assert(mid >= 1);
+      meta = record_metadata[mid - 1];
+      GetRecord(meta, &unused, &meta_key, &meta_payload);
+      child_node = reinterpret_cast<BaseNode *>(meta_payload);
       break;
+    } else {
+      if (left > right) {
+        if (cmp > 0) {
+          child_node = reinterpret_cast<BaseNode *>(meta_payload);
+        } else {
+          assert(mid >= 1);
+          meta = record_metadata[mid - 1];
+          GetRecord(meta, &unused, &meta_key, &meta_payload);
+          child_node = reinterpret_cast<BaseNode *>(meta_payload);
+        }
+        break;
+      } else {
+        if (cmp > 0) {
+          left = mid + 1;
+        } else {
+          right = mid - 1;
+        }
+      }
     }
   }
+
   if (out_meta) {
     *out_meta = meta;
   }
+  assert(child_node);
   return child_node;
 }
 
