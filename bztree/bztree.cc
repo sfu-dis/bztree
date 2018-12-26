@@ -1131,7 +1131,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     rc = node->Delete(key, key_size, pmwcas_pool);
     auto new_block_size = node->GetHeader()->status.GetBlockSize();
     if (new_block_size <= parameters.merge_threshold) {
-      // FIXME(hao): merge the nodes
+      // FIXME(hao): merge the nodes, not finished
       auto *parent = stack.Top();
       auto first_meta = node->GetMetadata(0);
       char *meta_key;
@@ -1141,6 +1141,11 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     }
   } while (rc.IsNodeFrozen());
   return rc;
+}
+
+Iterator *BzTree::RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2) {
+  auto iterator = new Iterator(this, key1, size1, key2, size2);
+  return iterator;
 }
 
 void BzTree::Dump() {

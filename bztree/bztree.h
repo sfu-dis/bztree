@@ -431,6 +431,7 @@ struct Record {
     return cmp < 0;
   }
 };
+class Iterator;
 class BzTree {
  public:
   struct ParameterSet {
@@ -447,11 +448,15 @@ class BzTree {
     root = LeafNode::New();
   }
   void Dump();
+  inline pmwcas::DescriptorPool *GetPool() const {
+    return pmwcas_pool;
+  };
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
+  Iterator *RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2);
 
  private:
   LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);
@@ -470,21 +475,37 @@ class Iterator {
                     const char *begin_key,
                     uint16_t begin_size,
                     const char *end_key,
-                    uint16_t end_size) :
-      begin_key(begin_key, begin_size), end_key(end_key, end_size) {
+                    uint16_t end_size) {
+    this->begin_key = begin_key;
+    this->end_key = end_key;
+    this->begin_size = begin_size;
+    this->end_size = end_size;
     this->tree = tree;
     node = this->tree->TraverseToLeaf(stack, begin_key, begin_size);
+    node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+    item_it = item_vec.begin();
   }
 
-  void GetNext();
+  Record *GetNext() {
+    auto old_it = item_it;
+    if (item_it != item_vec.end()) {
+      item_it += 1;
+      return *old_it;
+    } else {
+
+    }
+  }
 
  private:
   const BzTree *tree;
-  std::string begin_key;
-  std::string end_key;
+  const char *begin_key;
+  uint16_t begin_size;
+  const char *end_key;
+  uint16_t end_size;
   LeafNode *node;
   Stack stack;
   std::vector<Record *> item_vec;
+  std::vector<Record *>::iterator item_it;
 };
 
 }  // namespace bztree
