@@ -176,45 +176,30 @@ class BaseNode {
                                    uint32_t end_pos = (uint32_t) -1,
                                    bool check_concurrency = true);
   // Get the key and payload (8-byte)
-  // Return status
-  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+  // Outputs:
+  // 1. [*data] - pointer to the char string that stores key followed by payload.
+  //    If the record has a null key, then this will point directly to the
+  //    payload
+  // 2. [*key] - pointer to the key (could be nullptr)
+  // 3. [payload] - 8-byte payload
+  inline bool GetRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload) {
     if (!meta.IsVisible()) {
       return false;
     }
-    uint64_t offset = meta.GetOffset();
-//    zero key length dummy record
-    *key = meta.GetPaddedKeyLength() == 0 ?
-           nullptr : reinterpret_cast<char *>(this) + meta.GetOffset();
-    *payload = *(reinterpret_cast<uint64_t *> (reinterpret_cast<char *>(this) +
-        meta.GetOffset() + meta.GetPaddedKeyLength()));
+
+    assert(meta.GetTotalLength());
+
+    *data = reinterpret_cast<char *>(this) + meta.GetOffset();
+    uint16_t padded_key_len = meta.GetPaddedKeyLength();
+
+    // Zero key length dummy record
+    *key = (padded_key_len == 0 ? nullptr : *data);
+    *payload = *reinterpret_cast<uint64_t *>(*data + padded_key_len);
     return true;
   }
 };
 
-// Internal node: immutable once created, no free space, keys are always sorted
-class InternalNode : public BaseNode {
- public:
-  static InternalNode *New(InternalNode *src_node, char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
-  static InternalNode *New(char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
-
-  InternalNode(uint32_t node_size, const char *key, const uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr);
-  InternalNode(uint32_t node_size, InternalNode *src_node, const char *key, const uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr);
-  ~InternalNode() = default;
-
-  inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
-    char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
-    return reinterpret_cast<uint64_t *>(ptr);
-  }
-  ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
-                    pmwcas::DescriptorPool *pmwcas_pool);
-  BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
-  void Dump(bool dump_children = false);
-};
-
+class InternalNode;
 struct Stack {
   struct Frame {
     Frame() : node(nullptr), meta() {}
@@ -236,6 +221,51 @@ struct Stack {
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() { num_frames = 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
+  inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
+};
+
+// Internal node: immutable once created, no free space, keys are always sorted
+class InternalNode : public BaseNode {
+ public:
+  static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
+                           uint64_t left_child_addr, uint64_t right_child_addr);
+  static InternalNode *New(const char *key, uint32_t key_size,
+                           uint64_t left_child_addr, uint64_t right_child_addr);
+  InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
+                    const char *key, uint32_t key_size,
+                    uint64_t left_child_addr, uint64_t right_child_addr,
+                    uint64_t left_most_child_addr = 0);
+
+  InternalNode(uint32_t node_size, const char *key, const uint16_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr);
+  InternalNode(uint32_t node_size, InternalNode *src_node,
+               uint32_t begin_meta_idx, uint32_t nr_records,
+               const char *key, const uint16_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr,
+               uint64_t left_most_child_addr = 0);
+  ~InternalNode() = default;
+
+  InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
+                                const char *key, uint32_t key_size,
+                                uint64_t left_child_addr, uint64_t right_child_addr);
+
+  inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
+    char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
+    return reinterpret_cast<uint64_t *>(ptr);
+  }
+  ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
+                    pmwcas::DescriptorPool *pmwcas_pool);
+  BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
+  void Dump(bool dump_children = false);
+
+ private:
+  inline char *GetKey(RecordMetadata meta) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+    uint64_t offset = meta.GetOffset();
+    return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
+  }
 };
 
 class LeafNode : public BaseNode {
@@ -249,9 +279,9 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  ReturnCode PrepareForSplit(uint32_t epoch, Stack &stack,
-                             InternalNode **parent, LeafNode **left, LeafNode **right,
-                             pmwcas::DescriptorPool *pmwcas_pool);
+  InternalNode *PrepareForSplit(uint32_t epoch, Stack &stack, uint32_t split_threshold,
+                                pmwcas::DescriptorPool *pmwcas_pool,
+                                LeafNode **left, LeafNode **right);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
@@ -284,10 +314,18 @@ class LeafNode : public BaseNode {
     return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
   }
 
-  inline uint32_t GetFreeSpace() {
-    return kNodeSize - sizeof(*this) - header.status.GetBlockSize()
-        - header.status.GetRecordCount() * sizeof(RecordMetadata);
+  // Specialized GetRecord for leaf node only (key can't be nullptr)
+  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+    char *unused = nullptr;
+    return BaseNode::GetRecord(meta, &unused, key, payload);
   }
+
+  inline uint32_t GetUsedSpace() {
+    return sizeof(*this) + header.status.GetBlockSize() +
+           header.status.GetRecordCount() * sizeof(RecordMetadata);
+  }
+
+  inline uint32_t GetFreeSpace() { return kNodeSize - GetUsedSpace(); }
 
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);
   void Dump();
@@ -322,6 +360,7 @@ class BzTree {
 
  private:
   LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);
+  bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
 
  private:
   ParameterSet parameters;
