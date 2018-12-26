@@ -191,11 +191,17 @@ TEST_F(LeafNodeFixtures, RangeScan) {
   pool->GetEpoch()->Protect();
   InsertDummy();
   std::vector<bztree::Record *> result;
-  ASSERT_TRUE(node->RangeScan("10", 2, "220", 3, &result, pool).IsOk());
-  ASSERT_EQ(result.size(), 5);
+  ASSERT_TRUE(node->RangeScan("10", 2, "40", 2, &result, pool).IsOk());
+  ASSERT_EQ(result.size(), 14);
   ASSERT_EQ(result[0]->GetPayload(), 10);
-  ASSERT_EQ(result[1]->GetPayload(), 20);
-
+  ASSERT_EQ(result[2]->GetPayload(), 200);
+  ASSERT_EQ(result[13]->GetPayload(), 40);
+  ASSERT_EQ(std::string(result[0]->GetKey(), result[0]->meta.GetKeyLength()),
+            std::string("10"));
+  ASSERT_EQ(std::string(result[2]->GetKey(), result[2]->meta.GetKeyLength()),
+            std::string("200"));
+  ASSERT_EQ(std::string(result[13]->GetKey(), result[13]->meta.GetKeyLength()),
+            std::string("40"));
   pool->GetEpoch()->Unprotect();
 }
 

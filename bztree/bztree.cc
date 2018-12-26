@@ -694,7 +694,11 @@ ReturnCode LeafNode::RangeScan(const char *key1,
     }
     i += 1;
   }
-//  std::sort(result->begin(), result->end());
+  std::sort(result->begin(), result->end(), [this](Record *a, Record *b) -> bool {
+    auto cmp = BaseNode::KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
+                                    b->GetKey(), b->meta.GetKeyLength());
+    return cmp < 0;
+  });
   return ReturnCode::Ok();
 }
 
