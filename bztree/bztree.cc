@@ -25,12 +25,8 @@ InternalNode *InternalNode::New(InternalNode *src_node,
       sizeof(right_child_addr) + sizeof(RecordMetadata);
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
-<<<<<<< HEAD
-  new (node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
-                          key, key_size, left_child_addr, right_child_addr);
-=======
-  new(node) InternalNode(alloc_size, src_node, key, key_size, left_child_addr, right_child_addr);
->>>>>>> Moving to range scan
+  new(node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
+                         key, key_size, left_child_addr, right_child_addr);
   return node;
 }
 
@@ -74,13 +70,13 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   if (key) {
     LOG_IF(FATAL, key_size == 0);
     alloc_size +=
-      (RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t) + sizeof(RecordMetadata));
+        (RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t) + sizeof(RecordMetadata));
   }
 
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
-  new (node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
-                          key, key_size, left_child_addr, right_child_addr, left_most_child_addr);
+  new(node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+                         key, key_size, left_child_addr, right_child_addr, left_most_child_addr);
   return node;
 }
 
@@ -168,7 +164,7 @@ InternalNode::InternalNode(uint32_t node_size,
         // Now the new separtor key itself
         offset -= (padded_key_size + sizeof(right_child_addr));
         record_metadata[insert_idx].FinalizeForInsert(
-          offset, key_size, padded_key_size + sizeof(left_child_addr));
+            offset, key_size, padded_key_size + sizeof(left_child_addr));
 
         ++insert_idx;
         memcpy(reinterpret_cast<char *>(this) + offset, key, key_size);
@@ -275,10 +271,10 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
       // Need to insert into this parent, so create a new one
       return parent->PrepareForSplit(stack, split_threshold,
                                      separator_key, separator_key_size,
-                                     (uint64_t)left, (uint64_t)right);
+                                     (uint64_t) left, (uint64_t) right);
     } else {
       // New root node
-      return InternalNode::New(separator_key, separator_key_size, (uint64_t)left, (uint64_t)right);
+      return InternalNode::New(separator_key, separator_key_size, (uint64_t) left, (uint64_t) right);
     }
   } else {
     return InternalNode::New(this, key, key_size, left_child_addr, right_child_addr);
@@ -874,7 +870,7 @@ RecordMetadata *InternalNode::GetChildren(const char *key,
     uint32_t meta_key_size = meta.GetKeyLength();
     uint64_t meta_payload = 0;
     char *meta_key;
-    GetRecord(meta, &meta_key, &meta_payload);
+    GetRecord(meta, nullptr, &meta_key, &meta_payload);
     auto cmp = KeyCompare(key, key_size, meta_key, meta_key_size);
     if (cmp == 0) {
       // Key exists
@@ -892,8 +888,8 @@ RecordMetadata *InternalNode::GetChildren(const char *key,
   auto left_meta = record_metadata[left];
   auto right_meta = record_metadata[left + 1];
   uint64_t left_payload, right_payload;
-  GetRecord(left_meta, nullptr, &left_payload);
-  GetRecord(right_meta, nullptr, &right_payload);
+  GetRecord(left_meta, nullptr, nullptr, &left_payload);
+  GetRecord(right_meta, nullptr, nullptr, &right_payload);
   if (left_child != nullptr) {
     *left_child = reinterpret_cast<BaseNode *> (left_payload);
   }
@@ -907,7 +903,6 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
                                         uint32_t split_threshold,
                                         pmwcas::DescriptorPool *pmwcas_pool,
                                         LeafNode **left, LeafNode **right) {
-
   LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
   // Set the frozen bit on the node to be split
   if (!Freeze(pmwcas_pool)) {
@@ -956,10 +951,10 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
     // parent node as well, and if so, return a new (possibly upper-level) parent
     // node that needs to be installed to its parent
     return parent->PrepareForSplit(stack, split_threshold, key, separator_meta.GetKeyLength(),
-      reinterpret_cast<uint64_t>(*left), reinterpret_cast<uint64_t>(*right));
+                                   reinterpret_cast<uint64_t>(*left), reinterpret_cast<uint64_t>(*right));
   } else {
     return InternalNode::New(key, separator_meta.GetKeyLength(),
-      reinterpret_cast<uint64_t>(*left), reinterpret_cast<uint64_t>(*right));
+                             reinterpret_cast<uint64_t>(*left), reinterpret_cast<uint64_t>(*right));
   }
 }
 
@@ -987,7 +982,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
 
     // Check space to see if we need to split the node
     auto new_node_size = node->GetUsedSpace() + sizeof(RecordMetadata) +
-                         RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
+        RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
     if (new_node_size > parameters.split_threshold) {
       // Should split and we have three cases to handle:
       // 1. Root node is a leaf node - install [parent] as the new root
@@ -1018,7 +1013,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       LeafNode *left = nullptr;
       LeafNode *right = nullptr;
       InternalNode *parent =
-        node->PrepareForSplit(epoch, stack, parameters.split_threshold, pmwcas_pool, &left, &right);
+          node->PrepareForSplit(epoch, stack, parameters.split_threshold, pmwcas_pool, &left, &right);
       if (!parent) {
         // TODO(tzwang): check memory leaks
         continue;
@@ -1045,7 +1040,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       } else {
         // No grand parent or already popped out by during split propogation
         if (!ChangeRoot(old_root_addr, parent)) {
-            continue;
+          continue;
         }
       }
     } else {

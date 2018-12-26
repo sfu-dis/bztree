@@ -212,46 +212,22 @@ class BaseNode {
     if (!meta.IsVisible()) {
       return false;
     }
-    uint64_t offset = meta.GetOffset();
-    char *tmp_key;
-//    zero key length dummy record
-    tmp_key = meta.GetPaddedKeyLength() == 0 ?
-              nullptr : reinterpret_cast<char *>(this) + meta.GetOffset();
+    assert(meta.GetTotalLength());
+    char *tmp_data = reinterpret_cast<char *>(this) + meta.GetOffset();
+    if (data != nullptr) {
+      *data = tmp_data;
+    }
+    auto padded_key_len = meta.GetPaddedKeyLength();
     if (key != nullptr) {
-      *key = tmp_key;
+//    zero key length dummy record
+      *key = padded_key_len == 0 ? nullptr : tmp_data;
     }
 
-    uint64_t tmp_payload;
-    tmp_payload = *(reinterpret_cast<uint64_t *> (reinterpret_cast<char *>(this) +
-        meta.GetOffset() + meta.GetPaddedKeyLength()));
     if (payload != nullptr) {
-      *payload = tmp_payload;
+      *payload = *reinterpret_cast<uint64_t *>(tmp_data + padded_key_len);
     }
     return true;
   }
-};
-
-
-  InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr);
-  InternalNode(uint32_t node_size, InternalNode *src_node, const char *key, const uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr);
-  ~InternalNode() = default;
-
-    // Zero key length dummy record
-    *key = (padded_key_len == 0 ? nullptr : *data);
-    *payload = *reinterpret_cast<uint64_t *>(*data + padded_key_len);
-    return true;
-  }
-  ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
-                    pmwcas::DescriptorPool *pmwcas_pool);
-
-//  return searched metadata
-  RecordMetadata *GetChildren(const char *key,
-                              uint16_t key_size,
-                              BaseNode **left_child,
-                              BaseNode **right_child = nullptr);
-  void Dump(bool dump_children = false);
 };
 
 class InternalNode;
@@ -311,6 +287,10 @@ class InternalNode : public BaseNode {
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
   BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
+  RecordMetadata *GetChildren(const char *key,
+                              uint16_t key_size,
+                              BaseNode **left_child,
+                              BaseNode **right_child = nullptr);
   void Dump(bool dump_children = false);
 
  private:
@@ -387,7 +367,7 @@ class LeafNode : public BaseNode {
 
   inline uint32_t GetUsedSpace() {
     return sizeof(*this) + header.status.GetBlockSize() +
-           header.status.GetRecordCount() * sizeof(RecordMetadata);
+        header.status.GetRecordCount() * sizeof(RecordMetadata);
   }
 
   inline uint32_t GetFreeSpace() { return kNodeSize - GetUsedSpace(); }
@@ -450,19 +430,17 @@ class BzTree {
   void Dump();
   inline pmwcas::DescriptorPool *GetPool() const {
     return pmwcas_pool;
-  };
+  }
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
   Iterator *RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2);
+  LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size) const;
 
  private:
-  LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
-
- private:
   ParameterSet parameters;
   uint32_t epoch;
   BaseNode *root;
@@ -492,7 +470,6 @@ class Iterator {
       item_it += 1;
       return *old_it;
     } else {
-
     }
   }
 
