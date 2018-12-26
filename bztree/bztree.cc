@@ -153,7 +153,7 @@ InternalNode::InternalNode(uint32_t node_size,
       memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
     } else {
       // Compare the two keys to see which one to insert (first)
-      int cmp = memcmp(m_key, key, std::min<uint16_t>(m_key_size, key_size));
+      auto cmp = KeyCompare(m_key, m_key_size, key, key_size);
       LOG_IF(FATAL, cmp == 0 && key_size == m_key_size);
 
       if (cmp > 0) {
@@ -581,10 +581,10 @@ RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
       auto current = &(record_metadata[middle]);
       GetRecord(*current, &unused, &current_key, &payload);
 
-      auto cmp_result = memcmp(key, current_key, current->GetKeyLength());
+      auto cmp_result = KeyCompare(key, key_size, current_key, current->GetKeyLength());
       if (cmp_result < 0) {
         last = middle - 1;
-      } else if (cmp_result == 0 && key_size == current->GetKeyLength() && current->IsVisible()) {
+      } else if (cmp_result == 0 && current->IsVisible()) {
         return current;
       } else {
         first = middle + 1;
@@ -609,8 +609,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
       char *unused = nullptr;
       GetRecord(*current, &unused, &current_key, &payload);
       if (current->IsVisible() &&
-          key_size == current->GetKeyLength() &&
-          memcmp(key, current_key, current->GetKeyLength()) == 0) {
+          KeyCompare(key, key_size, current_key, current->GetKeyLength()) == 0) {
         return current;
       }
     }
@@ -672,9 +671,11 @@ ReturnCode LeafNode::RangeScan(const std::string &begin_key,
   // entering a new epoch and copying the data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   auto record_count = header.status.GetRecordCount();
-  for (uint32_t i = 0; i < record_count; i++) {
-    auto curr_meta = GetMetadata(i);
 
+  // scan the sorted fields first
+  for (uint32_t i = 0; i < header.sorted_count; i++) {
+    auto curr_meta = GetMetadata(i);
+    result->emplace_back(*Record::New(curr_meta, this));
   }
 }
 
@@ -723,15 +724,11 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visi
 
   // Lambda for comparing two keys
   auto key_cmp = [this](RecordMetadata &m1, RecordMetadata &m2) -> bool {
-    uint64_t l1 = m1.GetKeyLength();
-    uint64_t l2 = m2.GetKeyLength();
+    auto l1 = m1.GetKeyLength();
+    auto l2 = m2.GetKeyLength();
     char *k1 = GetKey(m1);
     char *k2 = GetKey(m2);
-    int cmp = memcmp(k1, k2, std::min<uint64_t>(l1, l2));
-    if (cmp == 0) {
-      return l1 < l2;
-    }
-    return cmp < 0;
+    return KeyCompare(k1, l1, k2, l2) < 0;
   };
 
   std::sort(vec.begin(), vec.end(), key_cmp);
@@ -851,17 +848,15 @@ RecordMetadata *InternalNode::GetChildren(const char *key,
   while (left <= right) {
     int32_t mid = (left + right) / 2;
     auto meta = record_metadata[mid];
-    uint64_t meta_key_size = meta.GetKeyLength();
+    uint32_t meta_key_size = meta.GetKeyLength();
     uint64_t meta_payload = 0;
     char *meta_key;
     GetRecord(meta, &meta_key, &meta_payload);
-    int cmp = memcmp(key, meta_key, std::min<uint64_t>(meta_key_size, key_size));
+    auto cmp = KeyCompare(key, key_size, meta_key, meta_key_size);
     if (cmp == 0) {
-      if (meta_key_size == key_size) {
-        // Key exists
-        left = mid;
-        break;
-      }
+      // Key exists
+      left = mid;
+      break;
     }
     if (cmp > 0) {
       right = mid - 1;

@@ -150,19 +150,26 @@ struct RecordMetadata {
 };
 
 class BaseNode {
- public:
-  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
-
  protected:
+
   bool is_leaf;
   NodeHeader header;
-
   RecordMetadata record_metadata[0];
+
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
   void Dump();
 
+  const int KeyCompare(const char *key1, uint32_t size1, const char *key2, uint32_t size2) {
+    auto cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+    if (cmp == 0) {
+      return size1 - size2;
+    }
+    return cmp;
+  }
+
  public:
+  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
   explicit BaseNode(bool leaf, uint32_t size) : is_leaf(leaf) {
     header.size = size;
   }
@@ -377,9 +384,10 @@ class LeafNode : public BaseNode {
 struct Record {
   RecordMetadata meta;
   char data[0];
-  Record *New(RecordMetadata meta, LeafNode *node) {
+  Record() = default;
+  static Record *New(RecordMetadata meta, LeafNode *node) {
     auto item = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
-    new(item) Record;
+    new(item) Record();
     item->meta = meta;
     memcpy(item + sizeof(meta), reinterpret_cast<char *>(node) + meta.GetOffset(), meta.GetTotalLength());
     return item;
