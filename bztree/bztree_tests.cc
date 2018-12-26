@@ -187,6 +187,18 @@ TEST_F(LeafNodeFixtures, Upsert) {
   ASSERT_READ(node, "211", 3, 211);
 }
 
+TEST_F(LeafNodeFixtures, RangeScan) {
+  pool->GetEpoch()->Protect();
+  InsertDummy();
+  std::vector<bztree::Record *> result;
+  ASSERT_TRUE(node->RangeScan("10", 2, "220", 3, &result, pool).IsOk());
+  ASSERT_EQ(result.size(), 5);
+  ASSERT_EQ(result[0]->GetPayload(), 10);
+  ASSERT_EQ(result[1]->GetPayload(), 20);
+
+  pool->GetEpoch()->Unprotect();
+}
+
 class BzTreeTest : public ::testing::Test {
  protected:
   pmwcas::DescriptorPool *pool;

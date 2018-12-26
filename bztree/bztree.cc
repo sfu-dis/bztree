@@ -668,7 +668,7 @@ ReturnCode LeafNode::RangeScan(const char *key1,
                                uint32_t size1,
                                const char *key2,
                                uint32_t size2,
-                               std::vector<bztree::Record> *result,
+                               std::vector<bztree::Record *> *result,
                                pmwcas::DescriptorPool *pmwcas_pool) {
   // entering a new epoch and copying the data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
@@ -680,12 +680,12 @@ ReturnCode LeafNode::RangeScan(const char *key1,
     if (!curr_meta.IsVisible()) {
       i += 1;
       continue;
-    };
+    }
     char *curr_key;
     GetRecord(curr_meta, &curr_key, nullptr);
     auto range_code = KeyInRange(curr_key, curr_meta.GetKeyLength(), key1, size1, key2, size2);
     if (range_code == 0) {
-      result->emplace_back(*Record::New(curr_meta, this));
+      result->emplace_back(Record::New(curr_meta, this));
     } else if (range_code == 1 && i < header.sorted_count) {
       // current key is larger than upper bound
       // jump to the unsorted field
@@ -694,6 +694,8 @@ ReturnCode LeafNode::RangeScan(const char *key1,
     }
     i += 1;
   }
+//  std::sort(result->begin(), result->end());
+  return ReturnCode::Ok();
 }
 
 bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {

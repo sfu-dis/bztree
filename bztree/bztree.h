@@ -98,7 +98,7 @@ struct RecordMetadata {
   static const uint64_t kVisibleFlag = 0x8;
 
   inline bool IsVacant() { return meta == 0; }
-  inline uint16_t GetKeyLength() { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
+  inline uint16_t GetKeyLength() const { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
 
 //    Get the padded key length from accurate key length
   inline uint16_t GetPaddedKeyLength() {
@@ -151,7 +151,6 @@ struct RecordMetadata {
 
 class BaseNode {
  protected:
-
   bool is_leaf;
   NodeHeader header;
   RecordMetadata record_metadata[0];
@@ -159,14 +158,6 @@ class BaseNode {
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
   void Dump();
-
-  static const inline int KeyCompare(const char *key1, uint32_t size1, const char *key2, uint32_t size2) {
-    auto cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
-    if (cmp == 0) {
-      return size1 - size2;
-    }
-    return cmp;
-  }
 
   // Check if the key in a range, inclusive
   // -1 if smaller than left key
@@ -180,13 +171,22 @@ class BaseNode {
       return -1;
     }
     cmp = KeyCompare(key, size, key_right, size_right);
-    if (cmp < 0) {
+    if (cmp <= 0) {
       return 0;
-    } else if (cmp > 0)
+    } else if (cmp > 0) {
       return 1;
+    }
   }
 
  public:
+  static const inline int KeyCompare(const char *key1, uint32_t size1,
+                                     const char *key2, uint32_t size2) {
+    auto cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+    if (cmp == 0) {
+      return size1 - size2;
+    }
+    return cmp;
+  }
   inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
   explicit BaseNode(bool leaf, uint32_t size) : is_leaf(leaf) {
     header.size = size;
@@ -365,7 +365,7 @@ class LeafNode : public BaseNode {
                        uint32_t size1,
                        const char *key2,
                        uint32_t size2,
-                       std::vector<Record> *result,
+                       std::vector<Record *> *result,
                        pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
@@ -404,13 +404,31 @@ class LeafNode : public BaseNode {
 struct Record {
   RecordMetadata meta;
   char data[0];
-  Record() = default;
+  explicit Record(RecordMetadata meta) {
+    this->meta = meta;
+  }
   static Record *New(RecordMetadata meta, LeafNode *node) {
     auto item = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
-    new(item) Record();
-    item->meta = meta;
-    memcpy(item + sizeof(meta), reinterpret_cast<char *>(node) + meta.GetOffset(), meta.GetTotalLength());
+    memset(item, 0, meta.GetTotalLength() + sizeof(meta));
+    new(item) Record(meta);
+    memcpy(item->data,
+           reinterpret_cast<char *>(node) + meta.GetOffset(),
+           meta.GetTotalLength());
     return item;
+  }
+
+  const uint64_t GetPayload() {
+    return *reinterpret_cast<uint64_t *>(data + meta.GetPaddedKeyLength());
+  }
+  const char *GetKey() const {
+    return data;
+  }
+
+  bool operator<(const Record &out) {
+    auto out_key = out.GetKey();
+    auto cmp = BaseNode::KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
+                                    out.GetKey(), out.meta.GetKeyLength());
+    return cmp < 0;
   }
 };
 class BzTree {
@@ -452,7 +470,8 @@ class Iterator {
                     const char *begin_key,
                     uint16_t begin_size,
                     const char *end_key,
-                    uint16_t end_size) : begin_key(begin_key, begin_size), end_key(end_key, end_size) {
+                    uint16_t end_size) :
+      begin_key(begin_key, begin_size), end_key(end_key, end_size) {
     this->tree = tree;
     node = this->tree->TraverseToLeaf(stack, begin_key, begin_size);
   }
