@@ -121,7 +121,7 @@ InternalNode::InternalNode(uint32_t node_size,
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
 
   uint64_t offset = node_size;
-  bool need_insert_new = !key;
+  bool need_insert_new = key;
   uint32_t insert_idx = 0;
 
   // See if we need a new left_most_child_addr, i.e., this must be the new node
@@ -141,7 +141,7 @@ InternalNode::InternalNode(uint32_t node_size,
     src_node->GetRecord(meta, &m_data, &m_key, &m_payload);
     auto m_key_size = meta.GetKeyLength();
 
-    if (need_insert_new) {
+    if (!need_insert_new) {
       // New key already inserted, so directly insert the key from src node
       offset -= (meta.GetTotalLength());
       record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
@@ -173,7 +173,7 @@ InternalNode::InternalNode(uint32_t node_size,
         record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
         memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
 
-        need_insert_new = true;
+        need_insert_new = false;
       } else {
         offset -= (meta.GetTotalLength());
         record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
@@ -183,7 +183,7 @@ InternalNode::InternalNode(uint32_t node_size,
     ++insert_idx;
   }
 
-  if (!need_insert_new) {
+  if (need_insert_new) {
     // The new key-payload pair will be the right-most (largest key) element
     uint32_t total_size = RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t);
     offset -= total_size;
