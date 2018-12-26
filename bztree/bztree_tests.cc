@@ -232,13 +232,27 @@ class BzTreeTest : public ::testing::Test {
 };
 
 TEST_F(BzTreeTest, Insert) {
-  for (uint32_t i = 100; i < 150; ++i) {
+  static const uint32_t kMaxKey = 1400;
+  for (uint32_t i = 100; i < kMaxKey ; ++i) {
     std::string key = std::to_string(i);
-    auto rc = tree->Insert(key.c_str(), key.length(), 127);
+    auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);
     ASSERT_TRUE(rc.IsOk());
-//    tree->Dump();
+
+    uint64_t payload = 0;
+    rc = tree->Read(key.c_str(), key.length(), &payload);
+    ASSERT_TRUE(rc.IsOk());
+    ASSERT_TRUE(payload == i + 2000);
   }
   tree->Dump();
+
+  // Read everything back
+  for (uint32_t i = 100; i < kMaxKey; ++i) {
+    std::string key = std::to_string(i);
+    uint64_t payload = 0;
+    auto rc = tree->Read(key.c_str(), key.length(), &payload);
+    ASSERT_TRUE(rc.IsOk());
+    ASSERT_TRUE(payload == i + 2000);
+  }
 }
 
 TEST_F(BzTreeTest, Read) {

@@ -266,7 +266,7 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
 
     // Now get this internal node's real parent
     InternalNode *parent = stack.Top() ?
-                           reinterpret_cast<InternalNode *>(stack.Pop()->node) : nullptr;
+                           reinterpret_cast<InternalNode *>(stack.Top()->node) : nullptr;
     if (parent) {
       // Need to insert into this parent, so create a new one
       return parent->PrepareForSplit(stack, split_threshold,
