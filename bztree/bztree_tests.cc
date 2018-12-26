@@ -247,7 +247,6 @@ TEST_F(BzTreeTest, Insert) {
     ASSERT_TRUE(rc.IsOk());
     ASSERT_TRUE(payload == i + 2000);
   }
-  tree->Dump();
 
   // Read everything back
   for (uint32_t i = 100; i < kMaxKey; ++i) {

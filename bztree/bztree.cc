@@ -858,46 +858,6 @@ BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetad
   assert(child_node);
   return child_node;
 }
-RecordMetadata *InternalNode::GetChildren(const char *key,
-                                          uint16_t key_size,
-                                          bztree::BaseNode **left_child,
-                                          bztree::BaseNode **right_child) {
-  // Keys in internal nodes are always sorted, visible
-  int32_t left = 0, right = header.status.GetRecordCount() - 1;
-  while (left <= right) {
-    int32_t mid = (left + right) / 2;
-    auto meta = record_metadata[mid];
-    uint32_t meta_key_size = meta.GetKeyLength();
-    uint64_t meta_payload = 0;
-    char *meta_key;
-    GetRecord(meta, nullptr, &meta_key, &meta_payload);
-    auto cmp = KeyCompare(key, key_size, meta_key, meta_key_size);
-    if (cmp == 0) {
-      // Key exists
-      left = mid;
-      break;
-    }
-    if (cmp > 0) {
-      right = mid - 1;
-    } else {
-      left = mid + 1;
-    }
-  }
-  LOG_IF(FATAL, left < 0);
-
-  auto left_meta = record_metadata[left];
-  auto right_meta = record_metadata[left + 1];
-  uint64_t left_payload, right_payload;
-  GetRecord(left_meta, nullptr, nullptr, &left_payload);
-  GetRecord(right_meta, nullptr, nullptr, &right_payload);
-  if (left_child != nullptr) {
-    *left_child = reinterpret_cast<BaseNode *> (left_payload);
-  }
-  if (right_child != nullptr) {
-    *right_child = reinterpret_cast<BaseNode *> (right_payload);
-  }
-  return &record_metadata[left];
-}
 
 InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
                                         uint32_t split_threshold,
@@ -965,7 +925,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
   while (!node->IsLeaf()) {
     RecordMetadata meta;
     parent = reinterpret_cast<InternalNode *>(node);
-    meta = *(reinterpret_cast<InternalNode *>(node))->GetChildren(key, key_size, &node);
+    node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta);
     assert(node);
     stack.Push(parent, meta);
   }
