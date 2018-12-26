@@ -35,6 +35,13 @@ struct ReturnCode {
   static ReturnCode NotFound() { return ReturnCode(RetNotFound); }
 };
 
+
+struct Item {
+  char *key;
+  uint16_t key_size;
+  uint64_t payload;
+};
+
 struct NodeHeader {
   // Header:
   // |-------64 bits-------|---32 bits---|---32 bits---|
@@ -152,7 +159,6 @@ struct RecordMetadata {
 class BaseNode {
  public:
   inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
-  static const uint32_t kNodeSize = 4096;
 
  protected:
   bool is_leaf;
@@ -334,6 +340,12 @@ class LeafNode : public BaseNode {
   ReturnCode Delete(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
 
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
+
+  ReturnCode RangeScan(const std::string &begin_key,
+                       const std::string &end_key,
+                       std::vector<RecordMetadata *> *result,
+                       pmwcas::DescriptorPool *pmwcas_pool);
+
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
@@ -378,7 +390,7 @@ class BzTree {
     ~ParameterSet() {}
   };
 
-  BzTree(ParameterSet param, pmwcas::DescriptorPool *pool)
+  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool)
       : parameters(param), epoch(0), root(nullptr), pmwcas_pool(pool) {
     root = LeafNode::New();
   }
@@ -398,6 +410,28 @@ class BzTree {
   uint32_t epoch;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
+};
+
+class Iterator {
+ public:
+  explicit Iterator(const BzTree *tree,
+                    const char *begin_key,
+                    uint16_t begin_size,
+                    const char *end_key,
+                    uint16_t end_size) : begin_key(begin_key, begin_size), end_key(end_key, end_size) {
+    this->tree = tree;
+    node = this->tree->TraverseToLeaf(stack, begin_key, begin_size);
+  }
+
+  void GetNext();
+
+ private:
+  const BzTree *tree;
+  std::string begin_key;
+  std::string end_key;
+  LeafNode *node;
+  Stack stack;
+  std::vector<RecordMetadata *> meta_vec;
 };
 
 }  // namespace bztree

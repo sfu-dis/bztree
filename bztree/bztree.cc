@@ -610,7 +610,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
       GetRecord(*current, &unused, &current_key, &payload);
       if (current->IsVisible() &&
           key_size == current->GetKeyLength() &&
-          strncmp(key, current_key, current->GetKeyLength()) == 0) {
+          memcmp(key, current_key, current->GetKeyLength()) == 0) {
         return current;
       }
     }
@@ -662,6 +662,19 @@ ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload)
     return ReturnCode::Ok();
   } else {
     return ReturnCode::NotFound();
+  }
+}
+
+ReturnCode LeafNode::RangeScan(const std::string &begin_key,
+                               const std::string &end_key,
+                               std::vector<bztree::RecordMetadata *> *result,
+                               pmwcas::DescriptorPool *pmwcas_pool) {
+  // entering a new epoch and copying the data
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+  auto record_count = header.status.GetRecordCount();
+  for (uint32_t i = 0; i < record_count; i++) {
+    auto curr_meta = GetMetadata(i);
+
   }
 }
 
@@ -932,7 +945,7 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
   }
 }
 
-LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size) {
+LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size) const {
   BaseNode *node = root;
   InternalNode *parent = nullptr;
   assert(node);
