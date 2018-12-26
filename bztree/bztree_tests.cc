@@ -49,10 +49,7 @@ class LeafNodeFixtures : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-        pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
-    new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
-
+    pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
     node = (bztree::LeafNode *) malloc(bztree::LeafNode::kNodeSize);
     memset(node, 0, bztree::LeafNode::kNodeSize);
     new(node) bztree::LeafNode;
@@ -60,11 +57,13 @@ class LeafNodeFixtures : public ::testing::Test {
 
   void TearDown() override {
     delete node;
+    delete pool;
+    pmwcas::Thread::ClearRegistry();
   }
 };
 
 TEST_F(LeafNodeFixtures, Read) {
-  pool->GetEpoch()->Protect();
+  pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
   uint64_t payload;
   ASSERT_READ(node, "0", 1, 0);
@@ -74,12 +73,10 @@ TEST_F(LeafNodeFixtures, Read) {
   ASSERT_READ(node, "200", 3, 200);
   ASSERT_READ(node, "210", 3, 210);
   ASSERT_READ(node, "280", 3, 280);
-
-  pool->GetEpoch()->Unprotect();
 }
 
 TEST_F(LeafNodeFixtures, Insert) {
-  pool->GetEpoch()->Protect();
+  pmwcas::EpochGuard guard(pool->GetEpoch());
 
   ASSERT_TRUE(node->Insert(0, "def", 3, 100, pool).IsOk());
   ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool).IsOk());
@@ -94,12 +91,10 @@ TEST_F(LeafNodeFixtures, Insert) {
   ASSERT_TRUE(new_node->Insert(0, "apple", 5, 106, pool).IsOk());
   ASSERT_READ(new_node, "bdef", 4, 101);
   ASSERT_READ(new_node, "apple", 5, 106);
-
-  pool->GetEpoch()->Unprotect();
 }
 
 TEST_F(LeafNodeFixtures, DuplicateInsert) {
-  pool->GetEpoch()->Protect();
+  pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
   ASSERT_TRUE(node->Insert(0, "10", 2, 111, pool).IsKeyExists());
   ASSERT_TRUE(node->Insert(0, "11", 2, 1212, pool).IsOk());
@@ -114,12 +109,10 @@ TEST_F(LeafNodeFixtures, DuplicateInsert) {
 
   ASSERT_TRUE(new_node->Insert(0, "201", 3, 201, pool).IsOk());
   ASSERT_READ(new_node, "201", 3, 201);
-
-  pool->GetEpoch()->Unprotect();
 }
 
 TEST_F(LeafNodeFixtures, Delete) {
-  pool->GetEpoch()->Protect();
+  pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
   uint64_t payload;
   ASSERT_READ(node, "40", 2, 40);
@@ -131,12 +124,10 @@ TEST_F(LeafNodeFixtures, Delete) {
   ASSERT_READ(new_node, "200", 3, 200);
   ASSERT_TRUE(new_node->Delete("200", 3, pool).IsOk());
   ASSERT_TRUE(new_node->Read("200", 3, &payload).IsNotFound());
-
-  pool->GetEpoch()->Unprotect();
 }
 
 TEST_F(LeafNodeFixtures, SplitPrep) {
-  pool->GetEpoch()->Protect();
+  pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
 
   ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool).IsOk());
@@ -160,10 +151,9 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   left->Dump();
   right->Dump();
   parent->Dump();
-  pool->GetEpoch()->Unprotect();
 }
 TEST_F(LeafNodeFixtures, Update) {
-  pool->GetEpoch()->Protect();
+  pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
   ASSERT_READ(node, "10", 2, 10);
   ASSERT_TRUE(node->Update(0, "10", 2, 11, pool).IsOk());
@@ -172,11 +162,10 @@ TEST_F(LeafNodeFixtures, Update) {
   ASSERT_READ(node, "200", 3, 200);
   ASSERT_TRUE(node->Update(0, "200", 3, 201, pool).IsOk());
   ASSERT_READ(node, "200", 3, 201);
-  pool->GetEpoch()->Unprotect();
 }
 
 TEST_F(LeafNodeFixtures, Upsert) {
-  pool->GetEpoch()->Protect();
+  pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
   uint64_t payload;
 
@@ -196,8 +185,6 @@ TEST_F(LeafNodeFixtures, Upsert) {
   ASSERT_TRUE(node->Read("211", 3, &payload).IsNotFound());
   ASSERT_TRUE(node->Upsert(0, "211", 3, 211, pool).IsOk());
   ASSERT_READ(node, "211", 3, 211);
-
-  pool->GetEpoch()->Unprotect();
 }
 
 class BzTreeTest : public ::testing::Test {
@@ -218,16 +205,15 @@ class BzTreeTest : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-        pmwcas::Allocator::Get()->Allocate(sizeof(pmwcas::DescriptorPool)));
-    new(pool) pmwcas::DescriptorPool(1000, 1, nullptr, false);
-
+    pool = new pmwcas::DescriptorPool(5000, 1, nullptr, false);
     bztree::BzTree::ParameterSet param(256, 128);
     tree = new bztree::BzTree(param, pool);
   }
 
   void TearDown() override {
     delete tree;
+    delete pool;
+    pmwcas::Thread::ClearRegistry();
   }
 };
 

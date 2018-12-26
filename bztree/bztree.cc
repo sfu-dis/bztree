@@ -990,6 +990,8 @@ bool BzTree::ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root) {
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
   thread_local Stack stack;
   stack.Clear();
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+
   LeafNode *node = TraverseToLeaf(stack, key, key_size);
   if (node == nullptr) {
     return ReturnCode::NotFound();
@@ -1020,6 +1022,8 @@ ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) 
 ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   stack.Clear();
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+
   LeafNode *node = TraverseToLeaf(stack, key, key_size);
   if (node == nullptr) {
     return Insert(key, key_size, payload);
