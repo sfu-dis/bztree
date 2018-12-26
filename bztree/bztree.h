@@ -160,12 +160,30 @@ class BaseNode {
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
   void Dump();
 
-  const int KeyCompare(const char *key1, uint32_t size1, const char *key2, uint32_t size2) {
+  static const inline int KeyCompare(const char *key1, uint32_t size1, const char *key2, uint32_t size2) {
     auto cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
     if (cmp == 0) {
       return size1 - size2;
     }
     return cmp;
+  }
+
+  // Check if the key in a range, inclusive
+  // -1 if smaller than left key
+  // 1 if larger than right key
+  // 0 if in range
+  static const inline int KeyInRange(const char *key, uint32_t size,
+                                     const char *key_left, uint32_t size_left,
+                                     const char *key_right, uint32_t size_right) {
+    auto cmp = KeyCompare(key_left, size_left, key, size);
+    if (cmp > 0) {
+      return -1;
+    }
+    cmp = KeyCompare(key, size, key_right, size_right);
+    if (cmp < 0) {
+      return 0;
+    } else if (cmp > 0)
+      return 1;
   }
 
  public:
@@ -343,8 +361,10 @@ class LeafNode : public BaseNode {
 
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
 
-  ReturnCode RangeScan(const std::string &begin_key,
-                       const std::string &end_key,
+  ReturnCode RangeScan(const char *key1,
+                       uint32_t size1,
+                       const char *key2,
+                       uint32_t size2,
                        std::vector<Record> *result,
                        pmwcas::DescriptorPool *pmwcas_pool);
 

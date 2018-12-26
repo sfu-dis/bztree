@@ -664,18 +664,35 @@ ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload)
   }
 }
 
-ReturnCode LeafNode::RangeScan(const std::string &begin_key,
-                               const std::string &end_key,
+ReturnCode LeafNode::RangeScan(const char *key1,
+                               uint32_t size1,
+                               const char *key2,
+                               uint32_t size2,
                                std::vector<bztree::Record> *result,
                                pmwcas::DescriptorPool *pmwcas_pool) {
   // entering a new epoch and copying the data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
-  auto record_count = header.status.GetRecordCount();
 
   // scan the sorted fields first
-  for (uint32_t i = 0; i < header.sorted_count; i++) {
+  uint32_t i = 0;
+  while (i < header.status.GetRecordCount()) {
     auto curr_meta = GetMetadata(i);
-    result->emplace_back(*Record::New(curr_meta, this));
+    if (!curr_meta.IsVisible()) {
+      i += 1;
+      continue;
+    };
+    char *curr_key;
+    GetRecord(curr_meta, &curr_key, nullptr);
+    auto range_code = KeyInRange(curr_key, curr_meta.GetKeyLength(), key1, size1, key2, size2);
+    if (range_code == 0) {
+      result->emplace_back(*Record::New(curr_meta, this));
+    } else if (range_code == 1 && i < header.sorted_count) {
+      // current key is larger than upper bound
+      // jump to the unsorted field
+      i = header.sorted_count;
+      continue;
+    }
+    i += 1;
   }
 }
 
