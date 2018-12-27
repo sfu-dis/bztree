@@ -304,7 +304,17 @@ TEST_F(BzTreeTest, Delete) {
 }
 
 TEST_F(BzTreeTest, RangeScan) {
-  InsertDummy();
+  static const uint32_t kMaxKey = 100;
+  for (uint32_t i = 0; i < kMaxKey; i++) {
+    auto key = std::to_string(i);
+    tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i + 100);
+  }
+  auto iter = tree->RangeScan("10", 2, "40", 2);
+  bztree::Record *record = iter->GetNext();
+  while (record) {
+    std::cout << "Key: " << record->GetKey() << " Payload: " << record->GetPayload() << std::endl;
+    record = iter->GetNext();
+  }
 }
 
 int main(int argc, char **argv) {

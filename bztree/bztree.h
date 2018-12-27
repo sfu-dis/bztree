@@ -291,41 +291,39 @@ struct Stack {
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() { num_frames = 0; }
+  inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
   inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
   inline LeafNode *GetLargerSibling() {
-    auto stack_ptr = num_frames - 1;
-    if (stack_ptr <= 0) {
+    auto old_frames = num_frames;
+    if (old_frames < 0) {
       // dont have a parent
       return nullptr;
     }
-    Frame parent;
-    BaseNode *parent_node = nullptr;
+    Frame *parent;
+    InternalNode *parent_node = nullptr;
     uint32_t next_meta_index = 0;
 
     // go up to find parents
-    while (stack_ptr > 0) {
-      parent = frames[stack_ptr - 1];
-      parent_node = parent.node;
-      next_meta_index = parent.meta_index + 1;
-      if (next_meta_index >= parent_node->GetHeader()->status.GetRecordCount()) {
-        // We are already the largest
-        stack_ptr -= 1;
-      } else {
+    while (true) {
+      parent = Pop();
+      parent_node = parent->node;
+      next_meta_index = parent->meta_index + 1;
+      if (next_meta_index < parent_node->GetHeader()->sorted_count) {
         break;
+      } else if (IsEmpty()) {
+        // no more parents to go
+        return nullptr;
       }
-    }
-    if (stack_ptr == 0) {
-      return nullptr;
     }
     // dive in to get child
     uint64_t next_payload = 0;
-    while (stack_ptr != num_frames - 1) {
+    while (num_frames != old_frames) {
       parent_node->GetRecord(parent_node->GetMetadata(next_meta_index),
                              nullptr, nullptr, &next_payload);
-      parent_node = reinterpret_cast<BaseNode *>(next_payload);
+      Push(parent_node, next_meta_index);
+      parent_node = reinterpret_cast<InternalNode *>(next_payload);
       next_meta_index = 0;
-      stack_ptr += 1;
     }
     return reinterpret_cast<LeafNode *>(next_payload);
   }
@@ -499,6 +497,10 @@ class Iterator {
       return *old_it;
     } else {
       node = stack.GetLargerSibling();
+      if (node == nullptr) {
+        // no available node
+        return nullptr;
+      }
       item_vec.clear();
       node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
       item_it = item_vec.begin();
