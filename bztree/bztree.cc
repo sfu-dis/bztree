@@ -806,19 +806,19 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   }
 }
 
-BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta) {
+BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, uint32_t *out_meta) {
   // Keys in internal nodes are always sorted, visible
   int32_t left = 0, right = header.sorted_count - 1, mid = 0;
   BaseNode *child_node = nullptr;
-  RecordMetadata meta;
+  int32_t meta_index;
   while (true) {
     mid = (left + right) / 2;
-    meta = record_metadata[mid];
-    uint64_t meta_key_size = meta.GetKeyLength();
+    meta_index = mid;
+    uint64_t meta_key_size = record_metadata[meta_index].GetKeyLength();
     uint64_t meta_payload = 0;
     char *meta_key = nullptr;
     char *unused = nullptr;
-    GetRecord(meta, &unused, &meta_key, &meta_payload);
+    GetRecord(record_metadata[meta_index], &unused, &meta_key, &meta_payload);
     int cmp = memcmp(key, meta_key, std::min<uint64_t>(meta_key_size, key_size));
     if (cmp == 0) {
       cmp = key_size - meta_key_size;
@@ -827,8 +827,8 @@ BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetad
     if (cmp == 0) {
       // Key exists
       assert(mid >= 1);
-      meta = record_metadata[mid - 1];
-      GetRecord(meta, &unused, &meta_key, &meta_payload);
+      meta_index = mid - 1;
+      GetRecord(record_metadata[meta_index], &unused, &meta_key, &meta_payload);
       child_node = reinterpret_cast<BaseNode *>(meta_payload);
       break;
     } else {
@@ -837,8 +837,8 @@ BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetad
           child_node = reinterpret_cast<BaseNode *>(meta_payload);
         } else {
           assert(mid >= 1);
-          meta = record_metadata[mid - 1];
-          GetRecord(meta, &unused, &meta_key, &meta_payload);
+          meta_index = mid - 1;
+          GetRecord(record_metadata[meta_index], &unused, &meta_key, &meta_payload);
           child_node = reinterpret_cast<BaseNode *>(meta_payload);
         }
         break;
@@ -853,7 +853,7 @@ BaseNode *InternalNode::GetChild(const char *key, uint16_t key_size, RecordMetad
   }
 
   if (out_meta) {
-    *out_meta = meta;
+    *out_meta = static_cast<uint32_t>(meta_index);
   }
   assert(child_node);
   return child_node;
@@ -923,11 +923,11 @@ LeafNode *BzTree::TraverseToLeaf(Stack &stack, const char *key, uint64_t key_siz
   InternalNode *parent = nullptr;
   assert(node);
   while (!node->IsLeaf()) {
-    RecordMetadata meta;
+    uint32_t meta_index;
     parent = reinterpret_cast<InternalNode *>(node);
-    node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta);
+    node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta_index);
     assert(node);
-    stack.Push(parent, meta);
+    stack.Push(parent, meta_index);
   }
   return reinterpret_cast<LeafNode *>(node);
 }
@@ -996,7 +996,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         // There is a grand parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent. Don't care the
         // result here - have to retry anyway.
-        gp->Update(top->meta, old_parent, parent, pmwcas_pool);
+        gp->Update(top->GetMeta(), old_parent, parent, pmwcas_pool);
       } else {
         // No grand parent or already popped out by during split propogation
         if (!ChangeRoot(old_root_addr, parent)) {

@@ -230,30 +230,7 @@ class BaseNode {
   }
 };
 
-class InternalNode;
-struct Stack {
-  struct Frame {
-    Frame() : node(nullptr), meta() {}
-    ~Frame() {}
-    InternalNode *node;
-    RecordMetadata meta;
-  };
-  static const uint32_t kMaxFrames = 32;
-  Frame frames[kMaxFrames];
-  uint32_t num_frames;
-
-  Stack() : num_frames(0) {}
-  ~Stack() { num_frames = 0; }
-  inline void Push(InternalNode *node, RecordMetadata meta) {
-    auto &frame = frames[num_frames++];
-    frame.node = node;
-    frame.meta = meta;
-  }
-  inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
-  inline void Clear() { num_frames = 0; }
-  inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
-  inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
-};
+class Stack;
 
 // Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
@@ -267,11 +244,11 @@ class InternalNode : public BaseNode {
                     uint64_t left_child_addr, uint64_t right_child_addr,
                     uint64_t left_most_child_addr = 0);
 
-  InternalNode(uint32_t node_size, const char *key, const uint16_t key_size,
+  InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode(uint32_t node_size, InternalNode *src_node,
                uint32_t begin_meta_idx, uint32_t nr_records,
-               const char *key, const uint16_t key_size,
+               const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr,
                uint64_t left_most_child_addr = 0);
   ~InternalNode() = default;
@@ -286,21 +263,35 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
-  RecordMetadata *GetChildren(const char *key,
-                              uint16_t key_size,
-                              BaseNode **left_child,
-                              BaseNode **right_child = nullptr);
+  BaseNode *GetChild(const char *key, uint16_t key_size, uint32_t *out_meta = nullptr);
   void Dump(bool dump_children = false);
+};
 
- private:
-  inline char *GetKey(RecordMetadata meta) {
-    if (!meta.IsVisible()) {
-      return nullptr;
+struct Stack {
+  struct Frame {
+    Frame() : node(nullptr), meta_index() {}
+    ~Frame() {}
+    InternalNode *node;
+    uint32_t meta_index;
+    RecordMetadata GetMeta() {
+      return node->GetMetadata(meta_index);
     }
-    uint64_t offset = meta.GetOffset();
-    return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
+  };
+  static const uint32_t kMaxFrames = 32;
+  Frame frames[kMaxFrames];
+  uint32_t num_frames;
+
+  Stack() : num_frames(0) {}
+  ~Stack() { num_frames = 0; }
+  inline void Push(InternalNode *node, uint32_t meta_index) {
+    auto &frame = frames[num_frames++];
+    frame.node = node;
+    frame.meta_index = meta_index;
   }
+  inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
+  inline void Clear() { num_frames = 0; }
+  inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
+  inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
 };
 
 struct Record;
