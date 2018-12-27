@@ -267,6 +267,7 @@ class InternalNode : public BaseNode {
   void Dump(bool dump_children = false);
 };
 
+class LeafNode;
 struct Stack {
   struct Frame {
     Frame() : node(nullptr), meta_index() {}
@@ -292,6 +293,42 @@ struct Stack {
   inline void Clear() { num_frames = 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
   inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
+  inline LeafNode *GetLargerSibling() {
+    auto stack_ptr = num_frames - 1;
+    if (stack_ptr <= 0) {
+      // dont have a parent
+      return nullptr;
+    }
+    Frame parent;
+    BaseNode *parent_node = nullptr;
+    uint32_t next_meta_index = 0;
+
+    // go up to find parents
+    while (stack_ptr > 0) {
+      parent = frames[stack_ptr - 1];
+      parent_node = parent.node;
+      next_meta_index = parent.meta_index + 1;
+      if (next_meta_index >= parent_node->GetHeader()->status.GetRecordCount()) {
+        // We are already the largest
+        stack_ptr -= 1;
+      } else {
+        break;
+      }
+    }
+    if (stack_ptr == 0) {
+      return nullptr;
+    }
+    // dive in to get child
+    uint64_t next_payload = 0;
+    while (stack_ptr != num_frames - 1) {
+      parent_node->GetRecord(parent_node->GetMetadata(next_meta_index),
+                             nullptr, nullptr, &next_payload);
+      parent_node = reinterpret_cast<BaseNode *>(next_payload);
+      next_meta_index = 0;
+      stack_ptr += 1;
+    }
+    return reinterpret_cast<LeafNode *>(next_payload);
+  }
 };
 
 struct Record;
@@ -461,6 +498,11 @@ class Iterator {
       item_it += 1;
       return *old_it;
     } else {
+      node = stack.GetLargerSibling();
+      item_vec.clear();
+      node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+      item_it = item_vec.begin();
+      return GetNext();
     }
   }
 

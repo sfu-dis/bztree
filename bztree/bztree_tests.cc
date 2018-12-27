@@ -237,7 +237,7 @@ class BzTreeTest : public ::testing::Test {
 
 TEST_F(BzTreeTest, Insert) {
   static const uint32_t kMaxKey = 1400;
-  for (uint32_t i = 100; i < kMaxKey ; ++i) {
+  for (uint32_t i = 100; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);
     ASSERT_TRUE(rc.IsOk());
@@ -301,6 +301,10 @@ TEST_F(BzTreeTest, Delete) {
   ASSERT_TRUE(tree->Delete("11", 2).IsNotFound());
   ASSERT_TRUE(tree->Delete("10", 2).IsOk());
   ASSERT_TRUE(tree->Read("10", 2, &payload).IsNotFound());
+}
+
+TEST_F(BzTreeTest, RangeScan) {
+  InsertDummy();
 }
 
 int main(int argc, char **argv) {
