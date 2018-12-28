@@ -927,7 +927,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key, uint64_t key_siz
     node = (reinterpret_cast<InternalNode *>(node))->GetChild(key, key_size, &meta_index);
     assert(node);
     if (stack != nullptr) {
-      stack->Push(parent, meta_index);
+      stack->Push(parent, parent->GetMetadata(meta_index));
     }
   }
   return reinterpret_cast<LeafNode *>(node);
@@ -998,7 +998,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         // There is a grand parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent. Don't care the
         // result here - have to retry anyway.
-        gp->Update(top->GetMeta(), old_parent, parent, pmwcas_pool);
+        gp->Update(top->meta, old_parent, parent, pmwcas_pool);
       } else {
         // No grand parent or already popped out by during split propogation
         if (!ChangeRoot(old_root_addr, parent)) {

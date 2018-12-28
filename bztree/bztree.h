@@ -270,13 +270,10 @@ class InternalNode : public BaseNode {
 class LeafNode;
 struct Stack {
   struct Frame {
-    Frame() : node(nullptr), meta_index() {}
+    Frame() : node(nullptr), meta() {}
     ~Frame() {}
     InternalNode *node;
-    uint32_t meta_index;
-    RecordMetadata GetMeta() {
-      return node->GetMetadata(meta_index);
-    }
+    RecordMetadata meta;
   };
   static const uint32_t kMaxFrames = 32;
   Frame frames[kMaxFrames];
@@ -284,49 +281,16 @@ struct Stack {
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
-  inline void Push(InternalNode *node, uint32_t meta_index) {
+  inline void Push(InternalNode *node, RecordMetadata meta) {
     auto &frame = frames[num_frames++];
     frame.node = node;
-    frame.meta_index = meta_index;
+    frame.meta = meta;
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() { num_frames = 0; }
   inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
   inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
-  inline LeafNode *GetLargerSibling() {
-    auto old_frames = num_frames;
-    if (old_frames < 0) {
-      // dont have a parent
-      return nullptr;
-    }
-    Frame *parent;
-    InternalNode *parent_node = nullptr;
-    uint32_t next_meta_index = 0;
-
-    // go up to find parents
-    while (true) {
-      parent = Pop();
-      parent_node = parent->node;
-      next_meta_index = parent->meta_index + 1;
-      if (next_meta_index < parent_node->GetHeader()->sorted_count) {
-        break;
-      } else if (IsEmpty()) {
-        // no more parents to go
-        return nullptr;
-      }
-    }
-    // dive in to get child
-    uint64_t next_payload = 0;
-    while (num_frames != old_frames) {
-      parent_node->GetRecord(parent_node->GetMetadata(next_meta_index),
-                             nullptr, nullptr, &next_payload);
-      Push(parent_node, next_meta_index);
-      parent_node = reinterpret_cast<InternalNode *>(next_payload);
-      next_meta_index = 0;
-    }
-    return reinterpret_cast<LeafNode *>(next_payload);
-  }
 };
 
 struct Record;
@@ -485,7 +449,7 @@ class Iterator {
     this->begin_size = begin_size;
     this->end_size = end_size;
     this->tree = tree;
-    node = this->tree->TraverseToLeaf(&stack, begin_key, begin_size);
+    node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
     node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
     item_it = item_vec.begin();
   }
@@ -496,7 +460,11 @@ class Iterator {
       item_it += 1;
       return *old_it;
     } else {
-      node = stack.GetLargerSibling();
+      auto last_record = item_vec.back();
+      auto last_key = last_record->GetKey();
+      node = this->tree->TraverseToLeaf(nullptr,
+                                        last_record->GetKey(),
+                                        last_record->meta.GetKeyLength());
       if (node == nullptr) {
         // no available node
         return nullptr;
@@ -515,7 +483,6 @@ class Iterator {
   const char *end_key;
   uint16_t end_size;
   LeafNode *node;
-  Stack stack;
   std::vector<Record *> item_vec;
   std::vector<Record *>::iterator item_it;
 };
