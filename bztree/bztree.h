@@ -463,7 +463,7 @@ class BzTree {
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
   Iterator *RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2);
-  LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size) const;
+  LeafNode *TraverseToLeaf(Stack *stack, const char *key, uint64_t key_size) const;
 
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
@@ -485,7 +485,7 @@ class Iterator {
     this->begin_size = begin_size;
     this->end_size = end_size;
     this->tree = tree;
-    node = this->tree->TraverseToLeaf(stack, begin_key, begin_size);
+    node = this->tree->TraverseToLeaf(&stack, begin_key, begin_size);
     node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
     item_it = item_vec.begin();
   }
