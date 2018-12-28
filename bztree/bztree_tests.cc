@@ -313,7 +313,7 @@ TEST_F(BzTreeTest, RangeScan) {
   for (uint32_t i = 100; i <= 140; i += 1) {
     auto *record = iter->GetNext();
     auto key = std::string(record->GetKey(), 3);
-    ASSERT_EQ(record->GetPayload(), i);
+    ASSERT_EQ(i, record->GetPayload());
     ASSERT_EQ(key, std::to_string(i));
   }
 }

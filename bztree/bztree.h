@@ -263,7 +263,12 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  BaseNode *GetChild(const char *key, uint16_t key_size, uint32_t *out_meta = nullptr);
+  uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_smaller = true);
+  inline BaseNode *GetChildByMetaIndex(uint32_t index) {
+    uint64_t child_addr;
+    GetRecord(GetMetadata(index), nullptr, nullptr, &child_addr);
+    return reinterpret_cast<BaseNode *> (child_addr);
+  }
   void Dump(bool dump_children = false);
 };
 
@@ -427,7 +432,8 @@ class BzTree {
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
   Iterator *RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2);
-  LeafNode *TraverseToLeaf(Stack *stack, const char *key, uint64_t key_size) const;
+  LeafNode *TraverseToLeaf(Stack *stack, const char *key,
+                           uint16_t key_size, bool smaller_child = true) const;
 
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
@@ -464,7 +470,8 @@ class Iterator {
       auto last_key = last_record->GetKey();
       node = this->tree->TraverseToLeaf(nullptr,
                                         last_record->GetKey(),
-                                        last_record->meta.GetKeyLength());
+                                        last_record->meta.GetKeyLength(),
+                                        false);
       if (node == nullptr) {
         // no available node
         return nullptr;
