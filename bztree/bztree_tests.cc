@@ -304,13 +304,13 @@ TEST_F(BzTreeTest, Delete) {
 }
 
 TEST_F(BzTreeTest, RangeScan) {
-  static const uint32_t kMaxKey = 200;
-  for (uint32_t i = 100; i < kMaxKey; i++) {
+  static const uint32_t kMaxKey = 125;
+  for (uint32_t i = 100; i <= kMaxKey; i++) {
     auto key = std::to_string(i);
     tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
   }
-  auto iter = tree->RangeScan("100", 3, "140", 3);
-  for (uint32_t i = 100; i <= 140; i += 1) {
+  auto iter = tree->RangeScan("100", 3, "125", 3);
+  for (uint32_t i = 100; i <= 125; i += 1) {
     auto *record = iter->GetNext();
     auto key = std::string(record->GetKey(), 3);
     ASSERT_EQ(i, record->GetPayload());

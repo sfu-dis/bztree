@@ -384,7 +384,7 @@ struct Record {
   }
   static Record *New(RecordMetadata meta, LeafNode *node) {
     auto item = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
-    memset(item, 0, meta.GetTotalLength() + sizeof(meta));
+    memset(item, 0, meta.GetTotalLength() + sizeof(Record));
     new(item) Record(meta);
     memcpy(item->data,
            reinterpret_cast<char *>(node) + meta.GetOffset(),
@@ -433,7 +433,7 @@ class BzTree {
   ReturnCode Delete(const char *key, uint16_t key_size);
   Iterator *RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2);
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
-                           uint16_t key_size, bool smaller_child = true) const;
+                           uint16_t key_size, bool le_child = true) const;
 
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
@@ -467,7 +467,6 @@ class Iterator {
       return *old_it;
     } else {
       auto last_record = item_vec.back();
-      auto last_key = last_record->GetKey();
       node = this->tree->TraverseToLeaf(nullptr,
                                         last_record->GetKey(),
                                         last_record->meta.GetKeyLength(),

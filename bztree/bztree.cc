@@ -824,23 +824,18 @@ uint32_t InternalNode::GetChildIndex(const char *key, uint16_t key_size, bool ge
       } else {
         return static_cast<uint32_t>(mid);
       }
-    } else {
-      if (left > right) {
-        if (cmp > 0) {
-          return static_cast<uint32_t>(mid );
-        } else {
-          if (get_smaller) {
-            return static_cast<uint32_t>(mid - 1);
-          } else {
-            return static_cast<uint32_t>(mid + 1);
-          }
-        }
+    }
+    if (left > right) {
+      if (cmp <= 0 && get_smaller) {
+        return static_cast<uint32_t>(mid - 1);
       } else {
-        if (cmp > 0) {
-          left = mid + 1;
-        } else {
-          right = mid - 1;
-        }
+        return static_cast<uint32_t> (mid);
+      }
+    } else {
+      if (cmp > 0) {
+        left = mid + 1;
+      } else {
+        right = mid - 1;
       }
     }
   }
@@ -908,14 +903,14 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 }
 
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
-                                 uint16_t key_size, bool smaller_child) const {
+                                 uint16_t key_size, bool le_child) const {
   BaseNode *node = root;
   InternalNode *parent = nullptr;
   uint32_t meta_index = 0;
   assert(node);
   while (!node->IsLeaf()) {
     parent = reinterpret_cast<InternalNode *>(node);
-    meta_index = parent->GetChildIndex(key, key_size, smaller_child);
+    meta_index = parent->GetChildIndex(key, key_size, le_child);
     node = parent->GetChildByMetaIndex(meta_index);
     assert(node);
     if (stack != nullptr) {
