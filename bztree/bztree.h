@@ -98,7 +98,7 @@ struct RecordMetadata {
   static const uint64_t kVisibleFlag = 0x8;
 
   inline bool IsVacant() { return meta == 0; }
-  inline uint16_t GetKeyLength() { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
+  inline uint16_t GetKeyLength() const { return (uint16_t) ((meta & kKeyLengthMask) >> 32); }
 
 //    Get the padded key length from accurate key length
   inline uint16_t GetPaddedKeyLength() {
@@ -155,13 +155,39 @@ class BaseNode {
   NodeHeader header;
   RecordMetadata record_metadata[0];
 
- protected:
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
-  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
   void Dump();
 
+  // Check if the key in a range, inclusive
+  // -1 if smaller than left key
+  // 1 if larger than right key
+  // 0 if in range
+  static const inline int KeyInRange(const char *key, uint32_t size,
+                                     const char *key_left, uint32_t size_left,
+                                     const char *key_right, uint32_t size_right) {
+    auto cmp = KeyCompare(key_left, size_left, key, size);
+    if (cmp > 0) {
+      return -1;
+    }
+    cmp = KeyCompare(key, size, key_right, size_right);
+    if (cmp <= 0) {
+      return 0;
+    } else if (cmp > 0) {
+      return 1;
+    }
+  }
+
  public:
+  static const inline int KeyCompare(const char *key1, uint32_t size1,
+                                     const char *key2, uint32_t size2) {
+    auto cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+    if (cmp == 0) {
+      return size1 - size2;
+    }
+    return cmp;
+  }
+  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
   explicit BaseNode(bool leaf, uint32_t size) : is_leaf(leaf) {
     header.size = size;
   }
@@ -186,20 +212,67 @@ class BaseNode {
     if (!meta.IsVisible()) {
       return false;
     }
-
     assert(meta.GetTotalLength());
+    char *tmp_data = reinterpret_cast<char *>(this) + meta.GetOffset();
+    if (data != nullptr) {
+      *data = tmp_data;
+    }
+    auto padded_key_len = meta.GetPaddedKeyLength();
+    if (key != nullptr) {
+//    zero key length dummy record
+      *key = padded_key_len == 0 ? nullptr : tmp_data;
+    }
 
-    *data = reinterpret_cast<char *>(this) + meta.GetOffset();
-    uint16_t padded_key_len = meta.GetPaddedKeyLength();
-
-    // Zero key length dummy record
-    *key = (padded_key_len == 0 ? nullptr : *data);
-    *payload = *reinterpret_cast<uint64_t *>(*data + padded_key_len);
+    if (payload != nullptr) {
+      *payload = *reinterpret_cast<uint64_t *>(tmp_data + padded_key_len);
+    }
     return true;
   }
 };
 
-class InternalNode;
+class Stack;
+
+// Internal node: immutable once created, no free space, keys are always sorted
+class InternalNode : public BaseNode {
+ public:
+  static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
+                           uint64_t left_child_addr, uint64_t right_child_addr);
+  static InternalNode *New(const char *key, uint32_t key_size,
+                           uint64_t left_child_addr, uint64_t right_child_addr);
+  InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
+                    const char *key, uint32_t key_size,
+                    uint64_t left_child_addr, uint64_t right_child_addr,
+                    uint64_t left_most_child_addr = 0);
+
+  InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr);
+  InternalNode(uint32_t node_size, InternalNode *src_node,
+               uint32_t begin_meta_idx, uint32_t nr_records,
+               const char *key, uint16_t key_size,
+               uint64_t left_child_addr, uint64_t right_child_addr,
+               uint64_t left_most_child_addr = 0);
+  ~InternalNode() = default;
+
+  InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
+                                const char *key, uint32_t key_size,
+                                uint64_t left_child_addr, uint64_t right_child_addr);
+
+  inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
+    char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
+    return reinterpret_cast<uint64_t *>(ptr);
+  }
+  ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
+                    pmwcas::DescriptorPool *pmwcas_pool);
+  uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_smaller = true);
+  inline BaseNode *GetChildByMetaIndex(uint32_t index) {
+    uint64_t child_addr;
+    GetRecord(GetMetadata(index), nullptr, nullptr, &child_addr);
+    return reinterpret_cast<BaseNode *> (child_addr);
+  }
+  void Dump(bool dump_children = false);
+};
+
+class LeafNode;
 struct Stack {
   struct Frame {
     Frame() : node(nullptr), meta() {}
@@ -220,53 +293,12 @@ struct Stack {
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() { num_frames = 0; }
+  inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
   inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
 };
 
-// Internal node: immutable once created, no free space, keys are always sorted
-class InternalNode : public BaseNode {
- public:
-  static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
-  static InternalNode *New(const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
-  InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
-                    const char *key, uint32_t key_size,
-                    uint64_t left_child_addr, uint64_t right_child_addr,
-                    uint64_t left_most_child_addr = 0);
-
-  InternalNode(uint32_t node_size, const char *key, const uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr);
-  InternalNode(uint32_t node_size, InternalNode *src_node,
-               uint32_t begin_meta_idx, uint32_t nr_records,
-               const char *key, const uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr,
-               uint64_t left_most_child_addr = 0);
-  ~InternalNode() = default;
-
-  InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
-                                const char *key, uint32_t key_size,
-                                uint64_t left_child_addr, uint64_t right_child_addr);
-
-  inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
-    char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
-    return reinterpret_cast<uint64_t *>(ptr);
-  }
-  ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
-                    pmwcas::DescriptorPool *pmwcas_pool);
-  BaseNode *GetChild(const char *key, uint16_t key_size, RecordMetadata *out_meta = nullptr);
-  void Dump(bool dump_children = false);
-
- private:
-  inline char *GetKey(RecordMetadata meta) {
-    if (!meta.IsVisible()) {
-      return nullptr;
-    }
-    uint64_t offset = meta.GetOffset();
-    return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-  }
-};
+struct Record;
 
 class LeafNode : public BaseNode {
  public:
@@ -303,6 +335,14 @@ class LeafNode : public BaseNode {
   ReturnCode Delete(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
 
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
+
+  ReturnCode RangeScan(const char *key1,
+                       uint32_t size1,
+                       const char *key2,
+                       uint32_t size2,
+                       std::vector<Record *> *result,
+                       pmwcas::DescriptorPool *pmwcas_pool);
+
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
@@ -322,7 +362,7 @@ class LeafNode : public BaseNode {
 
   inline uint32_t GetUsedSpace() {
     return sizeof(*this) + header.status.GetBlockSize() +
-           header.status.GetRecordCount() * sizeof(RecordMetadata);
+        header.status.GetRecordCount() * sizeof(RecordMetadata);
   }
 
   inline uint32_t GetFreeSpace() { return kNodeSize - GetUsedSpace(); }
@@ -336,6 +376,37 @@ class LeafNode : public BaseNode {
   Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
 };
 
+struct Record {
+  RecordMetadata meta;
+  char data[0];
+  explicit Record(RecordMetadata meta) {
+    this->meta = meta;
+  }
+  static Record *New(RecordMetadata meta, LeafNode *node) {
+    auto item = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
+    memset(item, 0, meta.GetTotalLength() + sizeof(Record));
+    new(item) Record(meta);
+    memcpy(item->data,
+           reinterpret_cast<char *>(node) + meta.GetOffset(),
+           meta.GetTotalLength());
+    return item;
+  }
+
+  const uint64_t GetPayload() {
+    return *reinterpret_cast<uint64_t *>(data + meta.GetPaddedKeyLength());
+  }
+  const char *GetKey() const {
+    return data;
+  }
+
+  bool operator<(const Record &out) {
+    auto out_key = out.GetKey();
+    auto cmp = BaseNode::KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
+                                    out.GetKey(), out.meta.GetKeyLength());
+    return cmp < 0;
+  }
+};
+class Iterator;
 class BzTree {
  public:
   struct ParameterSet {
@@ -347,26 +418,79 @@ class BzTree {
     ~ParameterSet() {}
   };
 
-  BzTree(ParameterSet param, pmwcas::DescriptorPool *pool)
+  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool)
       : parameters(param), epoch(0), root(nullptr), pmwcas_pool(pool) {
     root = LeafNode::New();
   }
   void Dump();
+  inline pmwcas::DescriptorPool *GetPool() const {
+    return pmwcas_pool;
+  }
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
+  Iterator *RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2);
+  LeafNode *TraverseToLeaf(Stack *stack, const char *key,
+                           uint16_t key_size, bool le_child = true) const;
 
  private:
-  LeafNode *TraverseToLeaf(Stack &stack, const char *key, uint64_t key_size);
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
-
- private:
   ParameterSet parameters;
   uint32_t epoch;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
+};
+
+class Iterator {
+ public:
+  explicit Iterator(const BzTree *tree,
+                    const char *begin_key,
+                    uint16_t begin_size,
+                    const char *end_key,
+                    uint16_t end_size) {
+    this->begin_key = begin_key;
+    this->end_key = end_key;
+    this->begin_size = begin_size;
+    this->end_size = end_size;
+    this->tree = tree;
+    node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
+    node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+    item_it = item_vec.begin();
+  }
+
+  Record *GetNext() {
+    auto old_it = item_it;
+    if (item_it != item_vec.end()) {
+      item_it += 1;
+      return *old_it;
+    } else {
+      auto last_record = item_vec.back();
+      node = this->tree->TraverseToLeaf(nullptr,
+                                        last_record->GetKey(),
+                                        last_record->meta.GetKeyLength(),
+                                        false);
+      if (node == nullptr) {
+        // no available node
+        return nullptr;
+      }
+      item_vec.clear();
+      node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+      item_it = item_vec.begin();
+      return GetNext();
+    }
+  }
+
+ private:
+  const BzTree *tree;
+  const char *begin_key;
+  uint16_t begin_size;
+  const char *end_key;
+  uint16_t end_size;
+  LeafNode *node;
+  std::vector<Record *> item_vec;
+  std::vector<Record *>::iterator item_it;
 };
 
 }  // namespace bztree

@@ -187,6 +187,24 @@ TEST_F(LeafNodeFixtures, Upsert) {
   ASSERT_READ(node, "211", 3, 211);
 }
 
+TEST_F(LeafNodeFixtures, RangeScan) {
+  pool->GetEpoch()->Protect();
+  InsertDummy();
+  std::vector<bztree::Record *> result;
+  ASSERT_TRUE(node->RangeScan("10", 2, "40", 2, &result, pool).IsOk());
+  ASSERT_EQ(result.size(), 14);
+  ASSERT_EQ(result[0]->GetPayload(), 10);
+  ASSERT_EQ(result[2]->GetPayload(), 200);
+  ASSERT_EQ(result[13]->GetPayload(), 40);
+  ASSERT_EQ(std::string(result[0]->GetKey(), result[0]->meta.GetKeyLength()),
+            std::string("10"));
+  ASSERT_EQ(std::string(result[2]->GetKey(), result[2]->meta.GetKeyLength()),
+            std::string("200"));
+  ASSERT_EQ(std::string(result[13]->GetKey(), result[13]->meta.GetKeyLength()),
+            std::string("40"));
+  pool->GetEpoch()->Unprotect();
+}
+
 class BzTreeTest : public ::testing::Test {
  protected:
   pmwcas::DescriptorPool *pool;
@@ -219,7 +237,7 @@ class BzTreeTest : public ::testing::Test {
 
 TEST_F(BzTreeTest, Insert) {
   static const uint32_t kMaxKey = 1400;
-  for (uint32_t i = 100; i < kMaxKey ; ++i) {
+  for (uint32_t i = 100; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);
     ASSERT_TRUE(rc.IsOk());
@@ -229,7 +247,6 @@ TEST_F(BzTreeTest, Insert) {
     ASSERT_TRUE(rc.IsOk());
     ASSERT_TRUE(payload == i + 2000);
   }
-  tree->Dump();
 
   // Read everything back
   for (uint32_t i = 100; i < kMaxKey; ++i) {
@@ -284,6 +301,21 @@ TEST_F(BzTreeTest, Delete) {
   ASSERT_TRUE(tree->Delete("11", 2).IsNotFound());
   ASSERT_TRUE(tree->Delete("10", 2).IsOk());
   ASSERT_TRUE(tree->Read("10", 2, &payload).IsNotFound());
+}
+
+TEST_F(BzTreeTest, RangeScan) {
+  static const uint32_t kMaxKey = 125;
+  for (uint32_t i = 100; i <= kMaxKey; i++) {
+    auto key = std::to_string(i);
+    tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
+  }
+  auto iter = tree->RangeScan("100", 3, "125", 3);
+  for (uint32_t i = 100; i <= 125; i += 1) {
+    auto *record = iter->GetNext();
+    auto key = std::string(record->GetKey(), 3);
+    ASSERT_EQ(i, record->GetPayload());
+    ASSERT_EQ(key, std::to_string(i));
+  }
 }
 
 int main(int argc, char **argv) {
