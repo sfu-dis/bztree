@@ -1,3 +1,6 @@
 [submodule "pmwcas"]
 	path = pmwcas
 	url = git@github.com:Microsoft/pmwcas.git
+[submodule "pmdk"]
+	path = pmdk
+	url = https://github.com/pmem/pmdk.git
