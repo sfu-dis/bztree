@@ -35,8 +35,7 @@ get_property(BZTREE_LIB_SRC GLOBAL PROPERTY BZTREE_SRC)
 add_library(bztree SHARED ${BZTREE_LIB_SRC})
 
 add_executable(bztree_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_tests.cc)
-add_executable(bztree_thread_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_multithread_tests.cc
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/performance_test.h)
+add_executable(bztree_thread_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_multithread_tests.cc)
 target_link_libraries(bztree_tests bztree)
 target_link_libraries(bztree_thread_tests bztree)
 

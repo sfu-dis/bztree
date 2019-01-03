@@ -6,7 +6,7 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "performance_test.h"
+#include "util/performance_test.h"
 #include "../bztree.h"
 
 uint32_t descriptor_pool_size = 1000000;
