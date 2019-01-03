@@ -263,7 +263,7 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_smaller = true);
+  uint32_t GetChildIndex(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pool, bool get_le = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index) {
     uint64_t child_addr;
     GetRawRecord(GetMetadata(index), nullptr, nullptr, &child_addr);
@@ -334,7 +334,8 @@ class LeafNode : public BaseNode {
 
   ReturnCode Delete(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
 
-  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload, pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload,
+                  pmwcas::DescriptorPool *pmwcas_pool);
 
   ReturnCode RangeScan(const char *key1,
                        uint32_t size1,
@@ -444,8 +445,8 @@ class BzTree {
   ReturnCode Delete(const char *key, uint16_t key_size);
   Iterator *RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2);
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
-                           uint16_t key_size, bool le_child = true) const;
-
+                           uint16_t key_size,
+                           bool le_child = true) const;
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
   ParameterSet parameters;
@@ -460,13 +461,15 @@ class Iterator {
                     const char *begin_key,
                     uint16_t begin_size,
                     const char *end_key,
-                    uint16_t end_size) {
+                    uint16_t end_size,
+                    pmwcas::DescriptorPool *pool) {
     this->begin_key = begin_key;
     this->end_key = end_key;
     this->begin_size = begin_size;
     this->end_size = end_size;
     this->tree = tree;
-    node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
+    this->pool = pool;
+    node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size, pool);
     node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
     item_it = item_vec.begin();
   }
@@ -502,6 +505,7 @@ class Iterator {
   LeafNode *node;
   std::vector<Record *> item_vec;
   std::vector<Record *>::iterator item_it;
+  pmwcas::DescriptorPool *pool;
 };
 
 }  // namespace bztree

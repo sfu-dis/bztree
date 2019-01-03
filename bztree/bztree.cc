@@ -649,7 +649,8 @@ ReturnCode LeafNode::Delete(const char *key,
   }
   return ReturnCode::Ok();
 }
-ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload, pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
+                          pmwcas::DescriptorPool *pmwcas_pool) {
   auto meta = SearchRecordMeta(key, key_size, 0, (uint32_t) -1, false);
   if (meta == nullptr) {
     return ReturnCode::NotFound();
@@ -808,26 +809,27 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   }
 }
 
-uint32_t InternalNode::GetChildIndex(const char *key, uint16_t key_size, bool get_smaller) {
+uint32_t InternalNode::GetChildIndex(const char *key,
+                                     uint16_t key_size,
+                                     pmwcas::DescriptorPool *pool,
+                                     bool get_le) {
   // Keys in internal nodes are always sorted, visible
   int32_t left = 0, right = header.sorted_count - 1, mid = 0;
   while (true) {
     mid = (left + right) / 2;
-    auto meta_key_size = record_metadata[mid].GetKeyLength();
-    uint64_t meta_payload = 0;
-    char *meta_key = nullptr;
-    GetRawRecord(record_metadata[mid], nullptr, &meta_key, &meta_payload);
-    auto cmp = KeyCompare(key, key_size, meta_key, meta_key_size);
+    auto record = Record::New(GetMetadata(static_cast<uint32_t>(mid)),
+                              this, pool->GetEpoch());
+    auto cmp = KeyCompare(key, key_size, record->GetKey(), record->meta.GetKeyLength());
     if (cmp == 0) {
       // Key exists
-      if (get_smaller) {
+      if (get_le) {
         return static_cast<uint32_t>(mid - 1);
       } else {
         return static_cast<uint32_t>(mid);
       }
     }
     if (left > right) {
-      if (cmp <= 0 && get_smaller) {
+      if (cmp <= 0 && get_le) {
         return static_cast<uint32_t>(mid - 1);
       } else {
         return static_cast<uint32_t> (mid);
@@ -904,14 +906,15 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 }
 
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
-                                 uint16_t key_size, bool le_child) const {
+                                 uint16_t key_size,
+                                 bool le_child) const {
   BaseNode *node = root;
   InternalNode *parent = nullptr;
   uint32_t meta_index = 0;
   assert(node);
   while (!node->IsLeaf()) {
     parent = reinterpret_cast<InternalNode *>(node);
-    meta_index = parent->GetChildIndex(key, key_size, le_child);
+    meta_index = parent->GetChildIndex(key, key_size, pmwcas_pool, le_child);
     node = parent->GetChildByMetaIndex(meta_index);
     assert(node);
     if (stack != nullptr) {
@@ -927,7 +930,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
     stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+    LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
 
     // Check space to see if we need to split the node
     auto new_node_size = node->GetUsedSpace() + sizeof(RecordMetadata) +
@@ -1015,7 +1018,7 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
   stack.Clear();
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
-  LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+  LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
   if (node == nullptr) {
     return ReturnCode::NotFound();
   }
@@ -1033,7 +1036,7 @@ ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) 
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
     stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+    LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
@@ -1047,7 +1050,7 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
   stack.Clear();
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
-  LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+  LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
   if (node == nullptr) {
     return Insert(key, key_size, payload);
   }
@@ -1069,7 +1072,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
     stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+    LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
@@ -1089,7 +1092,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
 }
 
 Iterator *BzTree::RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2) {
-  auto iterator = new Iterator(this, key1, size1, key2, size2);
+  auto iterator = new Iterator(this, key1, size1, key2, size2, pmwcas_pool);
   return iterator;
 }
 
