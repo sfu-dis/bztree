@@ -27,15 +27,17 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 endif()
 
-set_property(GLOBAL APPEND PROPERTY BZTREE_SRC 
+set_property(GLOBAL APPEND PROPERTY BZTREE_SRC
   ${CMAKE_CURRENT_SOURCE_DIR}/bztree.cc
 )
 get_property(BZTREE_LIB_SRC GLOBAL PROPERTY BZTREE_SRC)
 
 add_library(bztree SHARED ${BZTREE_LIB_SRC})
 
-add_executable(bztree_tests ${CMAKE_CURRENT_SOURCE_DIR}/bztree_tests.cc)
+add_executable(bztree_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_tests.cc)
+add_executable(bztree_thread_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_multithread_tests.cc)
 target_link_libraries(bztree_tests bztree)
+target_link_libraries(bztree_thread_tests bztree)
 
 add_custom_target(
   cpplint ALL
@@ -44,7 +46,7 @@ add_custom_target(
     --filter=-runtime/references,-build/header_guard,-build/include
     ${CMAKE_CURRENT_SOURCE_DIR}/bztree.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bztree.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/bztree_tests.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_tests.cc
   || (exit 0)
 )
 

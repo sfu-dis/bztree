@@ -7,7 +7,7 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
-#include "bztree.h"
+#include "../bztree.h"
 
 class LeafNodeFixtures : public ::testing::Test {
  public:
