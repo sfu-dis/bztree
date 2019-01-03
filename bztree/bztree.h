@@ -187,7 +187,11 @@ class BaseNode {
     }
     return cmp;
   }
-  inline RecordMetadata GetMetadata(uint32_t i) { return record_metadata[i]; }
+  inline RecordMetadata GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
+    // ensure the metadata is installed
+    reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record_metadata + i)->GetValue(epoch);
+    return record_metadata[i];
+  }
   explicit BaseNode(bool leaf, uint32_t size) : is_leaf(leaf) {
     header.size = size;
   }
@@ -236,12 +240,14 @@ class Stack;
 class InternalNode : public BaseNode {
  public:
   static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
+                           uint64_t left_child_addr, uint64_t right_child_addr,
+                           pmwcas::EpochManager *epoch);
   static InternalNode *New(const char *key, uint32_t key_size,
                            uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
                     const char *key, uint32_t key_size,
                     uint64_t left_child_addr, uint64_t right_child_addr,
+                    pmwcas::EpochManager *epoch,
                     uint64_t left_most_child_addr = 0);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
@@ -250,12 +256,14 @@ class InternalNode : public BaseNode {
                uint32_t begin_meta_idx, uint32_t nr_records,
                const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr,
+               pmwcas::EpochManager *epoch,
                uint64_t left_most_child_addr = 0);
   ~InternalNode() = default;
 
   InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
                                 const char *key, uint32_t key_size,
-                                uint64_t left_child_addr, uint64_t right_child_addr);
+                                uint64_t left_child_addr, uint64_t right_child_addr,
+                                pmwcas::EpochManager *epoch);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
     char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
@@ -263,10 +271,11 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
-  uint32_t GetChildIndex(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pool, bool get_le = true);
-  inline BaseNode *GetChildByMetaIndex(uint32_t index) {
+  uint32_t GetChildIndex(const char *key, uint16_t key_size,
+                         pmwcas::DescriptorPool *pool, bool get_le = true);
+  inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
-    GetRawRecord(GetMetadata(index), nullptr, nullptr, &child_addr);
+    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr);
     return reinterpret_cast<BaseNode *> (child_addr);
   }
   void Dump(bool dump_children = false);
@@ -447,6 +456,7 @@ class BzTree {
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true) const;
+
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
   ParameterSet parameters;
