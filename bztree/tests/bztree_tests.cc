@@ -37,7 +37,7 @@ class LeafNodeFixtures : public ::testing::Test {
 
   void ASSERT_READ(bztree::LeafNode *node, const char *key, uint16_t key_size, uint64_t expected) {
     uint64_t payload;
-    node->Read(key, key_size, &payload);
+    node->Read(key, key_size, &payload, pool);
     ASSERT_EQ(payload, expected);
   }
 
@@ -68,7 +68,7 @@ TEST_F(LeafNodeFixtures, Read) {
   uint64_t payload;
   ASSERT_READ(node, "0", 1, 0);
   ASSERT_READ(node, "10", 2, 10);
-  ASSERT_TRUE(node->Read("100", 3, &payload).IsNotFound());
+  ASSERT_TRUE(node->Read("100", 3, &payload, pool).IsNotFound());
 
   ASSERT_READ(node, "200", 3, 200);
   ASSERT_READ(node, "210", 3, 210);
@@ -117,13 +117,13 @@ TEST_F(LeafNodeFixtures, Delete) {
   uint64_t payload;
   ASSERT_READ(node, "40", 2, 40);
   ASSERT_TRUE(node->Delete("40", 2, pool).IsOk());
-  ASSERT_TRUE(node->Read("40", 2, &payload).IsNotFound());
+  ASSERT_TRUE(node->Read("40", 2, &payload, pool).IsNotFound());
 
   auto new_node = node->Consolidate(pool);
 
   ASSERT_READ(new_node, "200", 3, 200);
   ASSERT_TRUE(new_node->Delete("200", 3, pool).IsOk());
-  ASSERT_TRUE(new_node->Read("200", 3, &payload).IsNotFound());
+  ASSERT_TRUE(new_node->Read("200", 3, &payload, pool).IsNotFound());
 }
 
 TEST_F(LeafNodeFixtures, SplitPrep) {
@@ -178,11 +178,11 @@ TEST_F(LeafNodeFixtures, Upsert) {
   ASSERT_READ(node, "210", 3, 211);
 
 //  Non-existing upsert
-  ASSERT_TRUE(node->Read("21", 2, &payload).IsNotFound());
+  ASSERT_TRUE(node->Read("21", 2, &payload, pool).IsNotFound());
   ASSERT_TRUE(node->Upsert(0, "21", 2, 21, pool).IsOk());
   ASSERT_READ(node, "21", 2, 21);
 
-  ASSERT_TRUE(node->Read("211", 3, &payload).IsNotFound());
+  ASSERT_TRUE(node->Read("211", 3, &payload, pool).IsNotFound());
   ASSERT_TRUE(node->Upsert(0, "211", 3, 211, pool).IsOk());
   ASSERT_READ(node, "211", 3, 211);
 }

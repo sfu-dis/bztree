@@ -334,7 +334,7 @@ class LeafNode : public BaseNode {
 
   ReturnCode Delete(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
 
-  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
+  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload, pmwcas::DescriptorPool *pmwcas_pool);
 
   ReturnCode RangeScan(const char *key1,
                        uint32_t size1,
@@ -384,6 +384,9 @@ struct Record {
   }
 
   static inline Record *New(RecordMetadata meta, BaseNode *node, pmwcas::EpochManager *epoch) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
     auto item = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
     memset(item, 0, meta.GetTotalLength() + sizeof(Record));
     new(item) Record(meta);

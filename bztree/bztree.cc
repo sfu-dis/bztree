@@ -649,17 +649,17 @@ ReturnCode LeafNode::Delete(const char *key,
   }
   return ReturnCode::Ok();
 }
-ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload) {
+ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload, pmwcas::DescriptorPool *pmwcas_pool) {
   auto meta = SearchRecordMeta(key, key_size, 0, (uint32_t) -1, false);
   if (meta == nullptr) {
     return ReturnCode::NotFound();
   }
-  char *unused_key;
-  if (GetRawRecord(*meta, &unused_key, payload)) {
-    return ReturnCode::Ok();
-  } else {
+  auto record = Record::New(*meta, this, pmwcas_pool->GetEpoch());
+  if (record == nullptr) {
     return ReturnCode::NotFound();
   }
+  *payload = record->GetPayload();
+  return ReturnCode::Ok();
 }
 
 ReturnCode LeafNode::RangeScan(const char *key1,
@@ -1020,7 +1020,7 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
     return ReturnCode::NotFound();
   }
   uint64_t tmp_payload;
-  auto rc = node->Read(key, key_size, &tmp_payload);
+  auto rc = node->Read(key, key_size, &tmp_payload, pmwcas_pool);
   if (rc.IsOk()) {
     *payload = tmp_payload;
   }
@@ -1052,7 +1052,7 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
     return Insert(key, key_size, payload);
   }
   uint64_t tmp_payload;
-  auto rc = node->Read(key, key_size, &tmp_payload);
+  auto rc = node->Read(key, key_size, &tmp_payload, pmwcas_pool);
   if (rc.IsNotFound()) {
     return Insert(key, key_size, payload);
   } else if (rc.IsOk()) {
