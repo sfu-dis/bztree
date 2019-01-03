@@ -80,7 +80,8 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   return node;
 }
 
-InternalNode::InternalNode(uint32_t node_size,
+InternalNode::InternalNode(uint32_t
+                           node_size,
                            const char *key,
                            const uint16_t key_size,
                            uint64_t left_child_addr,
@@ -138,7 +139,7 @@ InternalNode::InternalNode(uint32_t node_size,
     uint64_t m_payload = 0;
     char *m_key = nullptr;
     char *m_data = nullptr;
-    src_node->GetRecord(meta, &m_data, &m_key, &m_payload);
+    src_node->GetRawRecord(meta, &m_data, &m_key, &m_payload);
     auto m_key_size = meta.GetKeyLength();
 
     if (!need_insert_new) {
@@ -238,7 +239,7 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
     uint32_t separator_key_size = separator_meta.GetKeyLength();
     uint64_t separator_payload = 0;
     char *unused = nullptr;
-    bool success = GetRecord(separator_meta, &unused, &separator_key, &separator_payload);
+    bool success = GetRawRecord(separator_meta, &unused, &separator_key, &separator_payload);
     LOG_IF(FATAL, !success);
 
     int cmp = memcmp(key, separator_key, std::min<uint32_t>(key_size, separator_key_size));
@@ -331,7 +332,7 @@ void LeafNode::Dump() {
     RecordMetadata meta = record_metadata[i];
     uint64_t payload = 0;
     char *key = nullptr;
-    GetRecord(meta, &key, &payload);
+    GetRawRecord(meta, &key, &payload);
     std::string keystr(key, key + meta.GetKeyLength());
     std::cout << " - record " << i << ": key = " << keystr
               << ", payload = " << payload << std::endl;
@@ -350,7 +351,7 @@ void InternalNode::Dump(bool dump_children) {
     uint64_t right_child_addr = 0;
     char *key = nullptr;
     char *unused = nullptr;
-    GetRecord(meta, &unused, &key, &right_child_addr);
+    GetRawRecord(meta, &unused, &key, &right_child_addr);
     if (key) {
       std::string keystr(key, key + meta.GetKeyLength());
       std::cout << " | " << keystr << " | ";
@@ -522,7 +523,7 @@ ReturnCode LeafNode::Update(uint32_t epoch,
 
   char *record_key;
   uint64_t record_payload;
-  GetRecord(*meta_ptr, &record_key, &record_payload);
+  GetRawRecord(*meta_ptr, &record_key, &record_payload);
   if (payload == record_payload) {
     return ReturnCode::Ok();
   }
@@ -576,7 +577,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
       char *current_key = nullptr;
       char *unused = nullptr;
       auto current = &(record_metadata[middle]);
-      GetRecord(*current, &unused, &current_key, &payload);
+      GetRawRecord(*current, &unused, &current_key, &payload);
 
       auto cmp_result = KeyCompare(key, key_size, current_key, current->GetKeyLength());
       if (cmp_result < 0) {
@@ -604,7 +605,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
       uint64_t payload = 0;
       char *current_key = nullptr;
       char *unused = nullptr;
-      GetRecord(*current, &unused, &current_key, &payload);
+      GetRawRecord(*current, &unused, &current_key, &payload);
       if (current->IsVisible() &&
           KeyCompare(key, key_size, current_key, current->GetKeyLength()) == 0) {
         return current;
@@ -654,7 +655,7 @@ ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload)
     return ReturnCode::NotFound();
   }
   char *unused_key;
-  if (GetRecord(*meta, &unused_key, payload)) {
+  if (GetRawRecord(*meta, &unused_key, payload)) {
     return ReturnCode::Ok();
   } else {
     return ReturnCode::NotFound();
@@ -679,10 +680,10 @@ ReturnCode LeafNode::RangeScan(const char *key1,
       continue;
     }
     char *curr_key;
-    GetRecord(curr_meta, &curr_key, nullptr);
+    GetRawRecord(curr_meta, &curr_key, nullptr);
     auto range_code = KeyInRange(curr_key, curr_meta.GetKeyLength(), key1, size1, key2, size2);
     if (range_code == 0) {
-      result->emplace_back(Record::New(curr_meta, this));
+      result->emplace_back(Record::New(curr_meta, this, pmwcas_pool->GetEpoch()));
     } else if (range_code == 1 && i < header.sorted_count) {
       // current key is larger than upper bound
       // jump to the unsorted field
@@ -765,7 +766,7 @@ void LeafNode::CopyFrom(LeafNode *node,
     auto meta = *it;
     uint64_t payload = 0;
     char *key;
-    node->GetRecord(meta, &key, &payload);
+    node->GetRawRecord(meta, &key, &payload);
 
     // Copy data
     assert(meta.GetTotalLength() >= sizeof(uint64_t));
@@ -815,7 +816,7 @@ uint32_t InternalNode::GetChildIndex(const char *key, uint16_t key_size, bool ge
     auto meta_key_size = record_metadata[mid].GetKeyLength();
     uint64_t meta_payload = 0;
     char *meta_key = nullptr;
-    GetRecord(record_metadata[mid], nullptr, &meta_key, &meta_payload);
+    GetRawRecord(record_metadata[mid], nullptr, &meta_key, &meta_payload);
     auto cmp = KeyCompare(key, key_size, meta_key, meta_key_size);
     if (cmp == 0) {
       // Key exists
@@ -1080,7 +1081,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       auto first_meta = node->GetMetadata(0);
       char *meta_key;
       uint64_t payload;
-      node->GetRecord(first_meta, &meta_key, &payload);
+      node->GetRawRecord(first_meta, &meta_key, &payload);
       BaseNode *left_child, *right_child;
     }
   } while (rc.IsNodeFrozen());

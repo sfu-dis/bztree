@@ -208,7 +208,7 @@ class BaseNode {
   //    payload
   // 2. [*key] - pointer to the key (could be nullptr)
   // 3. [payload] - 8-byte payload
-  inline bool GetRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload) {
+  inline bool GetRawRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload) {
     if (!meta.IsVisible()) {
       return false;
     }
@@ -266,7 +266,7 @@ class InternalNode : public BaseNode {
   uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_smaller = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index) {
     uint64_t child_addr;
-    GetRecord(GetMetadata(index), nullptr, nullptr, &child_addr);
+    GetRawRecord(GetMetadata(index), nullptr, nullptr, &child_addr);
     return reinterpret_cast<BaseNode *> (child_addr);
   }
   void Dump(bool dump_children = false);
@@ -354,10 +354,10 @@ class LeafNode : public BaseNode {
     return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
   }
 
-  // Specialized GetRecord for leaf node only (key can't be nullptr)
-  inline bool GetRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+  // Specialized GetRawRecord for leaf node only (key can't be nullptr)
+  inline bool GetRawRecord(RecordMetadata meta, char **key, uint64_t *payload) {
     char *unused = nullptr;
-    return BaseNode::GetRecord(meta, &unused, key, payload);
+    return BaseNode::GetRawRecord(meta, &unused, key, payload);
   }
 
   inline uint32_t GetUsedSpace() {
@@ -382,13 +382,21 @@ struct Record {
   explicit Record(RecordMetadata meta) {
     this->meta = meta;
   }
-  static Record *New(RecordMetadata meta, LeafNode *node) {
+
+  static inline Record *New(RecordMetadata meta, BaseNode *node, pmwcas::EpochManager *epoch) {
     auto item = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
     memset(item, 0, meta.GetTotalLength() + sizeof(Record));
     new(item) Record(meta);
+    auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
+
+    // Key will never be changed and it will not be a pmwcas descriptor
+    // but payload is fixed length 8-byte value, can be updated by pmwcas
     memcpy(item->data,
            reinterpret_cast<char *>(node) + meta.GetOffset(),
-           meta.GetTotalLength());
+           meta.GetPaddedKeyLength());
+    auto payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
+        source_addr + meta.GetPaddedKeyLength())->GetValue(epoch);
+    memcpy(item->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
     return item;
   }
 
