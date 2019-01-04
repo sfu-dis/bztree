@@ -84,10 +84,10 @@ TEST_F(LeafNodeFixtures, Insert) {
   ASSERT_READ(node, "def", 3, 100);
   ASSERT_READ(node, "abc", 3, 102);
 
-  node->Dump();
+  node->Dump(pool->GetEpoch());
 
   auto *new_node = node->Consolidate(pool);
-  new_node->Dump();
+  new_node->Dump(pool->GetEpoch());
   ASSERT_TRUE(new_node->Insert(0, "apple", 5, 106, pool).IsOk());
   ASSERT_READ(new_node, "bdef", 4, 101);
   ASSERT_READ(new_node, "apple", 5, 106);
@@ -138,7 +138,7 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   ASSERT_TRUE(node->Insert(0, "deadpork", 8, 105, pool).IsOk());
   ASSERT_TRUE(node->Insert(0, "toronto", 7, 106, pool).IsOk());
 
-  node->Dump();
+  node->Dump(pool->GetEpoch());
 
   bztree::Stack stack;
   bztree::LeafNode *left = nullptr;
@@ -148,9 +148,9 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);
 
-  left->Dump();
-  right->Dump();
-  parent->Dump();
+  left->Dump(pool->GetEpoch());
+  right->Dump(pool->GetEpoch());
+  parent->Dump(pool->GetEpoch());
 }
 TEST_F(LeafNodeFixtures, Update) {
   pmwcas::EpochGuard guard(pool->GetEpoch());

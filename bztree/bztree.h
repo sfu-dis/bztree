@@ -212,7 +212,8 @@ class BaseNode {
   //    payload
   // 2. [*key] - pointer to the key (could be nullptr)
   // 3. [payload] - 8-byte payload
-  inline bool GetRawRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload) {
+  inline bool GetRawRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload,
+                           pmwcas::EpochManager *epoch) {
     if (!meta.IsVisible()) {
       return false;
     }
@@ -228,7 +229,9 @@ class BaseNode {
     }
 
     if (payload != nullptr) {
-      *payload = *reinterpret_cast<uint64_t *>(tmp_data + padded_key_len);
+      auto tmp_payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
+          tmp_data + padded_key_len)->GetValue(epoch);
+      *payload = tmp_payload;
     }
     return true;
   }
@@ -277,10 +280,10 @@ class InternalNode : public BaseNode {
                          pmwcas::DescriptorPool *pool, bool get_le = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
-    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr);
+    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
     return reinterpret_cast<BaseNode *> (child_addr);
   }
-  void Dump(bool dump_children = false);
+  void Dump(pmwcas::EpochManager *epoch, bool dump_children = false);
 };
 
 class LeafNode;
@@ -335,7 +338,8 @@ class LeafNode : public BaseNode {
   // inserted to the node. Note end_it is non-inclusive.
   void CopyFrom(LeafNode *node,
                 std::vector<RecordMetadata>::iterator begin_it,
-                std::vector<RecordMetadata>::iterator end_it);
+                std::vector<RecordMetadata>::iterator end_it,
+                pmwcas::EpochManager *epoch);
 
   ReturnCode Update(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool);
@@ -367,9 +371,10 @@ class LeafNode : public BaseNode {
   }
 
   // Specialized GetRawRecord for leaf node only (key can't be nullptr)
-  inline bool GetRawRecord(RecordMetadata meta, char **key, uint64_t *payload) {
+  inline bool GetRawRecord(RecordMetadata meta, char **key,
+                           uint64_t *payload, pmwcas::EpochManager *epoch) {
     char *unused = nullptr;
-    return BaseNode::GetRawRecord(meta, &unused, key, payload);
+    return BaseNode::GetRawRecord(meta, &unused, key, payload, epoch);
   }
 
   inline uint32_t GetUsedSpace() {
@@ -382,7 +387,7 @@ class LeafNode : public BaseNode {
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
                              bool visible_only,
                              pmwcas::EpochManager *epoch);
-  void Dump();
+  void Dump(pmwcas::EpochManager *epoch);
 
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck };

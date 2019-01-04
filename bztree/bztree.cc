@@ -145,7 +145,7 @@ InternalNode::InternalNode(uint32_t node_size,
     uint64_t m_payload = 0;
     char *m_key = nullptr;
     char *m_data = nullptr;
-    src_node->GetRawRecord(meta, &m_data, &m_key, &m_payload);
+    src_node->GetRawRecord(meta, &m_data, &m_key, &m_payload, epoch);
     auto m_key_size = meta.GetKeyLength();
 
     if (!need_insert_new) {
@@ -247,7 +247,7 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
     uint32_t separator_key_size = separator_meta.GetKeyLength();
     uint64_t separator_payload = 0;
     char *unused = nullptr;
-    bool success = GetRawRecord(separator_meta, &unused, &separator_key, &separator_payload);
+    bool success = GetRawRecord(separator_meta, &unused, &separator_key, &separator_payload, epoch);
     LOG_IF(FATAL, !success);
 
     int cmp = memcmp(key, separator_key, std::min<uint32_t>(key_size, separator_key_size));
@@ -334,14 +334,14 @@ void BaseNode::Dump() {
   }
 }
 
-void LeafNode::Dump() {
+void LeafNode::Dump(pmwcas::EpochManager *epoch) {
   BaseNode::Dump();
   std::cout << " Key-Payload Pairs:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     RecordMetadata meta = record_metadata[i];
     uint64_t payload = 0;
     char *key = nullptr;
-    GetRawRecord(meta, &key, &payload);
+    GetRawRecord(meta, &key, &payload, epoch);
     std::string keystr(key, key + meta.GetKeyLength());
     std::cout << " - record " << i << ": key = " << keystr
               << ", payload = " << payload << std::endl;
@@ -350,7 +350,7 @@ void LeafNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
 }
 
-void InternalNode::Dump(bool dump_children) {
+void InternalNode::Dump(pmwcas::EpochManager *epoch, bool dump_children) {
   BaseNode::Dump();
   std::cout << " Child pointers and separator keys:" << std::endl;
   assert(header.status.GetRecordCount() == 0);
@@ -360,7 +360,7 @@ void InternalNode::Dump(bool dump_children) {
     uint64_t right_child_addr = 0;
     char *key = nullptr;
     char *unused = nullptr;
-    GetRawRecord(meta, &unused, &key, &right_child_addr);
+    GetRawRecord(meta, &unused, &key, &right_child_addr, epoch);
     if (key) {
       std::string keystr(key, key + meta.GetKeyLength());
       std::cout << " | " << keystr << " | ";
@@ -374,9 +374,9 @@ void InternalNode::Dump(bool dump_children) {
       uint64_t node_addr = *GetPayloadPtr(record_metadata[i]);
       BaseNode *node = reinterpret_cast<BaseNode *>(node_addr);
       if (node->IsLeaf()) {
-        (reinterpret_cast<LeafNode *>(node_addr))->Dump();
+        (reinterpret_cast<LeafNode *>(node_addr))->Dump(epoch);
       } else {
-        (reinterpret_cast<InternalNode *>(node_addr))->Dump(true);
+        (reinterpret_cast<InternalNode *>(node_addr))->Dump(epoch, true);
       }
     }
   }
@@ -537,7 +537,7 @@ ReturnCode LeafNode::Update(uint32_t epoch,
 
   char *record_key;
   uint64_t record_payload;
-  GetRawRecord(*meta_ptr, &record_key, &record_payload);
+  GetRawRecord(*meta_ptr, &record_key, &record_payload, pmwcas_pool->GetEpoch());
   if (payload == record_payload) {
     return ReturnCode::Ok();
   }
@@ -591,7 +591,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       uint64_t payload = 0;
       char *current_key = nullptr;
       auto current = &(record_metadata[middle]);
-      GetRawRecord(*current, nullptr, &current_key, &payload);
+      GetRawRecord(*current, nullptr, &current_key, &payload, epoch);
 
       auto cmp_result = KeyCompare(key, key_size, current_key, current->GetKeyLength());
       if (cmp_result < 0) {
@@ -618,7 +618,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
 
       uint64_t payload = 0;
       char *current_key = nullptr;
-      GetRawRecord(current, nullptr, &current_key, &payload);
+      GetRawRecord(current, nullptr, &current_key, &payload, epoch);
       if (current.IsVisible() &&
           KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
         return &current;
@@ -694,7 +694,7 @@ ReturnCode LeafNode::RangeScan(const char *key1,
       continue;
     }
     char *curr_key;
-    GetRawRecord(curr_meta, &curr_key, nullptr);
+    GetRawRecord(curr_meta, &curr_key, nullptr, pmwcas_pool->GetEpoch());
     auto range_code = KeyInRange(curr_key, curr_meta.GetKeyLength(), key1, size1, key2, size2);
     if (range_code == 0) {
       result->emplace_back(Record::New(curr_meta, this, pmwcas_pool->GetEpoch()));
@@ -739,7 +739,7 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
 
   // Allocate and populate a new node
   LeafNode *new_leaf = LeafNode::New();
-  new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end());
+  new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end(), pmwcas_pool->GetEpoch());
 
   pmwcas::NVRAM::Flush(kNodeSize, new_leaf);
 
@@ -774,7 +774,8 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
 
 void LeafNode::CopyFrom(LeafNode *node,
                         std::vector<RecordMetadata>::iterator begin_it,
-                        std::vector<RecordMetadata>::iterator end_it) {
+                        std::vector<RecordMetadata>::iterator end_it,
+                        pmwcas::EpochManager *epoch) {
   // meta_vec is assumed to be in sorted order, insert records one by one
   uint64_t offset = kNodeSize;
   uint16_t nrecords = 0;
@@ -782,7 +783,7 @@ void LeafNode::CopyFrom(LeafNode *node,
     auto meta = *it;
     uint64_t payload = 0;
     char *key;
-    node->GetRawRecord(meta, &key, &payload);
+    node->GetRawRecord(meta, &key, &payload, epoch);
 
     // Copy data
     assert(meta.GetTotalLength() >= sizeof(uint64_t));
@@ -891,8 +892,8 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 
   // TODO(tzwang): also put the new insert here to save some cycles
   auto left_end_it = meta_vec.begin() + nleft;
-  (*left)->CopyFrom(this, meta_vec.begin(), left_end_it);
-  (*right)->CopyFrom(this, left_end_it, meta_vec.end());
+  (*left)->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
+  (*right)->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
 
   // Separator exists in the new left leaf node, i.e., when traversing the tree,
   // we go left if <=, and go right if >.
@@ -1102,7 +1103,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       auto first_meta = node->GetMetadata(0, pmwcas_pool->GetEpoch());
       char *meta_key;
       uint64_t payload;
-      node->GetRawRecord(first_meta, &meta_key, &payload);
+      node->GetRawRecord(first_meta, &meta_key, &payload, pmwcas_pool->GetEpoch());
       BaseNode *left_child, *right_child;
     }
   } while (rc.IsNodeFrozen());
@@ -1119,9 +1120,10 @@ void BzTree::Dump() {
   std::cout << "Dumping tree with root node: " << root << std::endl;
   // Traverse each level and dump each node
   if (root->IsLeaf()) {
-    (reinterpret_cast<LeafNode *>(root))->Dump();
+    (reinterpret_cast<LeafNode *>(root))->Dump(pmwcas_pool->GetEpoch());
   } else {
-    (reinterpret_cast<InternalNode *>(root))->Dump(true /* inlcude children */);
+    (reinterpret_cast<InternalNode *>(root))->Dump(
+        pmwcas_pool->GetEpoch(), true /* inlcude children */);
   }
 }
 
