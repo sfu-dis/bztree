@@ -36,3 +36,4 @@
 # IDE related things
 cmake-build*
 .idea
+.vscode

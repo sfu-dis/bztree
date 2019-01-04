@@ -13,15 +13,13 @@ uint32_t descriptor_pool_size = 1000000;
 uint32_t thread_count = 10;
 
 struct MultiThreadRead : public pmwcas::PerformanceTest {
-  pmwcas::DescriptorPool *pool;
   bztree::BzTree *tree;
   uint32_t read_count;
 
-  explicit MultiThreadRead(uint32_t read_count) : PerformanceTest() {
+  explicit MultiThreadRead(uint32_t read_count, bztree::BzTree *tree)
+      : PerformanceTest() {
     this->read_count = read_count;
-    pool = new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr, false);
-    bztree::BzTree::ParameterSet param(256, 128);
-    tree = new bztree::BzTree(param, pool);
+    this->tree = tree;
     InsertDummy();
   }
 
@@ -44,8 +42,14 @@ struct MultiThreadRead : public pmwcas::PerformanceTest {
 };
 
 GTEST_TEST(BztreeTest, MultiThreadRead) {
-  MultiThreadRead test(10000);
-  test.Run(thread_count);
+  auto thread_count = pmwcas::Environment::Get()->GetCoreCount();
+  std::unique_ptr<pmwcas::DescriptorPool> pool(
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+  );
+  bztree::BzTree::ParameterSet param(256, 128);
+  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  MultiThreadRead t(1000, tree.get());
+  t.Run(thread_count);
 }
 
 int main(int argc, char **argv) {
