@@ -35,7 +35,8 @@ InternalNode *InternalNode::New(InternalNode *src_node,
 InternalNode *InternalNode::New(const char *key,
                                 uint32_t key_size,
                                 uint64_t left_child_addr,
-                                uint64_t right_child_addr) {
+                                uint64_t right_child_addr,
+                                pmwcas::EpochManager *epoch) {
   uint32_t alloc_size = sizeof(InternalNode) +
       RecordMetadata::PadKeyLength(key_size) +
       sizeof(left_child_addr) +
@@ -43,7 +44,7 @@ InternalNode *InternalNode::New(const char *key,
       sizeof(RecordMetadata) * 2;
   InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
   memset(node, 0, alloc_size);
-  new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
+  new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr, epoch);
   return node;
 }
 
@@ -88,14 +89,15 @@ InternalNode::InternalNode(uint32_t
                            const char *key,
                            const uint16_t key_size,
                            uint64_t left_child_addr,
-                           uint64_t right_child_addr)
+                           uint64_t right_child_addr,
+                           pmwcas::EpochManager *epoch)
     : BaseNode(false, node_size) {
   // Initialize a new internal node with one key only
   header.sorted_count = 2;  // Includes the null dummy key
 
   // Fill in left child address, with an empty key
   uint64_t offset = node_size - sizeof(left_child_addr);
-  record_metadata[0].FinalizeForInsert(offset, 0, sizeof(left_child_addr));
+  GetMetadata(0, epoch).FinalizeForInsert(offset, 0, sizeof(left_child_addr));
   char *ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, &left_child_addr, sizeof(left_child_addr));
 
@@ -103,7 +105,7 @@ InternalNode::InternalNode(uint32_t
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
   auto total_len = padded_key_size + sizeof(right_child_addr);
   offset -= total_len;
-  record_metadata[1].FinalizeForInsert(offset, key_size, total_len);
+  GetMetadata(1, epoch).FinalizeForInsert(offset, key_size, total_len);
   ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, key, key_size);
   memcpy(ptr + padded_key_size, &right_child_addr, sizeof(right_child_addr));
@@ -161,7 +163,8 @@ InternalNode::InternalNode(uint32_t node_size,
         assert(insert_idx >= 1);
 
         // Modify the previous key's payload to left_child_addr
-        auto &prev_meta = record_metadata[insert_idx - 1];
+        auto prev_meta = GetMetadata(insert_idx - 1, epoch);
+
         memcpy(reinterpret_cast<char *>(this) +
                    prev_meta.GetOffset() + prev_meta.GetPaddedKeyLength(),
                &left_child_addr, sizeof(left_child_addr));
@@ -202,7 +205,7 @@ InternalNode::InternalNode(uint32_t node_size,
            &right_child_addr, sizeof(right_child_addr));
 
     // Modify the previous key's payload to left_child_addr
-    auto &prev_meta = record_metadata[insert_idx - 1];
+    auto prev_meta = GetMetadata(insert_idx - 1, epoch);
     memcpy(reinterpret_cast<char *>(this) + prev_meta.GetOffset() + prev_meta.GetPaddedKeyLength(),
            &left_child_addr, sizeof(left_child_addr));
 
@@ -282,7 +285,7 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
     } else {
       // New root node
       return InternalNode::New(separator_key, separator_key_size,
-                               (uint64_t) left, (uint64_t) right);
+                               (uint64_t) left, (uint64_t) right, epoch);
     }
   } else {
     return InternalNode::New(this, key, key_size, left_child_addr, right_child_addr, epoch);
@@ -389,7 +392,7 @@ ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, 
     return ReturnCode::NodeFrozen();
   }
 
-  auto uniqueness = CheckUnique(key, key_size);
+  auto uniqueness = CheckUnique(key, key_size, pmwcas_pool->GetEpoch());
   if (uniqueness == Duplicate) {
     return ReturnCode::KeyExists();
   }
@@ -433,7 +436,9 @@ ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, 
   pmwcas::NVRAM::Flush(total_size, ptr);
 
   if (uniqueness == ReCheck) {
-    uniqueness = RecheckUnique(key, padded_key_size, expected_status.GetRecordCount());
+    uniqueness = RecheckUnique(key, padded_key_size,
+                               expected_status.GetRecordCount(),
+                               pmwcas_pool->GetEpoch());
     if (uniqueness == Duplicate) {
       memset(ptr, 0, key_size);
       memset(ptr + padded_key_size, 0, sizeof(payload));
@@ -460,8 +465,10 @@ ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, 
   }
 }
 
-LeafNode::Uniqueness LeafNode::CheckUnique(const char *key, uint32_t key_size) {
-  auto record = SearchRecordMeta(key, key_size);
+LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
+                                           uint32_t key_size,
+                                           pmwcas::EpochManager *epoch) {
+  auto record = SearchRecordMeta(epoch, key, key_size);
   if (record == nullptr) {
     return IsUnique;
   }
@@ -471,9 +478,10 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key, uint32_t key_size) {
   return Duplicate;
 }
 
-LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos) {
+LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
+                                             uint32_t end_pos, pmwcas::EpochManager *epoch) {
   retry:
-  auto record = SearchRecordMeta(key, key_size, header.sorted_count, end_pos);
+  auto record = SearchRecordMeta(epoch, key, key_size, header.sorted_count, end_pos);
   if (record == nullptr) {
     return IsUnique;
   }
@@ -493,7 +501,7 @@ ReturnCode LeafNode::Upsert(uint32_t epoch,
   if (old_status.IsFrozen()) {
     return ReturnCode::NodeFrozen();
   }
-  auto *meta_ptr = SearchRecordMeta(key, key_size);
+  auto *meta_ptr = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
   if (meta_ptr == nullptr) {
     auto insert_result = Insert(epoch, key, key_size, payload, pmwcas_pool);
 
@@ -519,7 +527,7 @@ ReturnCode LeafNode::Update(uint32_t epoch,
     return ReturnCode::NodeFrozen();
   }
 
-  auto *meta_ptr = SearchRecordMeta(key, key_size);
+  auto *meta_ptr = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
   if (meta_ptr == nullptr || !meta_ptr->IsVisible()) {
     return ReturnCode::NotFound();
   } else if (meta_ptr->IsInserting()) {
@@ -549,7 +557,8 @@ ReturnCode LeafNode::Update(uint32_t epoch,
   return ReturnCode::Ok();
 }
 
-RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
+RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
+                                           const char *key,
                                            uint32_t key_size,
                                            uint32_t start_pos,
                                            uint32_t end_pos,
@@ -598,21 +607,21 @@ RecordMetadata *BaseNode::SearchRecordMeta(const char *key,
     // Linear search on unsorted field
     uint32_t linear_end = std::min<uint32_t>(header.status.GetRecordCount(), end_pos);
     for (uint32_t i = header.sorted_count; i < linear_end; i++) {
-      auto current = &(record_metadata[i]);
+      auto &current = GetMetadata(i, epoch);
 
       // Encountered an in-progress insert, recheck later
-      if (current->IsInserting() && check_concurrency) {
+      if (current.IsInserting() && check_concurrency) {
         return &(record_metadata[i]);
-      } else if (current->IsInserting() && !check_concurrency) {
+      } else if (current.IsInserting() && !check_concurrency) {
         continue;
       }
 
       uint64_t payload = 0;
       char *current_key = nullptr;
-      GetRawRecord(*current, nullptr, &current_key, &payload);
-      if (current->IsVisible() &&
-          KeyCompare(key, key_size, current_key, current->GetKeyLength()) == 0) {
-        return current;
+      GetRawRecord(current, nullptr, &current_key, &payload);
+      if (current.IsVisible() &&
+          KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
+        return &current;
       }
     }
   }
@@ -628,7 +637,7 @@ ReturnCode LeafNode::Delete(const char *key,
   }
 
   retry:
-  auto record_meta = SearchRecordMeta(key, key_size);
+  auto record_meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
   if (record_meta == nullptr) {
     return ReturnCode::NotFound();
   } else if (record_meta->IsInserting()) {
@@ -655,7 +664,7 @@ ReturnCode LeafNode::Delete(const char *key,
 }
 ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
                           pmwcas::DescriptorPool *pmwcas_pool) {
-  auto meta = SearchRecordMeta(key, key_size, 0, (uint32_t) -1, false);
+  auto meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, 0, (uint32_t) -1, false);
   if (meta == nullptr) {
     return ReturnCode::NotFound();
   }
@@ -726,7 +735,7 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
 
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
-  SortMetadataByKey(meta_vec, true);
+  SortMetadataByKey(meta_vec, true, pmwcas_pool->GetEpoch());
 
   // Allocate and populate a new node
   LeafNode *new_leaf = LeafNode::New();
@@ -737,11 +746,13 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
   return new_leaf;
 }
 
-uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only) {
+uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
+                                     bool visible_only,
+                                     pmwcas::EpochManager *epoch) {
   uint32_t total_size = 0;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     // TODO(tzwang): handle deletes
-    if (record_metadata[i].IsVisible()) {
+    if (GetMetadata(i, epoch).IsVisible()) {
       auto meta = record_metadata[i];
       vec.emplace_back(meta);
       total_size += (meta.GetTotalLength());
@@ -865,7 +876,7 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
 
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
-  uint32_t total_size = SortMetadataByKey(meta_vec, true);
+  uint32_t total_size = SortMetadataByKey(meta_vec, true, pmwcas_pool->GetEpoch());
 
   int32_t left_size = total_size / 2;
   uint32_t nleft = 0;
@@ -906,7 +917,9 @@ InternalNode *LeafNode::PrepareForSplit(uint32_t epoch, Stack &stack,
                                    pmwcas_pool->GetEpoch());
   } else {
     return InternalNode::New(key, separator_meta.GetKeyLength(),
-                             reinterpret_cast<uint64_t>(*left), reinterpret_cast<uint64_t>(*right));
+                             reinterpret_cast<uint64_t>(*left),
+                             reinterpret_cast<uint64_t>(*right),
+                             pmwcas_pool->GetEpoch());
   }
 }
 

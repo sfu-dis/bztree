@@ -187,7 +187,7 @@ class BaseNode {
     }
     return cmp;
   }
-  inline RecordMetadata GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
+  inline RecordMetadata &GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
     // ensure the metadata is installed
     reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record_metadata + i)->GetValue(epoch);
     return record_metadata[i];
@@ -200,8 +200,8 @@ class BaseNode {
 //  Return a meta (not deleted) or nullptr (deleted or not exist)
 //  It's user's responsibility to check IsInserting()
 //  if check_concurrency is false, it will ignore all inserting record
-  RecordMetadata *SearchRecordMeta(const char *key,
-                                   uint32_t key_size,
+  RecordMetadata *SearchRecordMeta(pmwcas::EpochManager *epoch,
+                                   const char *key, uint32_t key_size,
                                    uint32_t start_pos = 0,
                                    uint32_t end_pos = (uint32_t) -1,
                                    bool check_concurrency = true);
@@ -243,7 +243,8 @@ class InternalNode : public BaseNode {
                            uint64_t left_child_addr, uint64_t right_child_addr,
                            pmwcas::EpochManager *epoch);
   static InternalNode *New(const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
+                           uint64_t left_child_addr, uint64_t right_child_addr,
+                           pmwcas::EpochManager *epoch);
   InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
                     const char *key, uint32_t key_size,
                     uint64_t left_child_addr, uint64_t right_child_addr,
@@ -251,7 +252,8 @@ class InternalNode : public BaseNode {
                     uint64_t left_most_child_addr = 0);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr);
+               uint64_t left_child_addr, uint64_t right_child_addr,
+               pmwcas::EpochManager *epoch);
   InternalNode(uint32_t node_size, InternalNode *src_node,
                uint32_t begin_meta_idx, uint32_t nr_records,
                const char *key, uint16_t key_size,
@@ -377,13 +379,18 @@ class LeafNode : public BaseNode {
 
   inline uint32_t GetFreeSpace() { return kNodeSize - GetUsedSpace(); }
 
-  uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec, bool visible_only);
+  uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
+                             bool visible_only,
+                             pmwcas::EpochManager *epoch);
   void Dump();
 
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck };
-  Uniqueness CheckUnique(const char *key, uint32_t key_size);
-  Uniqueness RecheckUnique(const char *key, uint32_t key_size, uint32_t end_pos);
+  Uniqueness CheckUnique(const char *key, uint32_t key_size, pmwcas::EpochManager *epoch);
+  Uniqueness RecheckUnique(const char *key,
+                           uint32_t key_size,
+                           uint32_t end_pos,
+                           pmwcas::EpochManager *epoch);
 };
 
 struct Record {
