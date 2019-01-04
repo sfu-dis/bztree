@@ -135,7 +135,7 @@ InternalNode::InternalNode(uint32_t node_size,
   // on the right
   if (left_most_child_addr) {
     offset -= sizeof(uint64_t);
-    record_metadata[0].FinalizeForInsert(offset, 0, sizeof(uint64_t));
+    GetMetadata(0, epoch).FinalizeForInsert(offset, 0, sizeof(uint64_t));
     memcpy(reinterpret_cast<char *>(this) + offset, &left_most_child_addr, sizeof(uint64_t));
     ++insert_idx;
   }
@@ -152,7 +152,7 @@ InternalNode::InternalNode(uint32_t node_size,
       // New key already inserted, so directly insert the key from src node
       assert(meta.GetTotalLength() >= sizeof(uint64_t));
       offset -= (meta.GetTotalLength());
-      record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
+      GetMetadata(insert_idx, epoch).FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
       memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
     } else {
       // Compare the two keys to see which one to insert (first)
@@ -171,7 +171,7 @@ InternalNode::InternalNode(uint32_t node_size,
 
         // Now the new separtor key itself
         offset -= (padded_key_size + sizeof(right_child_addr));
-        record_metadata[insert_idx].FinalizeForInsert(
+        GetMetadata(insert_idx, epoch).FinalizeForInsert(
             offset, key_size, padded_key_size + sizeof(left_child_addr));
 
         ++insert_idx;
@@ -181,14 +181,14 @@ InternalNode::InternalNode(uint32_t node_size,
 
         offset -= (meta.GetTotalLength());
         assert(meta.GetTotalLength() >= sizeof(uint64_t));
-        record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
+        GetMetadata(insert_idx, epoch).FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
         memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
 
         need_insert_new = false;
       } else {
         assert(meta.GetTotalLength() >= sizeof(uint64_t));
         offset -= (meta.GetTotalLength());
-        record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
+        GetMetadata(insert_idx, epoch).FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
         memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
       }
     }
@@ -199,7 +199,7 @@ InternalNode::InternalNode(uint32_t node_size,
     // The new key-payload pair will be the right-most (largest key) element
     uint32_t total_size = RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t);
     offset -= total_size;
-    record_metadata[insert_idx].FinalizeForInsert(offset, key_size, total_size);
+    GetMetadata(insert_idx, epoch).FinalizeForInsert(offset, key_size, total_size);
     memcpy(reinterpret_cast<char *>(this) + offset, key, key_size);
     memcpy(reinterpret_cast<char *>(this) + offset + RecordMetadata::PadKeyLength(key_size),
            &right_child_addr, sizeof(right_child_addr));
@@ -611,7 +611,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
 
       // Encountered an in-progress insert, recheck later
       if (current.IsInserting() && check_concurrency) {
-        return &(record_metadata[i]);
+        return &current;
       } else if (current.IsInserting() && !check_concurrency) {
         continue;
       }
@@ -752,8 +752,8 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
   uint32_t total_size = 0;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     // TODO(tzwang): handle deletes
-    if (GetMetadata(i, epoch).IsVisible()) {
-      auto meta = record_metadata[i];
+    auto meta = GetMetadata(i, epoch);
+    if (meta.IsVisible()) {
       vec.emplace_back(meta);
       total_size += (meta.GetTotalLength());
     }
