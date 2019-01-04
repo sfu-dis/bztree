@@ -680,7 +680,7 @@ ReturnCode LeafNode::RangeScan(const char *key1,
                                uint32_t size1,
                                const char *key2,
                                uint32_t size2,
-                               std::vector<bztree::Record *> *result,
+                               std::vector<std::unique_ptr<bztree::Record>> *result,
                                pmwcas::DescriptorPool *pmwcas_pool) {
   // entering a new epoch and copying the data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
@@ -706,11 +706,12 @@ ReturnCode LeafNode::RangeScan(const char *key1,
     }
     i += 1;
   }
-  std::sort(result->begin(), result->end(), [this](Record *a, Record *b) -> bool {
-    auto cmp = BaseNode::KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
-                                    b->GetKey(), b->meta.GetKeyLength());
-    return cmp < 0;
-  });
+  std::sort(result->begin(), result->end(),
+            [this](std::unique_ptr<Record> &a, std::unique_ptr<Record> &b) -> bool {
+              auto cmp = BaseNode::KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
+                                              b->GetKey(), b->meta.GetKeyLength());
+              return cmp < 0;
+            });
   return ReturnCode::Ok();
 }
 
@@ -1110,9 +1111,9 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   return rc;
 }
 
-Iterator *BzTree::RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2) {
-  auto iterator = new Iterator(this, key1, size1, key2, size2, pmwcas_pool);
-  return iterator;
+std::unique_ptr<Iterator> BzTree::RangeScan(const char *key1, uint16_t size1,
+                                            const char *key2, uint16_t size2) {
+  return std::make_unique<Iterator>(this, key1, size1, key2, size2);
 }
 
 void BzTree::Dump() {

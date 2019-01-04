@@ -190,7 +190,7 @@ TEST_F(LeafNodeFixtures, Upsert) {
 TEST_F(LeafNodeFixtures, RangeScan) {
   pool->GetEpoch()->Protect();
   InsertDummy();
-  std::vector<bztree::Record *> result;
+  std::vector<std::unique_ptr<bztree::Record>> result;
   ASSERT_TRUE(node->RangeScan("10", 2, "40", 2, &result, pool).IsOk());
   ASSERT_EQ(result.size(), 14);
   ASSERT_EQ(result[0]->GetPayload(), 10);
@@ -311,7 +311,8 @@ TEST_F(BzTreeTest, RangeScan) {
   }
   auto iter = tree->RangeScan("100", 3, "125", 3);
   for (uint32_t i = 100; i <= 125; i += 1) {
-    auto *record = iter->GetNext();
+    auto &record = iter->GetNext();
+    ASSERT_TRUE(record != nullptr);
     auto key = std::string(record->GetKey(), 3);
     ASSERT_EQ(i, record->GetPayload());
     ASSERT_EQ(key, std::to_string(i));

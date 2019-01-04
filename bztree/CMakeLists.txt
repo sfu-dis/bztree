@@ -19,7 +19,7 @@ add_definitions(-DPMEM)
 set(PMWCAS_LIB_PATH "" CACHE STRING "PMwCAS shared library path")
 link_directories(${PMWCAS_LIB_PATH})
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
 set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt -lglog -lgtest -lgflags -lpmwcas")
 link_libraries(${LINK_FLAGS})
 

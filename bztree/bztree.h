@@ -7,6 +7,7 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 
 #include "include/pmwcas.h"
 #include "mwcas/mwcas.h"
@@ -356,7 +357,7 @@ class LeafNode : public BaseNode {
                        uint32_t size1,
                        const char *key2,
                        uint32_t size2,
-                       std::vector<Record *> *result,
+                       std::vector<std::unique_ptr<Record>> *result,
                        pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
@@ -401,17 +402,19 @@ class LeafNode : public BaseNode {
 struct Record {
   RecordMetadata meta;
   char data[0];
+
   explicit Record(RecordMetadata meta) {
     this->meta = meta;
   }
 
-  static inline Record *New(RecordMetadata meta, BaseNode *node, pmwcas::EpochManager *epoch) {
+  static inline std::unique_ptr<Record> New(RecordMetadata meta, BaseNode *node,
+                                            pmwcas::EpochManager *epoch) {
     if (!meta.IsVisible()) {
       return nullptr;
     }
-    auto item = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
-    memset(item, 0, meta.GetTotalLength() + sizeof(Record));
-    new(item) Record(meta);
+    auto item_ptr = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
+    memset(item_ptr, 0, meta.GetTotalLength() + sizeof(Record));
+    auto item = std::make_unique<Record>(meta);
     auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
 
     // Key will never be changed and it will not be a pmwcas descriptor
@@ -464,7 +467,8 @@ class BzTree {
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
-  Iterator *RangeScan(const char *key1, uint16_t size1, const char *key2, uint16_t size2);
+  std::unique_ptr<Iterator> RangeScan(const char *key1, uint16_t size1,
+                                      const char *key2, uint16_t size2);
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true) const;
@@ -483,34 +487,29 @@ class Iterator {
                     const char *begin_key,
                     uint16_t begin_size,
                     const char *end_key,
-                    uint16_t end_size,
-                    pmwcas::DescriptorPool *pool) {
+                    uint16_t end_size) {
     this->begin_key = begin_key;
     this->end_key = end_key;
     this->begin_size = begin_size;
     this->end_size = end_size;
     this->tree = tree;
-    this->pool = pool;
-    node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size, pool);
+    node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
     node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
     item_it = item_vec.begin();
   }
 
-  Record *GetNext() {
+  std::unique_ptr<Record> &GetNext() {
     auto old_it = item_it;
     if (item_it != item_vec.end()) {
       item_it += 1;
       return *old_it;
     } else {
-      auto last_record = item_vec.back();
+      auto &last_record = item_vec.back();
       node = this->tree->TraverseToLeaf(nullptr,
                                         last_record->GetKey(),
                                         last_record->meta.GetKeyLength(),
                                         false);
-      if (node == nullptr) {
-        // no available node
-        return nullptr;
-      }
+      // TODO(hao): Check null
       item_vec.clear();
       node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
       item_it = item_vec.begin();
@@ -525,9 +524,8 @@ class Iterator {
   const char *end_key;
   uint16_t end_size;
   LeafNode *node;
-  std::vector<Record *> item_vec;
-  std::vector<Record *>::iterator item_it;
-  pmwcas::DescriptorPool *pool;
+  std::vector<std::unique_ptr<Record>> item_vec;
+  std::vector<std::unique_ptr<Record>>::iterator item_it;
 };
 
 }  // namespace bztree
