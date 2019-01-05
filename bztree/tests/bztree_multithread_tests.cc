@@ -3,13 +3,15 @@
 // Authors:
 // Tianzheng Wang <tzwang@sfu.ca>
 // Xiangpeng Hao <xiangpeng_hao@sfu.ca>
+
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
 #include "util/performance_test.h"
 #include "../bztree.h"
 
-uint32_t descriptor_pool_size = 100000;
+uint32_t descriptor_pool_size = 1000000;
+uint32_t thread_count = 30;
 
 struct MultiThreadRead : public pmwcas::PerformanceTest {
   bztree::BzTree *tree;
@@ -40,15 +42,52 @@ struct MultiThreadRead : public pmwcas::PerformanceTest {
   }
 };
 
+struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
+  bztree::BzTree *tree;
+  uint32_t item_per_thread;
+  explicit MultiThreadInsertTest(uint32_t item_per_thread, bztree::BzTree *tree)
+      : tree(tree), item_per_thread(item_per_thread) {}
+
+  void Entry(size_t thread_index) override {
+    WaitForStart();
+    for (uint32_t i = 0; i < item_per_thread; i++) {
+      auto value = i + item_per_thread * thread_index;
+      auto str_value = std::to_string(value);
+      auto rc = tree->Insert(str_value.c_str(),
+                             static_cast<uint16_t>(str_value.length()), value);
+      ASSERT_TRUE(rc.IsOk());
+    }
+  }
+};
+
 GTEST_TEST(BztreeTest, MultiThreadRead) {
-  auto thread_count = pmwcas::Environment::Get()->GetCoreCount();
+//  auto thread_count = pmwcas::Environment::Get()->GetCoreCount();
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
   bztree::BzTree::ParameterSet param;
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
-  MultiThreadRead t(1000, tree.get());
+  MultiThreadRead t(10000, tree.get());
   t.Run(thread_count);
+}
+
+GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
+  uint32_t thread_count = 1;
+  uint32_t item_per_thread = 1000;
+  std::unique_ptr<pmwcas::DescriptorPool> pool(
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+  );
+  bztree::BzTree::ParameterSet param;
+  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  MultiThreadInsertTest t(item_per_thread, tree.get());
+  t.Run(thread_count);
+  for (uint32_t i = 0; i < thread_count * item_per_thread; i++) {
+    auto i_str = std::to_string(i);
+    uint64_t payload;
+    auto rc = tree->Read(i_str.c_str(), static_cast<uint16_t>(i_str.length()), &payload);
+    ASSERT_TRUE(rc.IsOk());
+    ASSERT_EQ(payload, i);
+  }
 }
 
 int main(int argc, char **argv) {

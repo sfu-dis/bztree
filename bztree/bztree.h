@@ -8,6 +8,7 @@
 
 #include <vector>
 #include <memory>
+#include <optional>
 
 #include "include/pmwcas.h"
 #include "mwcas/mwcas.h"
@@ -498,22 +499,25 @@ class Iterator {
     item_it = item_vec.begin();
   }
 
-  std::unique_ptr<Record> &GetNext() {
+  Record *GetNext() {
     auto old_it = item_it;
     if (item_it != item_vec.end()) {
       item_it += 1;
-      return *old_it;
+      return (*old_it).get();
     } else {
       auto &last_record = item_vec.back();
       node = this->tree->TraverseToLeaf(nullptr,
                                         last_record->GetKey(),
                                         last_record->meta.GetKeyLength(),
                                         false);
-      // TODO(hao): Check null
-      item_vec.clear();
-      node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
-      item_it = item_vec.begin();
-      return GetNext();
+      if (node != nullptr) {
+        item_vec.clear();
+        node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+        item_it = item_vec.begin();
+        return GetNext();
+      } else {
+        return nullptr;
+      }
     }
   }
 
