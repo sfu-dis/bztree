@@ -72,8 +72,8 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
 }
 
 GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
-  uint32_t thread_count = 1;
-  uint32_t item_per_thread = 1000;
+  uint32_t thread_count = 2;
+  uint32_t item_per_thread = 50;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
@@ -88,6 +88,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
     ASSERT_TRUE(rc.IsOk());
     ASSERT_EQ(payload, i);
   }
+  tree->Dump();
 }
 
 int main(int argc, char **argv) {

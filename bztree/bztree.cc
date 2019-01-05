@@ -300,12 +300,12 @@ LeafNode *LeafNode::New() {
   return node;
 }
 
-void BaseNode::Dump() {
+void BaseNode::Dump(pmwcas::EpochManager *epoch) {
   std::cout << "-----------------------------" << std::endl;
   std::cout << " Dumping node: " << this << (is_leaf ? " (leaf)" : " (internal)") << std::endl;
   std::cout << " Header:\n";
   if (is_leaf) {
-    std::cout << " - free space: " << (reinterpret_cast<LeafNode *>(this))->GetFreeSpace()
+    std::cout << " - free space: " << (reinterpret_cast<LeafNode *>(this))->GetFreeSpace(epoch)
               << std::endl;
   }
   std::cout << " - status: 0x" << std::hex << header.status.word << std::endl
@@ -335,7 +335,7 @@ void BaseNode::Dump() {
 }
 
 void LeafNode::Dump(pmwcas::EpochManager *epoch) {
-  BaseNode::Dump();
+  BaseNode::Dump(epoch);
   std::cout << " Key-Payload Pairs:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     RecordMetadata meta = record_metadata[i];
@@ -351,7 +351,7 @@ void LeafNode::Dump(pmwcas::EpochManager *epoch) {
 }
 
 void InternalNode::Dump(pmwcas::EpochManager *epoch, bool dump_children) {
-  BaseNode::Dump();
+  BaseNode::Dump(epoch);
   std::cout << " Child pointers and separator keys:" << std::endl;
   assert(header.status.GetRecordCount() == 0);
   for (uint32_t i = 0; i < header.sorted_count; ++i) {
@@ -420,7 +420,7 @@ ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, 
 
   // Now do the PMwCAS
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&header.status.word, expected_status.word, desired_status.word);
+  pd->AddEntry(&header.GetStatus(pmwcas_pool->GetEpoch()).word, expected_status.word, desired_status.word);
   pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
   if (!pd->MwCAS()) {
     return ReturnCode::PMWCASFailure();
@@ -459,7 +459,7 @@ ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, 
     desired_meta.FinalizeForInsert(offset, key_size, total_size);
 
     pd = pmwcas_pool->AllocateDescriptor();
-    pd->AddEntry(&header.status.word, s.word, s.word);
+    pd->AddEntry(&header.GetStatus(pmwcas_pool->GetEpoch()).word, s.word, s.word);
     pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
     return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
   }
@@ -953,9 +953,10 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
 
     // Check space to see if we need to split the node
-    auto new_node_size = node->GetUsedSpace() + sizeof(RecordMetadata) +
+    auto new_node_size = node->GetUsedSpace(pmwcas_pool->GetEpoch()) + sizeof(RecordMetadata) +
         RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
     if (new_node_size > parameters.split_threshold) {
+      LOG(INFO) << "node splitting";
       // Should split and we have three cases to handle:
       // 1. Root node is a leaf node - install [parent] as the new root
       // 2. We have a parent but no grandparent - install [parent] as the new

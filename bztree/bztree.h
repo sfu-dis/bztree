@@ -85,6 +85,10 @@ struct NodeHeader {
   StatusWord status;
   uint32_t sorted_count;
   NodeHeader() : size(0), sorted_count(0) {}
+  inline StatusWord &GetStatus(pmwcas::EpochManager *epoch) {
+    reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(&this->status.word)->GetValue(epoch);
+    return this->status;
+  }
 };
 
 struct RecordMetadata {
@@ -159,7 +163,7 @@ class BaseNode {
 
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
-  void Dump();
+  void Dump(pmwcas::EpochManager *epoch);
 
   // Check if the key in a range, inclusive
   // -1 if smaller than left key
@@ -379,12 +383,12 @@ class LeafNode : public BaseNode {
     return BaseNode::GetRawRecord(meta, &unused, key, payload, epoch);
   }
 
-  inline uint32_t GetUsedSpace() {
-    return sizeof(*this) + header.status.GetBlockSize() +
+  inline uint32_t GetUsedSpace(pmwcas::EpochManager *epoch) {
+    return sizeof(*this) + header.GetStatus(epoch).GetBlockSize() +
         header.status.GetRecordCount() * sizeof(RecordMetadata);
   }
 
-  inline uint32_t GetFreeSpace() { return kNodeSize - GetUsedSpace(); }
+  inline uint32_t GetFreeSpace(pmwcas::EpochManager *epoch) { return kNodeSize - GetUsedSpace(epoch); }
 
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
                              bool visible_only,
