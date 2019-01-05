@@ -9,8 +9,7 @@
 #include "util/performance_test.h"
 #include "../bztree.h"
 
-uint32_t descriptor_pool_size = 1000000;
-uint32_t thread_count = 10;
+uint32_t descriptor_pool_size = 100000;
 
 struct MultiThreadRead : public pmwcas::PerformanceTest {
   bztree::BzTree *tree;
@@ -46,7 +45,7 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
-  bztree::BzTree::ParameterSet param(256, 128);
+  bztree::BzTree::ParameterSet param;
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
   MultiThreadRead t(1000, tree.get());
   t.Run(thread_count);

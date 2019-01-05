@@ -97,7 +97,7 @@ InternalNode::InternalNode(uint32_t
 
   // Fill in left child address, with an empty key
   uint64_t offset = node_size - sizeof(left_child_addr);
-  GetMetadata(0, epoch).FinalizeForInsert(offset, 0, sizeof(left_child_addr));
+  record_metadata[0].FinalizeForInsert(offset, 0, sizeof(left_child_addr));
   char *ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, &left_child_addr, sizeof(left_child_addr));
 
@@ -105,7 +105,7 @@ InternalNode::InternalNode(uint32_t
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
   auto total_len = padded_key_size + sizeof(right_child_addr);
   offset -= total_len;
-  GetMetadata(1, epoch).FinalizeForInsert(offset, key_size, total_len);
+  record_metadata[1].FinalizeForInsert(offset, key_size, total_len);
   ptr = reinterpret_cast<char *>(this) + offset;
   memcpy(ptr, key, key_size);
   memcpy(ptr + padded_key_size, &right_child_addr, sizeof(right_child_addr));
