@@ -94,6 +94,7 @@ struct NodeHeader {
 struct RecordMetadata {
   uint64_t meta;
   RecordMetadata() : meta(0) {}
+  RecordMetadata(uint64_t meta) : meta(meta) {}
 
   static const uint64_t kControlMask = 0x7;                         // Bits 1-3
   static const uint64_t kVisibleMask = 0x8;                         // Bit 4
@@ -193,10 +194,11 @@ class BaseNode {
     }
     return cmp;
   }
-  inline RecordMetadata &GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
+  inline RecordMetadata GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
     // ensure the metadata is installed
-    reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record_metadata + i)->GetValue(epoch);
-    return record_metadata[i];
+    auto meta = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record_metadata + i)->GetValue(epoch);
+    return RecordMetadata{meta};
+//    return record_metadata[i];
   }
   explicit BaseNode(bool leaf, uint32_t size) : is_leaf(leaf) {
     header.size = size;
