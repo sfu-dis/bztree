@@ -72,8 +72,8 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
 }
 
 GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
-  uint32_t thread_count = 2;
-  uint32_t item_per_thread = 50;
+  uint32_t thread_count = 5;
+  uint32_t item_per_thread = 15;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );

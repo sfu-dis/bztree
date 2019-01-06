@@ -51,6 +51,7 @@ struct NodeHeader {
   struct StatusWord {
     uint64_t word;
     StatusWord() : word(0) {}
+    StatusWord(uint64_t word) : word(word) {}
 
     static const uint64_t kControlMask = 0x7;                          // Bits 1-3
     static const uint64_t kFrozenMask = 0x8;                           // Bit 4
@@ -85,9 +86,10 @@ struct NodeHeader {
   StatusWord status;
   uint32_t sorted_count;
   NodeHeader() : size(0), sorted_count(0) {}
-  inline StatusWord &GetStatus(pmwcas::EpochManager *epoch) {
-    reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(&this->status.word)->GetValue(epoch);
-    return this->status;
+  inline StatusWord GetStatus(pmwcas::EpochManager *epoch) {
+    auto status_val = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
+        &this->status.word)->GetValue(epoch);
+    return StatusWord{status_val};
   }
 };
 
@@ -198,7 +200,6 @@ class BaseNode {
     // ensure the metadata is installed
     auto meta = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record_metadata + i)->GetValue(epoch);
     return RecordMetadata{meta};
-//    return record_metadata[i];
   }
   explicit BaseNode(bool leaf, uint32_t size) : is_leaf(leaf) {
     header.size = size;
@@ -386,8 +387,9 @@ class LeafNode : public BaseNode {
   }
 
   inline uint32_t GetUsedSpace(pmwcas::EpochManager *epoch) {
-    return sizeof(*this) + header.GetStatus(epoch).GetBlockSize() +
-        header.status.GetRecordCount() * sizeof(RecordMetadata);
+    auto status = header.GetStatus(epoch);
+    return sizeof(*this) + status.GetBlockSize() +
+        status.GetRecordCount() * sizeof(RecordMetadata);
   }
 
   inline uint32_t GetFreeSpace(pmwcas::EpochManager *epoch) { return kNodeSize - GetUsedSpace(epoch); }

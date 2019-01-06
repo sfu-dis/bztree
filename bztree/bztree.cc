@@ -385,7 +385,7 @@ void InternalNode::Dump(pmwcas::EpochManager *epoch, bool dump_children) {
 ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, uint64_t payload,
                             pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
-  NodeHeader::StatusWord expected_status = header.status;
+  NodeHeader::StatusWord expected_status = header.GetStatus(pmwcas_pool->GetEpoch());
 
   // If frozon then retry
   if (expected_status.IsFrozen()) {
@@ -420,7 +420,7 @@ ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, 
 
   // Now do the PMwCAS
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&header.GetStatus(pmwcas_pool->GetEpoch()).word, expected_status.word, desired_status.word);
+  pd->AddEntry(&header.status.word, expected_status.word, desired_status.word);
   pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
   if (!pd->MwCAS()) {
     return ReturnCode::PMWCASFailure();
@@ -447,7 +447,7 @@ ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, 
   }
 
   // Re-check if the node is frozen
-  NodeHeader::StatusWord s = header.status;
+  NodeHeader::StatusWord s = header.GetStatus(pmwcas_pool->GetEpoch());
   if (s.IsFrozen()) {
     return ReturnCode::NodeFrozen();
   } else {
@@ -459,7 +459,7 @@ ReturnCode LeafNode::Insert(uint32_t epoch, const char *key, uint16_t key_size, 
     desired_meta.FinalizeForInsert(offset, key_size, total_size);
 
     pd = pmwcas_pool->AllocateDescriptor();
-    pd->AddEntry(&header.GetStatus(pmwcas_pool->GetEpoch()).word, s.word, s.word);
+    pd->AddEntry(&header.status.word, s.word, s.word);
     pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
     return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
   }
@@ -605,7 +605,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
   }
   if (end_pos > header.sorted_count) {
     // Linear search on unsorted field
-    uint32_t linear_end = std::min<uint32_t>(header.status.GetRecordCount(), end_pos);
+    uint32_t linear_end = std::min<uint32_t>(header.GetStatus(epoch).GetRecordCount(), end_pos);
     for (uint32_t i = header.sorted_count; i < linear_end; i++) {
       auto current = GetMetadata(i, epoch);
 
@@ -957,7 +957,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     auto new_node_size = node->GetUsedSpace(pmwcas_pool->GetEpoch()) + sizeof(RecordMetadata) +
         RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
     if (new_node_size > parameters.split_threshold) {
-//      LOG(INFO) << "node splitting";
+      LOG(INFO) << "node splitting";
       // Should split and we have three cases to handle:
       // 1. Root node is a leaf node - install [parent] as the new root
       // 2. We have a parent but no grandparent - install [parent] as the new
