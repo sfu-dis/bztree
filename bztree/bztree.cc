@@ -485,7 +485,7 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   if (record == nullptr) {
     return IsUnique;
   }
-  if (record->IsInserting()) {
+  if (record->IsInserting(epoch->current_epoch_)) {
     goto retry;
   }
   return Duplicate;
@@ -508,7 +508,7 @@ ReturnCode LeafNode::Upsert(const char *key,
       return Update(key, key_size, payload, pmwcas_pool);
     }
     return ReturnCode::Ok();
-  } else if (meta_ptr->IsInserting()) {
+  } else if (meta_ptr->IsInserting(pmwcas_pool->GetEpoch()->current_epoch_)) {
     goto retry;
   } else {
     return Update(key, key_size, payload, pmwcas_pool);
@@ -528,7 +528,7 @@ ReturnCode LeafNode::Update(const char *key,
   auto *meta_ptr = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
   if (meta_ptr == nullptr || !meta_ptr->IsVisible()) {
     return ReturnCode::NotFound();
-  } else if (meta_ptr->IsInserting()) {
+  } else if (meta_ptr->IsInserting(pmwcas_pool->GetEpoch()->current_epoch_)) {
     goto retry;
   }
   auto old_meta_value = meta_ptr->meta;
@@ -608,9 +608,9 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       auto current = GetMetadata(i, epoch);
 
       // Encountered an in-progress insert, recheck later
-      if (current.IsInserting() && check_concurrency) {
+      if (current.IsInserting(epoch->current_epoch_) && check_concurrency) {
         return record_metadata + i;
-      } else if (current.IsInserting() && !check_concurrency) {
+      } else if (current.IsInserting(epoch->current_epoch_) && !check_concurrency) {
         continue;
       }
 
@@ -638,7 +638,7 @@ ReturnCode LeafNode::Delete(const char *key,
   auto record_meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
   if (record_meta == nullptr) {
     return ReturnCode::NotFound();
-  } else if (record_meta->IsInserting()) {
+  } else if (record_meta->IsInserting(pmwcas_pool->GetEpoch()->current_epoch_)) {
     // FIXME(hao): not mentioned in the paper, should confirm later;
     goto retry;
   }

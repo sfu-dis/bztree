@@ -101,6 +101,7 @@ struct RecordMetadata {
   static const uint64_t kControlMask = 0x7;                         // Bits 1-3
   static const uint64_t kVisibleMask = 0x8;                         // Bit 4
   static const uint64_t kOffsetMask = uint64_t{0xFFFFFFF} << 4;     // Bits 5-32
+  static const uint64_t kAllocationEpochMask = uint64_t{0x7FFFFFF} << 4; // Bit 5-31
   static const uint64_t kKeyLengthMask = uint64_t{0xFFFF} << 32;    // Bits 33-48
   static const uint64_t kTotalLengthMask = uint64_t{0xFFFF} << 48;  // Bits 49-64
 
@@ -150,11 +151,11 @@ struct RecordMetadata {
     meta = (offset << 4) | kVisibleFlag | (key_len << 32) | (total_len << 48);
     assert(GetKeyLength() == key_len);
   }
-  inline bool IsInserting() {
+  inline bool IsInserting(uint64_t epoch_index) {
     // record is not visible
     // and record allocation epoch equal to global index epoch
-    // FIXME(hao): Check the Global index epoch
-    return !IsVisible() && OffsetIsEpoch();
+    return !IsVisible() && OffsetIsEpoch() &&
+        ((GetOffset() & kAllocationEpochMask) >> 4 == epoch_index);
   }
 };
 
