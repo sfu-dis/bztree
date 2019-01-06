@@ -24,12 +24,12 @@ class LeafNodeFixtures : public ::testing::Test {
   void InsertDummy() {
     for (uint32_t i = 0; i < 100; i += 10) {
       auto str = std::to_string(i);
-      node->Insert(0, str.c_str(), (uint16_t) str.length(), i, pool);
+      node->Insert(str.c_str(), (uint16_t) str.length(), i, pool);
     }
     auto *new_node = node->Consolidate(pool);
     for (uint32_t i = 200; i < 300; i += 10) {
       auto str = std::to_string(i);
-      new_node->Insert(0, str.c_str(), (uint16_t) str.length(), i, pool);
+      new_node->Insert(str.c_str(), (uint16_t) str.length(), i, pool);
     }
     delete node;
     node = new_node;
@@ -78,15 +78,14 @@ TEST_F(LeafNodeFixtures, Read) {
 TEST_F(LeafNodeFixtures, Insert) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
 
-  ASSERT_TRUE(node->Insert(0, "def", 3, 100, pool).IsOk());
-  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool).IsOk());
-  ASSERT_TRUE(node->Insert(0, "abc", 3, 102, pool).IsOk());
+  ASSERT_TRUE(node->Insert("def", 3, 100, pool).IsOk());
+  ASSERT_TRUE(node->Insert("bdef", 4, 101, pool).IsOk());
+  ASSERT_TRUE(node->Insert("abc", 3, 102, pool).IsOk());
   ASSERT_READ(node, "def", 3, 100);
   ASSERT_READ(node, "abc", 3, 102);
 
-
   auto *new_node = node->Consolidate(pool);
-  ASSERT_TRUE(new_node->Insert(0, "apple", 5, 106, pool).IsOk());
+  ASSERT_TRUE(new_node->Insert("apple", 5, 106, pool).IsOk());
   ASSERT_READ(new_node, "bdef", 4, 101);
   ASSERT_READ(new_node, "apple", 5, 106);
 }
@@ -94,18 +93,18 @@ TEST_F(LeafNodeFixtures, Insert) {
 TEST_F(LeafNodeFixtures, DuplicateInsert) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
-  ASSERT_TRUE(node->Insert(0, "10", 2, 111, pool).IsKeyExists());
-  ASSERT_TRUE(node->Insert(0, "11", 2, 1212, pool).IsOk());
+  ASSERT_TRUE(node->Insert("10", 2, 111, pool).IsKeyExists());
+  ASSERT_TRUE(node->Insert("11", 2, 1212, pool).IsOk());
 
   ASSERT_READ(node, "10", 2, 10);
   ASSERT_READ(node, "11", 2, 1212);
 
   auto *new_node = node->Consolidate(pool);
 
-  ASSERT_TRUE(new_node->Insert(0, "11", 2, 1213, pool).IsKeyExists());
+  ASSERT_TRUE(new_node->Insert("11", 2, 1213, pool).IsKeyExists());
   ASSERT_READ(new_node, "11", 2, 1212);
 
-  ASSERT_TRUE(new_node->Insert(0, "201", 3, 201, pool).IsOk());
+  ASSERT_TRUE(new_node->Insert("201", 3, 201, pool).IsOk());
   ASSERT_READ(new_node, "201", 3, 201);
 }
 
@@ -128,32 +127,31 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
 
-  ASSERT_TRUE(node->Insert(0, "abc", 3, 100, pool).IsOk());
-  ASSERT_TRUE(node->Insert(0, "bdef", 4, 101, pool).IsOk());
-  ASSERT_TRUE(node->Insert(0, "abcd", 4, 102, pool).IsOk());
-  ASSERT_TRUE(node->Insert(0, "deadbeef", 8, 103, pool).IsOk());
-  ASSERT_TRUE(node->Insert(0, "parker", 6, 104, pool).IsOk());
-  ASSERT_TRUE(node->Insert(0, "deadpork", 8, 105, pool).IsOk());
-  ASSERT_TRUE(node->Insert(0, "toronto", 7, 106, pool).IsOk());
+  ASSERT_TRUE(node->Insert("abc", 3, 100, pool).IsOk());
+  ASSERT_TRUE(node->Insert("bdef", 4, 101, pool).IsOk());
+  ASSERT_TRUE(node->Insert("abcd", 4, 102, pool).IsOk());
+  ASSERT_TRUE(node->Insert("deadbeef", 8, 103, pool).IsOk());
+  ASSERT_TRUE(node->Insert("parker", 6, 104, pool).IsOk());
+  ASSERT_TRUE(node->Insert("deadpork", 8, 105, pool).IsOk());
+  ASSERT_TRUE(node->Insert("toronto", 7, 106, pool).IsOk());
 
   bztree::Stack stack;
   bztree::LeafNode *left = nullptr;
   bztree::LeafNode *right = nullptr;
-  bztree::InternalNode *parent = node->PrepareForSplit(0, stack, 3000, pool, &left, &right);
+  bztree::InternalNode *parent = node->PrepareForSplit(stack, 3000, pool, &left, &right);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);
-
 }
 TEST_F(LeafNodeFixtures, Update) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
   ASSERT_READ(node, "10", 2, 10);
-  ASSERT_TRUE(node->Update(0, "10", 2, 11, pool).IsOk());
+  ASSERT_TRUE(node->Update("10", 2, 11, pool).IsOk());
   ASSERT_READ(node, "10", 2, 11);
 
   ASSERT_READ(node, "200", 3, 200);
-  ASSERT_TRUE(node->Update(0, "200", 3, 201, pool).IsOk());
+  ASSERT_TRUE(node->Update("200", 3, 201, pool).IsOk());
   ASSERT_READ(node, "200", 3, 201);
 }
 
@@ -163,20 +161,20 @@ TEST_F(LeafNodeFixtures, Upsert) {
   uint64_t payload;
 
   ASSERT_READ(node, "20", 2, 20);
-  ASSERT_TRUE(node->Upsert(0, "20", 2, 21, pool).IsOk());
+  ASSERT_TRUE(node->Upsert("20", 2, 21, pool).IsOk());
   ASSERT_READ(node, "20", 2, 21);
 
   ASSERT_READ(node, "210", 3, 210);
-  ASSERT_TRUE(node->Upsert(0, "210", 3, 211, pool).IsOk());
+  ASSERT_TRUE(node->Upsert("210", 3, 211, pool).IsOk());
   ASSERT_READ(node, "210", 3, 211);
 
 //  Non-existing upsert
   ASSERT_TRUE(node->Read("21", 2, &payload, pool).IsNotFound());
-  ASSERT_TRUE(node->Upsert(0, "21", 2, 21, pool).IsOk());
+  ASSERT_TRUE(node->Upsert("21", 2, 21, pool).IsOk());
   ASSERT_READ(node, "21", 2, 21);
 
   ASSERT_TRUE(node->Read("211", 3, &payload, pool).IsNotFound());
-  ASSERT_TRUE(node->Upsert(0, "211", 3, 211, pool).IsOk());
+  ASSERT_TRUE(node->Upsert("211", 3, 211, pool).IsOk());
   ASSERT_READ(node, "211", 3, 211);
 }
 
