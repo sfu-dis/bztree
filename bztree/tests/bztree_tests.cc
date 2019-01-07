@@ -13,8 +13,8 @@ class LeafNodeFixtures : public ::testing::Test {
  public:
   void EmptyNode() {
     delete node;
-    node = (bztree::LeafNode *) malloc(bztree::LeafNode::kNodeSize);
-    memset(node, 0, bztree::LeafNode::kNodeSize);
+    node = (bztree::LeafNode *) malloc(node->GetHeader()->size);
+    memset(node, 0, node->GetHeader()->size);
     new(node) bztree::LeafNode;
   }
 
@@ -49,9 +49,10 @@ class LeafNodeFixtures : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
+    const uint32_t node_size = 4096;
     pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
-    node = (bztree::LeafNode *) malloc(bztree::LeafNode::kNodeSize);
-    memset(node, 0, bztree::LeafNode::kNodeSize);
+    node = (bztree::LeafNode *) malloc(node_size);
+    memset(node, 0, node_size);
     new(node) bztree::LeafNode;
   }
 

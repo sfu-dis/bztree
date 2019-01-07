@@ -101,7 +101,7 @@ struct RecordMetadata {
   static const uint64_t kControlMask = 0x7;                         // Bits 1-3
   static const uint64_t kVisibleMask = 0x8;                         // Bit 4
   static const uint64_t kOffsetMask = uint64_t{0xFFFFFFF} << 4;     // Bits 5-32
-  static const uint64_t kAllocationEpochMask = uint64_t{0x7FFFFFF} << 4; // Bit 5-31
+  static const uint64_t kAllocationEpochMask = uint64_t{0x7FFFFFF} << 4;  // Bit 5-31
   static const uint64_t kKeyLengthMask = uint64_t{0xFFFF} << 32;    // Bits 33-48
   static const uint64_t kTotalLengthMask = uint64_t{0xFFFF} << 48;  // Bits 49-64
 
@@ -327,11 +327,9 @@ struct Record;
 
 class LeafNode : public BaseNode {
  public:
-  static const uint32_t kNodeSize = 4096;
+  static LeafNode *New(uint32_t node_size);
 
-  static LeafNode *New();
-
-  LeafNode() : BaseNode(true, kNodeSize) {}
+  explicit LeafNode(uint32_t node_size = 4096) : BaseNode(true, node_size) {}
   ~LeafNode() = default;
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
@@ -395,7 +393,7 @@ class LeafNode : public BaseNode {
   }
 
   inline uint32_t GetFreeSpace(pmwcas::EpochManager *epoch) {
-    return kNodeSize - GetUsedSpace(epoch);
+    return header.size - GetUsedSpace(epoch);
   }
 
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
@@ -459,17 +457,20 @@ class Iterator;
 class BzTree {
  public:
   struct ParameterSet {
-    uint32_t split_threshold;
-    uint32_t merge_threshold;
-    ParameterSet() : split_threshold(3072), merge_threshold(1024) {}
-    ParameterSet(uint32_t split_threshold, uint32_t merge_threshold)
-        : split_threshold(split_threshold), merge_threshold(merge_threshold) {}
+    const uint32_t split_threshold;
+    const uint32_t merge_threshold;
+    const uint32_t leaf_node_size;
+    ParameterSet() : split_threshold(3072), merge_threshold(1024), leaf_node_size(4096) {}
+    ParameterSet(uint32_t split_threshold, uint32_t merge_threshold, uint32_t leaf_node_size)
+        : split_threshold(split_threshold),
+          merge_threshold(merge_threshold),
+          leaf_node_size(leaf_node_size) {}
     ~ParameterSet() {}
   };
 
   BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool)
       : parameters(param), root(nullptr), pmwcas_pool(pool) {
-    root = LeafNode::New();
+    root = LeafNode::New(param.leaf_node_size);
   }
   void Dump();
   inline pmwcas::DescriptorPool *GetPool() const {

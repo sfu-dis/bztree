@@ -292,11 +292,11 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
   }
 }
 
-LeafNode *LeafNode::New() {
+LeafNode *LeafNode::New(uint32_t node_size) {
   // FIXME(tzwang): use a better allocator
-  LeafNode *node = reinterpret_cast<LeafNode *>(malloc(kNodeSize));
-  memset(node, 0, kNodeSize);
-  new(node) LeafNode;
+  LeafNode *node = reinterpret_cast<LeafNode *>(malloc(node_size));
+  memset(node, 0, node_size);
+  new(node) LeafNode(node_size);
   return node;
 }
 
@@ -428,7 +428,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 
   // Reserved space! Now copy data
   // The key size must be padded to 64bit
-  uint64_t offset = kNodeSize - desired_status.GetBlockSize();
+  uint64_t offset = header.size - desired_status.GetBlockSize();
   char *ptr = &(reinterpret_cast<char *>(this))[offset];
   memcpy(ptr, key, key_size);
   memcpy(ptr + padded_key_size, &payload, sizeof(payload));
@@ -737,10 +737,10 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
   SortMetadataByKey(meta_vec, true, pmwcas_pool->GetEpoch());
 
   // Allocate and populate a new node
-  LeafNode *new_leaf = LeafNode::New();
+  LeafNode *new_leaf = LeafNode::New(this->header.size);
   new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end(), pmwcas_pool->GetEpoch());
 
-  pmwcas::NVRAM::Flush(kNodeSize, new_leaf);
+  pmwcas::NVRAM::Flush(this->header.size, new_leaf);
 
   return new_leaf;
 }
@@ -776,7 +776,7 @@ void LeafNode::CopyFrom(LeafNode *node,
                         std::vector<RecordMetadata>::iterator end_it,
                         pmwcas::EpochManager *epoch) {
   // meta_vec is assumed to be in sorted order, insert records one by one
-  uint64_t offset = kNodeSize;
+  uint32_t offset = this->header.size;
   uint16_t nrecords = 0;
   for (auto it = begin_it; it != end_it; ++it) {
     auto meta = *it;
@@ -796,7 +796,7 @@ void LeafNode::CopyFrom(LeafNode *node,
     ++nrecords;
   }
   // Finalize header stats
-  header.status.SetBlockSize((uint32_t) (kNodeSize - offset));
+  header.status.SetBlockSize(this->header.size - offset);
   header.status.SetRecordCount(nrecords);
   header.sorted_count = nrecords;
 }
@@ -872,8 +872,8 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
   // FIXME(tzwang): not PM-safe, might leak
-  *left = LeafNode::New();
-  *right = LeafNode::New();
+  *left = LeafNode::New(this->header.size);
+  *right = LeafNode::New(this->header.size);
 
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
