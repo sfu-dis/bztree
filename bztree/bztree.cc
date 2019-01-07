@@ -955,7 +955,6 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     auto new_node_size = node->GetUsedSpace(pmwcas_pool->GetEpoch()) + sizeof(RecordMetadata) +
         RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
     if (new_node_size > parameters.split_threshold) {
-      LOG(INFO) << "node splitting";
       // Should split and we have three cases to handle:
       // 1. Root node is a leaf node - install [parent] as the new root
       // 2. We have a parent but no grandparent - install [parent] as the new

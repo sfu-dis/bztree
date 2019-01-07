@@ -6,11 +6,12 @@
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
+#include <gperftools/profiler.h>
 
 #include "util/performance_test.h"
 #include "../bztree.h"
 
-uint32_t descriptor_pool_size = 100000;
+uint32_t descriptor_pool_size = 1000000;
 uint32_t thread_count = 30;
 
 struct MultiThreadRead : public pmwcas::PerformanceTest {
@@ -63,7 +64,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
 GTEST_TEST(BztreeTest, MultiThreadRead) {
 //  auto thread_count = pmwcas::Environment::Get()->GetCoreCount();
   std::unique_ptr<pmwcas::DescriptorPool> pool(
-      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+      new pmwcas::DescriptorPool(descriptor_pool_size, 5, nullptr)
   );
   bztree::BzTree::ParameterSet param;
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
@@ -80,6 +81,8 @@ GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
   const auto kb = 1024;
   bztree::BzTree::ParameterSet param(kb * kb, 0, kb * kb);
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+
+  ProfilerStart("whatever_name");
   MultiThreadInsertTest t(item_per_thread, tree.get());
   t.Run(thread_count);
   for (uint32_t i = 0; i < (thread_count + 1) * item_per_thread; i++) {
@@ -89,7 +92,19 @@ GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
     ASSERT_TRUE(rc.IsOk());
     ASSERT_EQ(payload, i);
   }
-  tree->Dump();
+  ProfilerStop();
+}
+
+GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
+  uint32_t thread_count = 2;
+  uint32_t item_per_thread = 20;
+  std::unique_ptr<pmwcas::DescriptorPool> pool(
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+  );
+  bztree::BzTree::ParameterSet param;
+  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  MultiThreadInsertTest t(item_per_thread, tree.get());
+  t.Run(thread_count);
 }
 
 int main(int argc, char **argv) {
