@@ -82,7 +82,9 @@ GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
   bztree::BzTree::ParameterSet param(kb * kb, 0, kb * kb);
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
 
+#ifdef PROFILE
   ProfilerStart("whatever_name");
+#endif
   MultiThreadInsertTest t(item_per_thread, tree.get());
   t.Run(thread_count);
   for (uint32_t i = 0; i < (thread_count + 1) * item_per_thread; i++) {
@@ -92,7 +94,9 @@ GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
     ASSERT_TRUE(rc.IsOk());
     ASSERT_EQ(payload, i);
   }
+#ifdef PROFILE
   ProfilerStop();
+#endif
 }
 
 GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {

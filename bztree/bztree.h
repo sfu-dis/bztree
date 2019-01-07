@@ -461,7 +461,7 @@ class BzTree {
     const uint32_t merge_threshold;
     const uint32_t leaf_node_size;
     ParameterSet() : split_threshold(3072), merge_threshold(1024), leaf_node_size(4096) {}
-    ParameterSet(uint32_t split_threshold, uint32_t merge_threshold, uint32_t leaf_node_size)
+    ParameterSet(uint32_t split_threshold, uint32_t merge_threshold, uint32_t leaf_node_size = 4096)
         : split_threshold(split_threshold),
           merge_threshold(merge_threshold),
           leaf_node_size(leaf_node_size) {}
