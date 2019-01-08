@@ -81,6 +81,7 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
   MultiThreadRead t(10000, tree.get());
   t.Run(thread_count);
+  pmwcas::Thread::ClearRegistry();
 }
 
 GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
@@ -95,6 +96,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
 
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
+  pmwcas::Thread::ClearRegistry();
   t.SanityCheck();
 }
 
@@ -109,6 +111,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
+  pmwcas::Thread::ClearRegistry();
   t.SanityCheck();
   tree->Dump();
 }
