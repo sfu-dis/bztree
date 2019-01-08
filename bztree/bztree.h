@@ -164,9 +164,6 @@ class BaseNode {
   bool is_leaf;
   NodeHeader header;
   RecordMetadata record_metadata[0];
-
-  // Set the frozen bit to prevent future modifications to the node
-  bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
   void Dump(pmwcas::EpochManager *epoch);
 
   // Check if the key in a range, inclusive
@@ -197,6 +194,8 @@ class BaseNode {
     }
     return cmp;
   }
+  // Set the frozen bit to prevent future modifications to the node
+  bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
   inline RecordMetadata GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
     // ensure the metadata is installed
     auto meta = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
@@ -278,7 +277,7 @@ class InternalNode : public BaseNode {
   InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
                                 const char *key, uint32_t key_size,
                                 uint64_t left_child_addr, uint64_t right_child_addr,
-                                pmwcas::EpochManager *epoch);
+                                pmwcas::DescriptorPool *pool);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
     char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
