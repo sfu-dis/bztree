@@ -84,8 +84,7 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   return node;
 }
 
-InternalNode::InternalNode(uint32_t
-                           node_size,
+InternalNode::InternalNode(uint32_t node_size,
                            const char *key,
                            const uint16_t key_size,
                            uint64_t left_child_addr,
@@ -714,7 +713,7 @@ ReturnCode LeafNode::RangeScan(const char *key1,
 }
 
 bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
-  NodeHeader::StatusWord expected = header.status;
+  NodeHeader::StatusWord expected = header.GetStatus(pmwcas_pool->GetEpoch());
   if (expected.IsFrozen()) {
     return false;
   }
@@ -748,10 +747,12 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
 uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
                                      bool visible_only,
                                      pmwcas::EpochManager *epoch) {
+  // Node is frozen at this point
+  // there should not be any on-going pmwcas
   uint32_t total_size = 0;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     // TODO(tzwang): handle deletes
-    auto meta = GetMetadata(i, epoch);
+    auto meta = record_metadata[i];;
     if (meta.IsVisible()) {
       vec.emplace_back(meta);
       total_size += (meta.GetTotalLength());
@@ -901,7 +902,7 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
   RecordMetadata separator_meta = meta_vec[nleft - 1];
 
   InternalNode *parent = stack.Top() ?
-                         reinterpret_cast<InternalNode *>(stack.Top()->node) : nullptr;
+                         stack.Top()->node : nullptr;
 
   // The node is already frozen (by us), so we must be able to get a valid key
   char *key = GetKey(separator_meta);
@@ -926,8 +927,8 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
 
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
-                                 bool le_child) const {
-  BaseNode *node = root;
+                                 bool le_child) {
+  BaseNode *node = GetRootNodeSafe();
   InternalNode *parent = nullptr;
   uint32_t meta_index = 0;
   assert(node);

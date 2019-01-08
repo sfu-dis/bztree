@@ -216,7 +216,8 @@ class BaseNode {
                                    uint32_t start_pos = 0,
                                    uint32_t end_pos = (uint32_t) -1,
                                    bool check_concurrency = true);
-  // Get the key and payload (8-byte)
+
+  // Get the key and payload (8-byte), not thread-safe
   // Outputs:
   // 1. [*data] - pointer to the char string that stores key followed by payload.
   //    If the record has a null key, then this will point directly to the
@@ -240,9 +241,7 @@ class BaseNode {
     }
 
     if (payload != nullptr) {
-      auto tmp_payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-          tmp_data + padded_key_len)->GetValue(epoch);
-      *payload = tmp_payload;
+      *payload = *reinterpret_cast<uint64_t *> (tmp_data + padded_key_len);
     }
     return true;
   }
@@ -396,6 +395,7 @@ class LeafNode : public BaseNode {
     return header.size - GetUsedSpace(epoch);
   }
 
+  // Make sure this node is freezed before calling this function
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
                              bool visible_only,
                              pmwcas::EpochManager *epoch);
@@ -485,18 +485,23 @@ class BzTree {
                                       const char *key2, uint16_t size2);
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
-                           bool le_child = true) const;
+                           bool le_child = true);
 
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
+  BaseNode *GetRootNodeSafe() {
+    auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
+        &root)->GetValue(pmwcas_pool->GetEpoch());
+    return reinterpret_cast< BaseNode *>(root_node);
+  }
 };
 
 class Iterator {
  public:
-  explicit Iterator(const BzTree *tree,
+  explicit Iterator(BzTree *tree,
                     const char *begin_key,
                     uint16_t begin_size,
                     const char *end_key,
@@ -534,7 +539,7 @@ class Iterator {
   }
 
  private:
-  const BzTree *tree;
+  BzTree *tree;
   const char *begin_key;
   uint16_t begin_size;
   const char *end_key;
