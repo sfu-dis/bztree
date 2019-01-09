@@ -235,7 +235,6 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
   // After adding a key and pointers the new node would be too large. This
   // means we are effectively 'moving up' the tree to do split
   // So now we split the node and generate two new internal nodes
-  LOG(INFO) << "Triggered internal node split";
   LOG_IF(FATAL, header.sorted_count < 2);
   uint32_t n_left = header.sorted_count >> 1;
 
