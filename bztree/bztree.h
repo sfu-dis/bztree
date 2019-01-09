@@ -296,6 +296,7 @@ class InternalNode : public BaseNode {
 };
 
 class LeafNode;
+class BzTree;
 struct Stack {
   struct Frame {
     Frame() : node(nullptr), meta() {}
@@ -306,8 +307,9 @@ struct Stack {
   static const uint32_t kMaxFrames = 32;
   Frame frames[kMaxFrames];
   uint32_t num_frames;
+  BzTree *tree;
 
-  Stack() : num_frames(0) {}
+  explicit Stack(BzTree *tree = nullptr) : tree(tree), num_frames(0) {}
   ~Stack() { num_frames = 0; }
   inline void Push(InternalNode *node, RecordMetadata meta) {
     auto &frame = frames[num_frames++];
@@ -485,6 +487,10 @@ class BzTree {
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
+
+  // typically used when a parent is freezed and we want to re-find a new one.
+  BaseNode *TraverseToNode(Stack *stack, const char *key,
+                           uint16_t key_size, BaseNode *stop_at);
 
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);

@@ -215,6 +215,7 @@ InternalNode::InternalNode(uint32_t node_size,
 }
 
 // insert record to this internal node
+// The node is freezed at this time.
 InternalNode *InternalNode::PrepareForSplit(Stack &stack,
                                             uint32_t split_threshold,
                                             const char *key,
@@ -222,72 +223,77 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
                                             uint64_t left_child_addr,
                                             uint64_t right_child_addr,
                                             pmwcas::DescriptorPool *pool) {
-  if (!Freeze(pool)) {
-    // Maybe hit another SMO, the entire split op will abort
-    return nullptr;
-  }
   uint32_t data_size = header.size + key_size +
       sizeof(right_child_addr) + sizeof(RecordMetadata);
   uint32_t new_node_size = sizeof(InternalNode) + data_size;
-  if (new_node_size > split_threshold) {
-    // After adding a key and pointers the new node would be too large. This
-    // means we are effectively 'moving up' the tree to do split
-    // So now we split the node and generate two new internal nodes
+  if (new_node_size < split_threshold) {
+    // good boy
+    return InternalNode::New(this, key, key_size, left_child_addr,
+                             right_child_addr, pool->GetEpoch());
+  }
 
-    LOG(INFO) << "Triggered internal node split";
-    LOG_IF(FATAL, header.sorted_count < 2);
-    uint32_t n_left = header.sorted_count >> 1;
+  // After adding a key and pointers the new node would be too large. This
+  // means we are effectively 'moving up' the tree to do split
+  // So now we split the node and generate two new internal nodes
+  LOG(INFO) << "Triggered internal node split";
+  LOG_IF(FATAL, header.sorted_count < 2);
+  uint32_t n_left = header.sorted_count >> 1;
 
-    InternalNode *left = nullptr;
-    InternalNode *right = nullptr;
+  InternalNode *left = nullptr;
+  InternalNode *right = nullptr;
 
-    // Figure out where does the new key will go
-    auto separator_meta = record_metadata[n_left];
-    char *separator_key = nullptr;
-    uint32_t separator_key_size = separator_meta.GetKeyLength();
-    uint64_t separator_payload = 0;
-    bool success = GetRawRecord(separator_meta, nullptr, &separator_key, &separator_payload, pool->GetEpoch());
-    LOG_IF(FATAL, !success);
+  // Figure out where does the new key will go
+  auto separator_meta = record_metadata[n_left];
+  char *separator_key = nullptr;
+  uint16_t separator_key_size = separator_meta.GetKeyLength();
+  uint64_t separator_payload = 0;
+  bool success = GetRawRecord(separator_meta, nullptr, &separator_key,
+                              &separator_payload, pool->GetEpoch());
+  LOG_IF(FATAL, !success);
 
-    int cmp = memcmp(key, separator_key, std::min<uint32_t>(key_size, separator_key_size));
-    if (cmp == 0) {
-      cmp = key_size - separator_key_size;
-    }
-    LOG_IF(FATAL, cmp == 0);
-    if (cmp < 0) {
-      // Should go to left
-      left = InternalNode::New(this, 0, n_left, key, key_size,
-                               left_child_addr, right_child_addr, pool->GetEpoch());
-      right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
-                                nullptr, 0, 0, 0, pool->GetEpoch(), separator_payload);
-    } else {
-      left = InternalNode::New(this, 0, n_left, nullptr, 0, 0, 0, pool->GetEpoch());
-      right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
-                                key, key_size, left_child_addr, right_child_addr,
-                                pool->GetEpoch(), separator_payload);
-    }
-    assert(left);
-    assert(right);
+  int cmp = memcmp(key, separator_key, std::min<uint32_t>(key_size, separator_key_size));
+  if (cmp == 0) {
+    cmp = key_size - separator_key_size;
+  }
+  LOG_IF(FATAL, cmp == 0);
+  if (cmp < 0) {
+    // Should go to left
+    left = InternalNode::New(this, 0, n_left, key, key_size,
+                             left_child_addr, right_child_addr, pool->GetEpoch());
+    right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
+                              nullptr, 0, 0, 0, pool->GetEpoch(), separator_payload);
+  } else {
+    left = InternalNode::New(this, 0, n_left, nullptr, 0, 0, 0, pool->GetEpoch());
+    right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
+                              key, key_size, left_child_addr, right_child_addr,
+                              pool->GetEpoch(), separator_payload);
+  }
+  assert(left);
+  assert(right);
 
-    // Pop here as if this were a leaf node so that when we get back to the
-    // original caller, we get stack top as the "parent"
-    stack.Pop();
+  // Pop here as if this were a leaf node so that when we get back to the
+  // original caller, we get stack top as the "parent"
+  stack.Pop();
 
-    // Now get this internal node's real parent
-    InternalNode *parent = stack.Top() ?
-                           reinterpret_cast<InternalNode *>(stack.Top()->node) : nullptr;
-    if (parent) {
-      // Need to insert into this parent, so create a new one
+  // Now get this internal node's real parent
+  InternalNode *parent = stack.Top() ?
+                         stack.Top()->node : nullptr;
+  if (parent == nullptr) {
+    // Good!
+    return InternalNode::New(separator_key, separator_key_size,
+                             (uint64_t) left, (uint64_t) right, pool->GetEpoch());
+  }
+  while (true) {
+    if (parent->Freeze(pool)) {
       return parent->PrepareForSplit(stack, split_threshold,
                                      separator_key, separator_key_size,
                                      (uint64_t) left, (uint64_t) right, pool);
     } else {
-      // New root node
-      return InternalNode::New(separator_key, separator_key_size,
-                               (uint64_t) left, (uint64_t) right, pool->GetEpoch());
+      stack.Clear();
+      stack.tree->TraverseToNode(&stack, separator_key, separator_key_size, this);
+      assert(stack.Top());
+      parent = stack.Top()->node;
     }
-  } else {
-    return InternalNode::New(this, key, key_size, left_child_addr, right_child_addr, pool->GetEpoch());
   }
 }
 
@@ -833,7 +839,7 @@ uint32_t InternalNode::GetChildIndex(const char *key,
   int32_t left = 0, right = header.sorted_count - 1, mid = 0;
   while (true) {
     mid = (left + right) / 2;
-    auto meta = GetMetadata(mid, pool->GetEpoch());
+    auto meta = record_metadata[mid];
     char *record_key;
     GetRawRecord(meta, nullptr, &record_key, nullptr, pool->GetEpoch());
     auto cmp = KeyCompare(key, key_size, record_key, meta.GetKeyLength());
@@ -866,68 +872,90 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
                                         pmwcas::DescriptorPool *pmwcas_pool,
                                         LeafNode **left, LeafNode **right) {
   LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
-  // Set the frozen bit on the node to be split
-  if (!Freeze(pmwcas_pool)) {
-    return nullptr;
+
+  // Prepare new nodes: a parent node, a left leaf and a right leaf
+  // FIXME(tzwang): not PM-safe, might leak
+  *left = LeafNode::New(this->header.size);
+  *right = LeafNode::New(this->header.size);
+
+  thread_local std::vector<RecordMetadata> meta_vec;
+  meta_vec.clear();
+  uint32_t total_size = SortMetadataByKey(meta_vec, true, pmwcas_pool->GetEpoch());
+
+  int32_t left_size = total_size / 2;
+  uint32_t nleft = 0;
+  for (uint32_t i = 0; i < meta_vec.size(); ++i) {
+    auto &meta = meta_vec[i];
+    ++nleft;
+    left_size -= meta.GetTotalLength();
+    if (left_size <= 0) {
+      break;
+    }
+  }
+
+  // TODO(tzwang): also put the new insert here to save some cycles
+  auto left_end_it = meta_vec.begin() + nleft;
+  (*left)->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
+  (*right)->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
+
+  // Separator exists in the new left leaf node, i.e., when traversing the tree,
+  // we go left if <=, and go right if >.
+  LOG_IF(FATAL, nleft - 1 == 0);
+  RecordMetadata separator_meta = meta_vec[nleft - 1];
+
+  // The node is already frozen (by us), so we must be able to get a valid key
+  char *key = GetKey(separator_meta);
+  assert(key);
+
+  InternalNode *parent = stack.Top() ?
+                         stack.Top()->node : nullptr;
+  if (parent == nullptr) {
+    // Good boy!
+    return InternalNode::New(key, separator_meta.GetKeyLength(),
+                             reinterpret_cast<uint64_t>(*left),
+                             reinterpret_cast<uint64_t>(*right),
+                             pmwcas_pool->GetEpoch());
   }
 
   while (true) {
-    // Prepare new nodes: a parent node, a left leaf and a right leaf
-    // FIXME(tzwang): not PM-safe, might leak
-    *left = LeafNode::New(this->header.size);
-    *right = LeafNode::New(this->header.size);
-
-    thread_local std::vector<RecordMetadata> meta_vec;
-    meta_vec.clear();
-    uint32_t total_size = SortMetadataByKey(meta_vec, true, pmwcas_pool->GetEpoch());
-
-    int32_t left_size = total_size / 2;
-    uint32_t nleft = 0;
-    for (uint32_t i = 0; i < meta_vec.size(); ++i) {
-      auto &meta = meta_vec[i];
-      ++nleft;
-      left_size -= meta.GetTotalLength();
-      if (left_size <= 0) {
-        break;
-      }
-    }
-
-    // TODO(tzwang): also put the new insert here to save some cycles
-    auto left_end_it = meta_vec.begin() + nleft;
-    (*left)->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
-    (*right)->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
-
-    // Separator exists in the new left leaf node, i.e., when traversing the tree,
-    // we go left if <=, and go right if >.
-    LOG_IF(FATAL, nleft - 1 == 0);
-    RecordMetadata separator_meta = meta_vec[nleft - 1];
-
-    InternalNode *parent = stack.Top() ?
-                           stack.Top()->node : nullptr;
-
-    // The node is already frozen (by us), so we must be able to get a valid key
-    char *key = GetKey(separator_meta);
-    assert(key);
-
-    if (parent) {
-      // Has a parent node. PrepareForSplit will see if we need to split this
-      // parent node as well, and if so, return a new (possibly upper-level) parent
-      // node that needs to be installed to its parent
-      auto new_parent = parent->PrepareForSplit(stack, split_threshold, key,
-                                                separator_meta.GetKeyLength(),
-                                                reinterpret_cast<uint64_t>(*left),
-                                                reinterpret_cast<uint64_t>(*right),
-                                                pmwcas_pool);
-      if (new_parent != nullptr) {
-        return new_parent;
-      }
+    // Has a parent node. PrepareForSplit will see if we need to split this
+    // parent node as well, and if so, return a new (possibly upper-level) parent
+    // node that needs to be installed to its parent
+    if (parent->Freeze(pmwcas_pool)) {
+      return parent->PrepareForSplit(stack, split_threshold, key,
+                                     separator_meta.GetKeyLength(),
+                                     reinterpret_cast<uint64_t>(*left),
+                                     reinterpret_cast<uint64_t>(*right),
+                                     pmwcas_pool);
     } else {
-      return InternalNode::New(key, separator_meta.GetKeyLength(),
-                               reinterpret_cast<uint64_t>(*left),
-                               reinterpret_cast<uint64_t>(*right),
-                               pmwcas_pool->GetEpoch());
+      // for whatever reason cannot freeze the node
+      // re-traverse the tree to find the new node.
+      stack.Clear();
+      stack.tree->TraverseToNode(&stack, key, separator_meta.GetKeyLength(), this);
+
+      // must have a parent in this case
+      assert(stack.Top());
+      parent = stack.Top()->node;
+      // Fixme(hao): I believe spinning is not desired, we should help the parent to finish op
     }
   }
+}
+
+BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
+                                 const char *key, uint16_t key_size, bztree::BaseNode *stop_at) {
+  BaseNode *node = GetRootNodeSafe();
+  InternalNode *parent = nullptr;
+  uint32_t meta_index = 0;
+  while (node != stop_at) {
+    parent = reinterpret_cast<InternalNode *>(node);
+    meta_index = parent->GetChildIndex(key, key_size, pmwcas_pool);
+    node = parent->GetChildByMetaIndex(meta_index, pmwcas_pool->GetEpoch());
+    assert(node);
+    if (stack != nullptr) {
+      stack->Push(parent, parent->GetMetadata(meta_index, pmwcas_pool->GetEpoch()));
+    }
+  }
+  return node;
 }
 
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
@@ -950,7 +978,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
 }
 
 ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack;
+  thread_local Stack stack(this);
   ReturnCode rc;
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
@@ -960,18 +988,27 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     // Check space to see if we need to split the node
     auto new_node_size = node->GetUsedSpace(pmwcas_pool->GetEpoch()) + sizeof(RecordMetadata) +
         RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
-    if (new_node_size > parameters.split_threshold) {
-      // Should split and we have three cases to handle:
-      // 1. Root node is a leaf node - install [parent] as the new root
-      // 2. We have a parent but no grandparent - install [parent] as the new
-      //    root
-      // 3. We have a grandparent - update the child pointer in the grandparent
-      //    to point to the new [parent] (might further cause splits up the tree)
+    if (new_node_size < parameters.split_threshold) {
+      rc = node->Insert(key, key_size, payload, pmwcas_pool);
+      continue;
+    }
+    // Should split and we have three cases to handle:
+    // 1. Root node is a leaf node - install [parent] as the new root
+    // 2. We have a parent but no grandparent - install [parent] as the new
+    //    root
+    // 3. We have a grandparent - update the child pointer in the grandparent
+    //    to point to the new [parent] (might further cause splits up the tree)
 
+    LeafNode *left = nullptr;
+    LeafNode *right = nullptr;
+    if (!node->Freeze(pmwcas_pool)) {
+      continue;
+    }
+    do {
       // Note that when we split internal nodes (if needed), stack will get
       // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
       // So we save the root node here in case we need to change root later.
-      uint64_t old_root_addr = reinterpret_cast<uint64_t>(stack.GetRoot());
+      auto old_root_addr = reinterpret_cast<uint64_t>(stack.GetRoot());
       if (!old_root_addr) {
         old_root_addr = reinterpret_cast<uint64_t>(node);
       }
@@ -987,15 +1024,10 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // on its top the "parent" node and the "grandparent" node (if any) that
       // points to the parent node. As a result, we directly install a pointer to
       // the new parent node returned by leaf.PrepareForSplit to the grandparent.
-      LeafNode *left = nullptr;
-      LeafNode *right = nullptr;
       InternalNode *parent = node->PrepareForSplit(stack,
                                                    parameters.split_threshold,
                                                    pmwcas_pool, &left, &right);
-      if (!parent) {
-        // TODO(tzwang): check memory leaks
-        continue;
-      }
+      assert(parent);
 
       auto *top = stack.Pop();
       InternalNode *old_parent = nullptr;
@@ -1004,26 +1036,33 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       }
 
       top = stack.Pop();
-      InternalNode *gp = nullptr;
+      InternalNode *grand_parent = nullptr;
       if (top) {
-        gp = reinterpret_cast<InternalNode *>(top->node);
+        grand_parent = top->node;
       }
 
-      if (gp) {
+      if (grand_parent) {
         assert(old_parent);
         // There is a grand parent. We need to swap out the pointer to the old
-        // parent and install the pointer to the new parent. Don't care the
-        // result here - have to retry anyway.
-        gp->Update(top->meta, old_parent, parent, pmwcas_pool);
+        // parent and install the pointer to the new parent.
+        auto result = grand_parent->Update(top->meta, old_parent, parent, pmwcas_pool);
+        if (result.IsOk()) {
+          break;
+        }
+        stack.Clear();
+        node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+        continue;
       } else {
         // No grand parent or already popped out by during split propogation
-        if (!ChangeRoot(old_root_addr, parent)) {
-          continue;
+        auto result = ChangeRoot(old_root_addr, parent);
+        if (result) {
+          break;
         }
+        stack.Clear();
+        node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+        continue;
       }
-    } else {
-      rc = node->Insert(key, key_size, payload, pmwcas_pool);
-    }
+    } while (true);
   } while (!rc.IsOk() && !rc.IsKeyExists());
   return rc;
 }
@@ -1039,7 +1078,7 @@ bool BzTree::ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root) {
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
-  thread_local Stack stack;
+  thread_local Stack stack(this);
   stack.Clear();
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
@@ -1056,7 +1095,7 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
 }
 
 ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack;
+  thread_local Stack stack(this);
   ReturnCode rc;
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
@@ -1071,7 +1110,7 @@ ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) 
 }
 
 ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack;
+  thread_local Stack stack(this);
   stack.Clear();
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
@@ -1092,7 +1131,7 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
 }
 
 ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
-  thread_local Stack stack;
+  thread_local Stack stack(this);
   ReturnCode rc;
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
