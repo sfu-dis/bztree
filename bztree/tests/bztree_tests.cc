@@ -215,7 +215,7 @@ class BzTreeTest : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(5000, 1, nullptr, false);
+    pool = new pmwcas::DescriptorPool(10000, 1, nullptr, false);
     bztree::BzTree::ParameterSet param(256, 128);
     tree = new bztree::BzTree(param, pool);
   }

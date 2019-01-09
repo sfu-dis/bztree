@@ -977,7 +977,8 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
 }
 
 ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack(this);
+  thread_local Stack stack;
+  stack.tree = this;
   ReturnCode rc;
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
@@ -1056,6 +1057,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         if (result) {
           break;
         }
+        LOG(INFO) << "Root not installed";
       }
       // unsuccessful install, retry
       stack.Clear();
@@ -1076,7 +1078,8 @@ bool BzTree::ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root) {
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
-  thread_local Stack stack(this);
+  thread_local Stack stack;
+  stack.tree = this;
   stack.Clear();
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
@@ -1093,7 +1096,8 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
 }
 
 ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack(this);
+  thread_local Stack stack;
+  stack.tree = this;
   ReturnCode rc;
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
@@ -1108,7 +1112,8 @@ ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) 
 }
 
 ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack(this);
+  thread_local Stack stack;
+  stack.tree = this;
   stack.Clear();
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
@@ -1129,7 +1134,8 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
 }
 
 ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
-  thread_local Stack stack(this);
+  thread_local Stack stack;
+  stack.tree = this;
   ReturnCode rc;
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {

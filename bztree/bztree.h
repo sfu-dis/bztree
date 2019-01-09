@@ -316,7 +316,7 @@ struct Stack {
   uint32_t num_frames;
   BzTree *tree;
 
-  explicit Stack(BzTree *tree = nullptr) : tree(tree), num_frames(0) {}
+  Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
   inline void Push(InternalNode *node, RecordMetadata meta) {
     auto &frame = frames[num_frames++];
