@@ -840,7 +840,7 @@ uint32_t InternalNode::GetChildIndex(const char *key,
     mid = (left + right) / 2;
     auto meta = record_metadata[mid];
     char *record_key;
-    GetRawRecord(meta, nullptr, &record_key, nullptr, pool->GetEpoch());
+    GetRawRecord(meta, nullptr, &record_key, nullptr, pool->GetEpoch(), true);
     auto cmp = KeyCompare(key, key_size, record_key, meta.GetKeyLength());
     if (cmp == 0) {
       // Key exists
@@ -1003,28 +1003,28 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     if (!node->Freeze(pmwcas_pool)) {
       continue;
     }
+    // Note that when we split internal nodes (if needed), stack will get
+    // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
+    // So we save the root node here in case we need to change root later.
+
+
+    // Now split the leaf node. PrepareForSplit will return the node that we
+    // need to install to the grandparent node (will be stack top, if any). If
+    // it turns out there is no such grandparent, we directly install the
+    // returned node as the new root.
+    //
+    // Note that in internal node's PrepareSplit if the internal node needs to
+    // split we will pop the stack along the way as the split propogates
+    // upward, such that by the time we come back here, the stack will contain
+    // on its top the "parent" node and the "grandparent" node (if any) that
+    // points to the parent node. As a result, we directly install a pointer to
+    // the new parent node returned by leaf.PrepareForSplit to the grandparent.
+    InternalNode *parent = node->PrepareForSplit(stack,
+                                                 parameters.split_threshold,
+                                                 pmwcas_pool, &left, &right);
+    assert(parent);
+
     do {
-      // Note that when we split internal nodes (if needed), stack will get
-      // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
-      // So we save the root node here in case we need to change root later.
-
-
-      // Now split the leaf node. PrepareForSplit will return the node that we
-      // need to install to the grandparent node (will be stack top, if any). If
-      // it turns out there is no such grandparent, we directly install the
-      // returned node as the new root.
-      //
-      // Note that in internal node's PrepareSplit if the internal node needs to
-      // split we will pop the stack along the way as the split propogates
-      // upward, such that by the time we come back here, the stack will contain
-      // on its top the "parent" node and the "grandparent" node (if any) that
-      // points to the parent node. As a result, we directly install a pointer to
-      // the new parent node returned by leaf.PrepareForSplit to the grandparent.
-      InternalNode *parent = node->PrepareForSplit(stack,
-                                                   parameters.split_threshold,
-                                                   pmwcas_pool, &left, &right);
-      assert(parent);
-
       auto *top = stack.Pop();
       InternalNode *old_parent = nullptr;
       if (top) {
@@ -1045,26 +1045,21 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         if (result.IsOk()) {
           break;
         }
-        stack.Clear();
-        node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
-        LOG(INFO) << "unsuccessful grand parent install";
-        continue;
       } else {
         // No grand parent or already popped out by during split propagation
         // root here is thread safe. why?
         // whenever we want to install a root,
         // the old root must be already freezed by our thread, before prepare for split.
-        // once it's freezed, other thread cann't install new root.
+        // once it's freezed, other thread cannot install new root.
         auto root_now = stack.tree->root;
         auto result = ChangeRoot(reinterpret_cast<uint64_t>(root_now), parent);
         if (result) {
           break;
         }
-        stack.Clear();
-        node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
-        LOG(INFO) << "unsuccessful root install";
-        continue;
       }
+      // unsuccessful install, retry
+      stack.Clear();
+      TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
     } while (true);
   } while (!rc.IsOk() && !rc.IsKeyExists());
   return rc;
