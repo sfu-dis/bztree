@@ -1008,10 +1008,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // Note that when we split internal nodes (if needed), stack will get
       // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
       // So we save the root node here in case we need to change root later.
-      auto old_root_addr = reinterpret_cast<uint64_t>(stack.GetRoot());
-      if (!old_root_addr) {
-        old_root_addr = reinterpret_cast<uint64_t>(node);
-      }
+
 
       // Now split the leaf node. PrepareForSplit will return the node that we
       // need to install to the grandparent node (will be stack top, if any). If
@@ -1051,15 +1048,22 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         }
         stack.Clear();
         node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+        LOG(INFO) << "unsuccessful grand parent install";
         continue;
       } else {
-        // No grand parent or already popped out by during split propogation
-        auto result = ChangeRoot(old_root_addr, parent);
+        // No grand parent or already popped out by during split propagation
+        // root here is thread safe. why?
+        // whenever we want to install a root,
+        // the old root must be already freezed by our thread, before prepare for split.
+        // once it's freezed, other thread cann't install new root.
+        auto root_now = stack.tree->root;
+        auto result = ChangeRoot(reinterpret_cast<uint64_t>(root_now), parent);
         if (result) {
           break;
         }
         stack.Clear();
         node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+        LOG(INFO) << "unsuccessful root install";
         continue;
       }
     } while (true);

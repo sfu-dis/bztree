@@ -114,12 +114,12 @@ GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
   t.SanityCheck();
 }
 GTEST_TEST(BztreeTest, MultiThreadInsertParentSplitTest) {
-  uint32_t thread_count = 5;
-  uint32_t item_per_thread = 4;
+  uint32_t thread_count = 20;
+  uint32_t item_per_thread = 40;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
-  bztree::BzTree::ParameterSet param(256, 0, 4096);
+  bztree::BzTree::ParameterSet param;
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
