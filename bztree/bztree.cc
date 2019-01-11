@@ -141,6 +141,9 @@ InternalNode::InternalNode(uint32_t node_size,
 
   for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
     RecordMetadata meta = src_node->record_metadata[i];
+    if (!meta.IsVisible()) {
+      continue;
+    }
     uint64_t m_payload = 0;
     char *m_key = nullptr;
     char *m_data = nullptr;
@@ -426,6 +429,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(&header.status.word, expected_status.word, desired_status.word);
   pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
+  assert(desired_meta.GetTotalLength() < 100);
   if (!pd->MwCAS()) {
     return ReturnCode::PMWCASFailure();
   }
@@ -439,6 +443,11 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   // Flush the word
   pmwcas::NVRAM::Flush(total_size, ptr);
 
+  // Re-check if the node is frozen
+  NodeHeader::StatusWord s = header.GetStatus(pmwcas_pool->GetEpoch());
+  if (s.IsFrozen()) {
+    return ReturnCode::NodeFrozen();
+  }
   if (uniqueness == ReCheck) {
     uniqueness = RecheckUnique(key, padded_key_size,
                                expected_status.GetRecordCount(),
@@ -447,27 +456,23 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
       memset(ptr, 0, key_size);
       memset(ptr + padded_key_size, 0, sizeof(payload));
       offset = 0;
+    } else if (uniqueness == NodeFrozen) {
+      return ReturnCode::NodeFrozen();
     }
   }
+  // Final step: make the new record visible, a 2-word PMwCAS:
+  // 1. Metadata - set the visible bit and actual block offset
+  // 2. Status word - set to the initial value read above (s) to detect
+  // conflicting threads that are trying to set the frozen bit
+  expected_meta = desired_meta;
+  desired_meta.FinalizeForInsert(offset, key_size, total_size);
+  assert(desired_meta.GetTotalLength() < 100);
 
-  // Re-check if the node is frozen
-  NodeHeader::StatusWord s = header.GetStatus(pmwcas_pool->GetEpoch());
-  if (s.IsFrozen()) {
-    return ReturnCode::NodeFrozen();
-  } else {
-    // Final step: make the new record visible, a 2-word PMwCAS:
-    // 1. Metadata - set the visible bit and actual block offset
-    // 2. Status word - set to the initial value read above (s) to detect
-    // conflicting threads that are trying to set the frozen bit
-    expected_meta = desired_meta;
-    desired_meta.FinalizeForInsert(offset, key_size, total_size);
-    assert(desired_meta.GetTotalLength());
+  pd = pmwcas_pool->AllocateDescriptor();
+  pd->AddEntry(&header.status.word, s.word, s.word);
+  pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
+  return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
 
-    pd = pmwcas_pool->AllocateDescriptor();
-    pd->AddEntry(&header.status.word, s.word, s.word);
-    pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
-    return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
-  }
 }
 
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
@@ -486,6 +491,10 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
 LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
                                              uint32_t end_pos, pmwcas::EpochManager *epoch) {
   retry:
+  auto current_status = GetHeader()->GetStatus(epoch);
+  if (current_status.IsFrozen()) {
+    return NodeFrozen;
+  }
   auto record = SearchRecordMeta(epoch, key, key_size, header.sorted_count, end_pos);
   if (record == nullptr) {
     return IsUnique;
@@ -576,31 +585,31 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
 
       // Encountered a deleted record
       // Try to adjust the middle to left ones
-      while (!record_metadata[middle].IsVisible() && first < middle) {
+      while (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible() && first < middle) {
         middle -= 1;
       }
 
       // Every record on the left is deleted, now try right ones
       middle = (first + last) / 2;
-      while (!record_metadata[middle].IsVisible() && middle < last) {
+      while (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible() && middle < last) {
         middle += 1;
       }
 
       // Every record in the sorted field is deleted
-      if (!record_metadata[middle].IsVisible()) {
+      if (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible()) {
         break;
       }
 
       uint64_t payload = 0;
       char *current_key = nullptr;
-      auto current = &(record_metadata[middle]);
-      GetRawRecord(*current, nullptr, &current_key, &payload, epoch);
+      auto current = GetMetadata(static_cast<uint32_t>(middle), epoch);
+      GetRawRecord(current, nullptr, &current_key, &payload, epoch, true);
 
-      auto cmp_result = KeyCompare(key, key_size, current_key, current->GetKeyLength());
+      auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
       if (cmp_result < 0) {
         last = middle - 1;
-      } else if (cmp_result == 0 && current->IsVisible()) {
-        return current;
+      } else if (cmp_result == 0 && current.IsVisible()) {
+        return record_metadata + middle;
       } else {
         first = middle + 1;
       }
@@ -763,6 +772,7 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
       vec.emplace_back(meta);
       total_size += (meta.GetTotalLength());
       assert(meta.GetTotalLength());
+      assert(meta.GetTotalLength() < 100);
     }
   }
 
@@ -795,12 +805,14 @@ void LeafNode::CopyFrom(LeafNode *node,
     // Copy data
     assert(meta.GetTotalLength() >= sizeof(uint64_t));
     uint64_t total_len = meta.GetTotalLength();
+    assert(offset >= total_len);
     offset -= total_len;
     char *ptr = &(reinterpret_cast<char *>(this))[offset];
     memcpy(ptr, key, total_len);
 
     // Setup new metadata
     record_metadata[nrecords].FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
+    assert(record_metadata[nrecords].GetTotalLength() < 100);
     ++nrecords;
   }
   // Finalize header stats
@@ -840,7 +852,7 @@ uint32_t InternalNode::GetChildIndex(const char *key,
   int32_t left = 0, right = header.sorted_count - 1, mid = 0;
   while (true) {
     mid = (left + right) / 2;
-    auto meta = record_metadata[mid];
+    auto meta = GetMetadata(static_cast<uint32_t>(mid), pool->GetEpoch());
     char *record_key;
     GetRawRecord(meta, nullptr, &record_key, nullptr, pool->GetEpoch(), true);
     auto cmp = KeyCompare(key, key_size, record_key, meta.GetKeyLength());

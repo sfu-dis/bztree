@@ -60,7 +60,7 @@ struct NodeHeader {
     static const uint64_t kDeleteSizeMask = uint64_t{0x3FFFFF} << 0;  // Bits 22-1
 
     inline void Freeze() { word |= kFrozenMask; }
-    inline bool IsFrozen() { return word & kFrozenMask; }
+    inline bool IsFrozen() { return (word & kFrozenMask) > 0; }
     inline uint16_t GetRecordCount() { return (uint16_t) ((word & kRecordCountMask) >> 44); }
     inline void SetRecordCount(uint16_t count) {
       word = (word & (~kRecordCountMask)) | (uint64_t{count} << 44);
@@ -124,7 +124,7 @@ struct RecordMetadata {
   inline void SetOffset(uint32_t offset) {
     meta = (meta & (~kOffsetMask)) | (uint64_t{offset} << 32);
   }
-  inline bool IsVisible() { return meta & kVisibleMask; }
+  inline bool IsVisible() { return (meta & kVisibleMask) > 0; }
   inline void SetVisible(bool visible) {
     if (visible) {
       meta = meta | kVisibleMask;
@@ -143,7 +143,7 @@ struct RecordMetadata {
     // allocation epoch and fill in the rest offset bits with global epoch
     assert(epoch < (uint64_t{1} << 27));
     meta = (uint64_t{1} << 59) | (epoch << 32);
-    assert(!IsVisible());
+    assert(IsInserting(epoch));
   }
   inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
     // Set the actual offset, the visible bit, key/total length
@@ -416,7 +416,7 @@ class LeafNode : public BaseNode {
   void Dump(pmwcas::EpochManager *epoch);
 
  private:
-  enum Uniqueness { IsUnique, Duplicate, ReCheck };
+  enum Uniqueness { IsUnique, Duplicate, ReCheck, NodeFrozen };
   Uniqueness CheckUnique(const char *key, uint32_t key_size, pmwcas::EpochManager *epoch);
   Uniqueness RecheckUnique(const char *key,
                            uint32_t key_size,
