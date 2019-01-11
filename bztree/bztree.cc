@@ -461,6 +461,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
     // conflicting threads that are trying to set the frozen bit
     expected_meta = desired_meta;
     desired_meta.FinalizeForInsert(offset, key_size, total_size);
+    assert(desired_meta.GetTotalLength());
 
     pd = pmwcas_pool->AllocateDescriptor();
     pd->AddEntry(&header.status.word, s.word, s.word);
@@ -620,7 +621,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
 
       uint64_t payload = 0;
       char *current_key = nullptr;
-      GetRawRecord(current, nullptr, &current_key, &payload, epoch);
+      GetRawRecord(current, nullptr, &current_key, &payload, epoch, true);
       if (current.IsVisible() &&
           KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
         return record_metadata + i;
@@ -757,10 +758,11 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
   uint32_t total_size = 0;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     // TODO(tzwang): handle deletes
-    auto meta = record_metadata[i];;
+    auto meta = record_metadata[i];
     if (meta.IsVisible()) {
       vec.emplace_back(meta);
       total_size += (meta.GetTotalLength());
+      assert(meta.GetTotalLength());
     }
   }
 
@@ -1130,6 +1132,8 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
       return ReturnCode::Ok();
     }
     return Update(key, key_size, payload);
+  } else {
+    return rc;
   }
 }
 

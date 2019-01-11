@@ -144,11 +144,20 @@ struct RecordMetadata {
     //
     // Flip the high order bit of [offset] to indicate this field contains an
     // allocation epoch and fill in the rest offset bits with global epoch
-    meta = (((uint64_t{1} << 27) | epoch) << 31);
+    assert(epoch < (uint64_t{1} << 27));
+    meta = (uint64_t{1} << 31) | (epoch << 4);
+    assert(!IsVisible());
   }
   inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
     // Set the actual offset, the visible bit, key/total length
-    meta = (offset << 4) | kVisibleFlag | (key_len << 32) | (total_len << 48);
+    if (offset == 0) {
+      // this record is duplicate inserted
+      // make it invisible
+      meta = (offset << 4) | (0 << 3) | (key_len << 32) | (total_len << 48);
+      LOG(INFO) << "concurrent duplicate";
+    } else {
+      meta = (offset << 4) | kVisibleFlag | (key_len << 32) | (total_len << 48);
+    }
     assert(GetKeyLength() == key_len);
   }
   inline bool IsInserting(uint64_t epoch_index) {
@@ -180,7 +189,7 @@ class BaseNode {
     cmp = KeyCompare(key, size, key_right, size_right);
     if (cmp <= 0) {
       return 0;
-    } else if (cmp > 0) {
+    } else {
       return 1;
     }
   }
