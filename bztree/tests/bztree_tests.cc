@@ -156,29 +156,6 @@ TEST_F(LeafNodeFixtures, Update) {
   ASSERT_READ(node, "200", 3, 201);
 }
 
-TEST_F(LeafNodeFixtures, Upsert) {
-  pmwcas::EpochGuard guard(pool->GetEpoch());
-  InsertDummy();
-  uint64_t payload;
-
-  ASSERT_READ(node, "20", 2, 20);
-  ASSERT_TRUE(node->Upsert("20", 2, 21, pool).IsOk());
-  ASSERT_READ(node, "20", 2, 21);
-
-  ASSERT_READ(node, "210", 3, 210);
-  ASSERT_TRUE(node->Upsert("210", 3, 211, pool).IsOk());
-  ASSERT_READ(node, "210", 3, 211);
-
-//  Non-existing upsert
-  ASSERT_TRUE(node->Read("21", 2, &payload, pool).IsNotFound());
-  ASSERT_TRUE(node->Upsert("21", 2, 21, pool).IsOk());
-  ASSERT_READ(node, "21", 2, 21);
-
-  ASSERT_TRUE(node->Read("211", 3, &payload, pool).IsNotFound());
-  ASSERT_TRUE(node->Upsert("211", 3, 211, pool).IsOk());
-  ASSERT_READ(node, "211", 3, 211);
-}
-
 TEST_F(LeafNodeFixtures, RangeScan) {
   pool->GetEpoch()->Protect();
   InsertDummy();

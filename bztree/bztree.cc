@@ -505,30 +505,6 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   return Duplicate;
 }
 
-ReturnCode LeafNode::Upsert(const char *key,
-                            uint16_t key_size,
-                            uint64_t payload,
-                            pmwcas::DescriptorPool *pmwcas_pool) {
-  retry:
-  auto old_status = header.status;
-  if (old_status.IsFrozen()) {
-    return ReturnCode::NodeFrozen();
-  }
-  auto *meta_ptr = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
-  if (meta_ptr == nullptr) {
-    auto insert_result = Insert(key, key_size, payload, pmwcas_pool);
-
-    if (insert_result.IsPMWCASFailure()) {
-      return Update(key, key_size, payload, pmwcas_pool);
-    }
-    return ReturnCode::Ok();
-  } else if (meta_ptr->IsInserting(pmwcas_pool->GetEpoch()->current_epoch_)) {
-    goto retry;
-  } else {
-    return Update(key, key_size, payload, pmwcas_pool);
-  }
-}
-
 ReturnCode LeafNode::Update(const char *key,
                             uint16_t key_size,
                             uint64_t payload,
