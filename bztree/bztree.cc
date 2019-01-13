@@ -390,7 +390,7 @@ void InternalNode::Dump(pmwcas::EpochManager *epoch, bool dump_children) {
 }
 
 ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload,
-                            pmwcas::DescriptorPool *pmwcas_pool) {
+                            pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold) {
   retry:
   NodeHeader::StatusWord expected_status = header.GetStatus(pmwcas_pool->GetEpoch());
 
@@ -402,6 +402,13 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   auto uniqueness = CheckUnique(key, key_size, pmwcas_pool->GetEpoch());
   if (uniqueness == Duplicate) {
     return ReturnCode::KeyExists();
+  }
+
+  // Check space to see if we need to split the node
+  auto new_size = LeafNode::GetUsedSpace(expected_status) + sizeof(RecordMetadata) +
+                  RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
+  if (new_size >= split_threshold) {
+    return ReturnCode::NotEnoughSpace();
   }
 
   // Now try to reserve space in the free space region using a PMwCAS. Two steps:
@@ -472,7 +479,6 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   pd->AddEntry(&header.status.word, s.word, s.word);
   pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
   return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
-
 }
 
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
@@ -975,13 +981,12 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     stack.Clear();
     LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
 
-    // Check space to see if we need to split the node
-    auto new_node_size = node->GetUsedSpace(pmwcas_pool->GetEpoch()) + sizeof(RecordMetadata) +
-        RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
-    if (new_node_size < parameters.split_threshold) {
-      rc = node->Insert(key, key_size, payload, pmwcas_pool);
+    // Try to insert to the leaf node
+    rc = node->Insert(key, key_size, payload, pmwcas_pool, parameters.split_threshold);
+    if (!rc.IsNotEnoughSpace()) {
       continue;
     }
+
     // Should split and we have three cases to handle:
     // 1. Root node is a leaf node - install [parent] as the new root
     // 2. We have a parent but no grandparent - install [parent] as the new
@@ -1108,6 +1113,8 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
   LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+  // FIXME(tzwang): be more clever here to get the node this record would be
+  // landing in?
   if (node == nullptr) {
     return Insert(key, key_size, payload);
   }

@@ -16,7 +16,15 @@
 namespace bztree {
 
 struct ReturnCode {
-  enum RC { RetInvalid, RetOk, RetKeyExists, RetNotFound, RetNodeFrozen, RetPMWCASFail };
+  enum RC { RetInvalid,
+            RetOk,
+            RetKeyExists,
+            RetNotFound,
+            RetNodeFrozen,
+            RetPMWCASFail,
+            RetNotEnoughSpace
+  };
+
   uint8_t rc;
 
   constexpr explicit ReturnCode(uint8_t r) : rc(r) {}
@@ -29,12 +37,14 @@ struct ReturnCode {
   constexpr bool inline IsNotFound() const { return rc == RetNotFound; }
   constexpr bool inline IsNodeFrozen() const { return rc == RetNodeFrozen; }
   constexpr bool inline IsPMWCASFailure() const { return rc == RetPMWCASFail; }
+  constexpr bool inline IsNotEnoughSpace() const { return rc == RetNotEnoughSpace; }
 
   static ReturnCode NodeFrozen() { return ReturnCode(RetNodeFrozen); }
   static ReturnCode KeyExists() { return ReturnCode(RetKeyExists); }
   static ReturnCode PMWCASFailure() { return ReturnCode(RetPMWCASFail); }
   static ReturnCode Ok() { return ReturnCode(RetOk); }
   static ReturnCode NotFound() { return ReturnCode(RetNotFound); }
+  static ReturnCode NotEnoughSpace() { return ReturnCode(RetNotEnoughSpace); }
 };
 
 struct NodeHeader {
@@ -342,11 +352,16 @@ class LeafNode : public BaseNode {
  public:
   static LeafNode *New(uint32_t node_size);
 
+  static inline uint32_t GetUsedSpace(NodeHeader::StatusWord status) {
+    return sizeof(LeafNode) + status.GetBlockSize() +
+           status.GetRecordCount() * sizeof(RecordMetadata);
+  }
+
   explicit LeafNode(uint32_t node_size = 4096) : BaseNode(true, node_size) {}
   ~LeafNode() = default;
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
-                    pmwcas::DescriptorPool *pmwcas_pool);
+                    pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold);
   InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
                                 pmwcas::DescriptorPool *pmwcas_pool,
                                 LeafNode **left, LeafNode **right);
@@ -396,14 +411,10 @@ class LeafNode : public BaseNode {
     return BaseNode::GetRawRecord(meta, &unused, key, payload, epoch);
   }
 
-  inline uint32_t GetUsedSpace(pmwcas::EpochManager *epoch) {
-    auto status = header.GetStatus(epoch);
-    return sizeof(*this) + status.GetBlockSize() +
-        status.GetRecordCount() * sizeof(RecordMetadata);
-  }
-
   inline uint32_t GetFreeSpace(pmwcas::EpochManager *epoch) {
-    return header.size - GetUsedSpace(epoch);
+    auto status = header.GetStatus(epoch);
+    assert(header.size >= GetUsedSpace(status));
+    return header.size - GetUsedSpace(status);
   }
 
   // Make sure this node is freezed before calling this function
