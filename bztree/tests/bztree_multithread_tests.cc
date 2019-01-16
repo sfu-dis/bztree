@@ -51,11 +51,13 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
       : tree(tree), thread_count(thread_count), item_per_thread(item_per_thread) {}
 
   void SanityCheck() {
-    for (uint32_t i = 0; i < (thread_count + 1) * item_per_thread; i++) {
+    for (uint32_t i = 0; i < (thread_count) * item_per_thread; i++) {
       auto i_str = std::to_string(i);
       uint64_t payload;
       auto rc = tree->Read(i_str.c_str(), static_cast<uint16_t>(i_str.length()), &payload);
-      LOG_IF(INFO, !rc.IsOk()) << i << std::endl;
+      if (!rc.IsOk()) {
+        tree->Dump();
+      }
       ASSERT_TRUE(rc.IsOk());
       ASSERT_EQ(payload, i);
     }
@@ -63,7 +65,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
 
   void Entry(size_t thread_index) override {
     WaitForStart();
-    for (uint32_t i = 0; i < item_per_thread * 2; i++) {
+    for (uint32_t i = 0; i < item_per_thread; i++) {
       auto value = i + item_per_thread * thread_index;
       auto str_value = std::to_string(value);
       auto rc = tree->Insert(str_value.c_str(),
@@ -129,7 +131,7 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
 
 GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
   uint32_t thread_count = 5;
-  uint32_t item_per_thread = 1000;
+  uint32_t item_per_thread = 100;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
@@ -158,12 +160,12 @@ GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
   tree->Dump();
 }
 GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
-  uint32_t thread_count = 5;
-  uint32_t item_per_thread = 1000;
+  uint32_t thread_count = 3;
+  uint32_t item_per_thread = 2000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
-  bztree::BzTree::ParameterSet param;
+  bztree::BzTree::ParameterSet param(256, 0, 256);
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);

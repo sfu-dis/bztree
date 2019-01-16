@@ -452,19 +452,16 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 
   retry_phase2:
   // Re-check if the node is frozen
-  NodeHeader::StatusWord s = header.GetStatus(pmwcas_pool->GetEpoch());
-  if (s.IsFrozen()) {
-    return ReturnCode::NodeFrozen();
-  }
+
   if (uniqueness == ReCheck) {
-    uniqueness = RecheckUnique(key, padded_key_size,
-                               expected_status.GetRecordCount(),
-                               pmwcas_pool->GetEpoch());
-    if (uniqueness == Duplicate) {
+    auto new_uniqueness = RecheckUnique(key, key_size,
+                                        expected_status.GetRecordCount(),
+                                        pmwcas_pool->GetEpoch());
+    if (new_uniqueness == Duplicate) {
       memset(ptr, 0, key_size);
       memset(ptr + padded_key_size, 0, sizeof(payload));
       offset = 0;
-    } else if (uniqueness == NodeFrozen) {
+    } else if (new_uniqueness == NodeFrozen) {
       return ReturnCode::NodeFrozen();
     }
   }
@@ -472,14 +469,17 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   // 1. Metadata - set the visible bit and actual block offset
   // 2. Status word - set to the initial value read above (s) to detect
   // conflicting threads that are trying to set the frozen bit
-  auto old_meta = desired_meta;
   auto new_meta = desired_meta;
   new_meta.FinalizeForInsert(offset, key_size, total_size);
   assert(new_meta.GetTotalLength() < 100);
 
+  NodeHeader::StatusWord s = header.GetStatus(pmwcas_pool->GetEpoch());
+  if (s.IsFrozen()) {
+    return ReturnCode::NodeFrozen();
+  }
   pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(&header.status.word, s.word, s.word);
-  pd->AddEntry(&meta_ptr->meta, old_meta.meta, new_meta.meta);
+  pd->AddEntry(&meta_ptr->meta, desired_meta.meta, new_meta.meta);
   if (pd->MwCAS()) {
     return ReturnCode::Ok();
   } else {
@@ -513,11 +513,17 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   if (record == nullptr) {
     return IsUnique;
   }
-  auto meta_data = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record)->GetValue(epoch);
-  if (RecordMetadata{meta_data}.IsInserting(epoch->current_epoch_)) {
+  auto meta_data = RecordMetadata{
+      reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record)->GetValue(epoch)
+  };
+  if (meta_data.IsInserting(epoch->current_epoch_)) {
     goto retry;
   }
-  return Duplicate;
+  char *curr_key = GetKey(meta_data);
+  if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
+    return Duplicate;
+  }
+  return IsUnique;
 }
 
 ReturnCode LeafNode::Update(const char *key,
@@ -952,6 +958,7 @@ BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
   InternalNode *parent = nullptr;
   uint32_t meta_index = 0;
   while (node != stop_at) {
+    assert(!node->IsLeaf());
     parent = reinterpret_cast<InternalNode *>(node);
     meta_index = parent->GetChildIndex(key, key_size, pmwcas_pool);
     node = parent->GetChildByMetaIndex(meta_index, pmwcas_pool->GetEpoch());
@@ -1053,14 +1060,14 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         }
         LOG_IF(INFO, result.IsNodeFrozen()) << "grandparent frozen";
         stack.Clear();
-        TraverseToNode(&stack, key, key_size, parent);
+        TraverseToNode(&stack, key, key_size, old_parent);
       } else {
         // No grand parent or already popped out by during split propagation
         // root here is thread safe. why?
         // whenever we want to install a root,
         // the old root must be already freezed by our thread, before prepare for split.
         // once it's freezed, other thread cannot install new root.
-        assert(old_parent == nullptr || old_parent == stack.tree->root);
+//        assert(old_parent == nullptr || old_parent == stack.tree->root);
         auto root_now = stack.tree->root;
         auto result = ChangeRoot(reinterpret_cast<uint64_t>(root_now), parent);
         if (result) {
