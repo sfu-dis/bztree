@@ -140,6 +140,7 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   bztree::Stack stack;
   bztree::LeafNode *left = nullptr;
   bztree::LeafNode *right = nullptr;
+  node->Freeze(pool);
   bztree::InternalNode *parent = node->PrepareForSplit(stack, 3000, pool, &left, &right);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
@@ -193,8 +194,8 @@ class BzTreeTest : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(10000, 1, nullptr, false);
-    bztree::BzTree::ParameterSet param(256, 128);
+    pool = new pmwcas::DescriptorPool(100000, 1, nullptr, false);
+    bztree::BzTree::ParameterSet param(256, 128, 256);
     tree = new bztree::BzTree(param, pool);
   }
 
@@ -206,7 +207,7 @@ class BzTreeTest : public ::testing::Test {
 };
 
 TEST_F(BzTreeTest, Insert) {
-  static const uint32_t kMaxKey = 1400;
+  static const uint32_t kMaxKey = 10000;
   for (uint32_t i = 100; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);

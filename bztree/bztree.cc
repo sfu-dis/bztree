@@ -406,7 +406,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 
   // Check space to see if we need to split the node
   auto new_size = LeafNode::GetUsedSpace(expected_status) + sizeof(RecordMetadata) +
-                  RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
+      RecordMetadata::PadKeyLength(key_size) + sizeof(payload);
   if (new_size >= split_threshold) {
     return ReturnCode::NotEnoughSpace();
   }
@@ -505,7 +505,8 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   if (record == nullptr) {
     return IsUnique;
   }
-  if (record->IsInserting(epoch->current_epoch_)) {
+  auto meta_data = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record)->GetValue(epoch);
+  if (RecordMetadata{meta_data}.IsInserting(epoch->current_epoch_)) {
     goto retry;
   }
   return Duplicate;
@@ -746,6 +747,7 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
                                      pmwcas::EpochManager *epoch) {
   // Node is frozen at this point
   // there should not be any on-going pmwcas
+  assert(header.status.IsFrozen());
   uint32_t total_size = 0;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     // TODO(tzwang): handle deletes
@@ -1041,22 +1043,26 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         if (result.IsOk()) {
           break;
         }
+        LOG_IF(INFO, result.IsNodeFrozen()) << "grandparent frozen";
+        stack.Clear();
+        TraverseToNode(&stack, key, key_size, parent);
       } else {
         // No grand parent or already popped out by during split propagation
         // root here is thread safe. why?
         // whenever we want to install a root,
         // the old root must be already freezed by our thread, before prepare for split.
         // once it's freezed, other thread cannot install new root.
+        assert(old_parent == nullptr || old_parent == stack.tree->root);
         auto root_now = stack.tree->root;
         auto result = ChangeRoot(reinterpret_cast<uint64_t>(root_now), parent);
         if (result) {
           break;
         }
         LOG(INFO) << "Root not installed";
+        // unsuccessful install, retry
+        stack.Clear();
+        TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
       }
-      // unsuccessful install, retry
-      stack.Clear();
-      TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
     } while (true);
   } while (!rc.IsOk() && !rc.IsKeyExists());
   return rc;
