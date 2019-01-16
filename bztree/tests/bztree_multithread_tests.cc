@@ -55,6 +55,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
       auto i_str = std::to_string(i);
       uint64_t payload;
       auto rc = tree->Read(i_str.c_str(), static_cast<uint16_t>(i_str.length()), &payload);
+      LOG_IF(INFO, !rc.IsOk()) << i << std::endl;
       ASSERT_TRUE(rc.IsOk());
       ASSERT_EQ(payload, i);
     }
@@ -127,8 +128,8 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
 }
 
 GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
-  uint32_t thread_count = 40;
-  uint32_t item_per_thread = 100;
+  uint32_t thread_count = 5;
+  uint32_t item_per_thread = 1000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );

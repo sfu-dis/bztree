@@ -438,7 +438,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
   assert(desired_meta.GetTotalLength() < 100);
   if (!pd->MwCAS()) {
-    return ReturnCode::PMWCASFailure();
+    goto retry;
   }
 
   // Reserved space! Now copy data
@@ -450,6 +450,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   // Flush the word
   pmwcas::NVRAM::Flush(total_size, ptr);
 
+  retry_phase2:
   // Re-check if the node is frozen
   NodeHeader::StatusWord s = header.GetStatus(pmwcas_pool->GetEpoch());
   if (s.IsFrozen()) {
@@ -471,14 +472,21 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   // 1. Metadata - set the visible bit and actual block offset
   // 2. Status word - set to the initial value read above (s) to detect
   // conflicting threads that are trying to set the frozen bit
-  expected_meta = desired_meta;
-  desired_meta.FinalizeForInsert(offset, key_size, total_size);
-  assert(desired_meta.GetTotalLength() < 100);
+  auto old_meta = desired_meta;
+  auto new_meta = desired_meta;
+  new_meta.FinalizeForInsert(offset, key_size, total_size);
+  assert(new_meta.GetTotalLength() < 100);
 
   pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(&header.status.word, s.word, s.word);
-  pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
-  return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
+  pd->AddEntry(&meta_ptr->meta, old_meta.meta, new_meta.meta);
+  if (pd->MwCAS()) {
+    return ReturnCode::Ok();
+  } else {
+    LOG(INFO) << "insert phase 2 pmwcas failure";
+    goto retry_phase2;
+  }
+//  return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
 }
 
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
