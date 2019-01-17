@@ -294,6 +294,7 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
       stack.Clear();
       stack.tree->TraverseToNode(&stack, separator_key, separator_key_size, this);
       assert(stack.Top());
+      stack.Pop();
       parent = stack.Top()->node;
     }
   }
@@ -946,6 +947,7 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
 
       // must have a parent in this case
       assert(stack.Top());
+      stack.Pop();
       parent = stack.Top()->node;
       // Fixme(hao): I believe spinning is not desired, we should help the parent to finish op
     }
@@ -966,6 +968,10 @@ BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
     if (stack != nullptr) {
       stack->Push(parent, parent->GetMetadata(meta_index, pmwcas_pool->GetEpoch()));
     }
+  }
+  if (stack != nullptr) {
+    stack->Push(reinterpret_cast<InternalNode *>(node),
+                node->GetMetadata(meta_index, pmwcas_pool->GetEpoch()));
   }
   return node;
 }
@@ -1058,7 +1064,6 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         if (result.IsOk()) {
           break;
         }
-        LOG_IF(INFO, result.IsNodeFrozen()) << "grandparent frozen";
         stack.Clear();
         TraverseToNode(&stack, key, key_size, old_parent);
       } else {
