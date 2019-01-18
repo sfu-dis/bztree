@@ -462,6 +462,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
       memset(ptr, 0, key_size);
       memset(ptr + padded_key_size, 0, sizeof(payload));
       offset = 0;
+      LOG(INFO) << "concurrent duplicate insert";
     } else if (new_uniqueness == NodeFrozen) {
       return ReturnCode::NodeFrozen();
     }
@@ -487,7 +488,6 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
     LOG(INFO) << "insert phase 2 pmwcas failure";
     goto retry_phase2;
   }
-//  return pd->MwCAS() ? ReturnCode::Ok() : ReturnCode::PMWCASFailure();
 }
 
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
@@ -511,7 +511,6 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
   }
   char *curr_key = GetKey(meta_data);
   if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
-    LOG(INFO) << "duplicate recheck";
     return Duplicate;
   }
   return ReCheck;
@@ -533,10 +532,11 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   };
   if (meta_data.IsInserting(epoch->current_epoch_)) {
     goto retry;
+  } else if (!meta_data.IsVisible()) {
+    return IsUnique;
   }
   char *curr_key = GetKey(meta_data);
   if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
-    LOG(INFO) << "duplicate recheck";
     return Duplicate;
   }
   return IsUnique;

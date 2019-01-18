@@ -52,7 +52,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
 
   void SanityCheck() {
     std::vector<std::pair<uint32_t, bztree::InternalNode *>> value_missing;
-    for (uint32_t i = 0; i < (thread_count) * item_per_thread; i++) {
+    for (uint32_t i = 0; i < (thread_count + 1) * item_per_thread; i++) {
       auto i_str = std::to_string(i);
       uint64_t payload;
       auto rc = tree->Read(i_str.c_str(), static_cast<uint16_t>(i_str.length()), &payload);
@@ -63,8 +63,6 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
                   << "rc: " << std::to_string(rc.rc) << std::endl
                   << "tree height: " << stack.num_frames + 1 << std::endl;
         auto parent_node = stack.Top();
-//        parent_node->node->Dump(tree->GetPool()->GetEpoch());
-//        leaf_node->Dump(tree->GetPool()->GetEpoch());
         value_missing.emplace_back(i, parent_node->node);
       } else {
         ASSERT_TRUE(rc.IsOk());
@@ -84,7 +82,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
 
   void Entry(size_t thread_index) override {
     WaitForStart();
-    for (uint32_t i = 0; i < item_per_thread; i++) {
+    for (uint32_t i = 0; i < item_per_thread * 2; i++) {
       auto value = i + item_per_thread * thread_index;
       auto str_value = std::to_string(value);
       auto rc = tree->Insert(str_value.c_str(),
@@ -180,7 +178,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
 }
 GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
   uint32_t thread_count = 50;
-  uint32_t item_per_thread = 1000;
+  uint32_t item_per_thread = 10000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );

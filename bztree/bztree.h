@@ -161,7 +161,6 @@ struct RecordMetadata {
       // this record is duplicate inserted
       // make it invisible
       meta = (offset << 32) | (uint64_t{0} << 60) | (key_len << 16) | total_len;
-      LOG(INFO) << "concurrent duplicate";
     } else {
       meta = (offset << 32) | kVisibleMask | (key_len << 16) | total_len;
     }
