@@ -497,10 +497,24 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
   if (record == nullptr) {
     return IsUnique;
   }
-  if (!record->IsVisible()) {
+  auto meta_data = RecordMetadata{
+      reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record)->GetValue(epoch)
+  };
+  // we need to perform a key compare again
+  // consider this case:
+  // a key is inserting when we "SearchRecordMeta"
+  // when get back, this meta may have finished inserting, so the following if will be false
+  // however, this key may not be duplicate, so we need to compare the key again
+  // even if this key is not duplicate, we need to return a "Recheck"
+  if (!meta_data.IsInserting(epoch->current_epoch_)) {
     return ReCheck;
   }
-  return Duplicate;
+  char *curr_key = GetKey(meta_data);
+  if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
+    LOG(INFO) << "duplicate recheck";
+    return Duplicate;
+  }
+  return ReCheck;
 }
 
 LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
@@ -522,6 +536,7 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   }
   char *curr_key = GetKey(meta_data);
   if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
+    LOG(INFO) << "duplicate recheck";
     return Duplicate;
   }
   return IsUnique;
