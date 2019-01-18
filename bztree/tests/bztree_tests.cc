@@ -11,6 +11,8 @@
 
 class LeafNodeFixtures : public ::testing::Test {
  public:
+  const uint32_t node_size = 4096;
+
   void EmptyNode() {
     delete node;
     node = (bztree::LeafNode *) malloc(node->GetHeader()->size);
@@ -24,12 +26,12 @@ class LeafNodeFixtures : public ::testing::Test {
   void InsertDummy() {
     for (uint32_t i = 0; i < 100; i += 10) {
       auto str = std::to_string(i);
-      node->Insert(str.c_str(), (uint16_t) str.length(), i, pool);
+      node->Insert(str.c_str(), (uint16_t) str.length(), i, pool, node_size);
     }
     auto *new_node = node->Consolidate(pool);
     for (uint32_t i = 200; i < 300; i += 10) {
       auto str = std::to_string(i);
-      new_node->Insert(str.c_str(), (uint16_t) str.length(), i, pool);
+      new_node->Insert(str.c_str(), (uint16_t) str.length(), i, pool, node_size);
     }
     delete node;
     node = new_node;
@@ -49,7 +51,6 @@ class LeafNodeFixtures : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    const uint32_t node_size = 4096;
     pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
     node = (bztree::LeafNode *) malloc(node_size);
     memset(node, 0, node_size);
@@ -79,14 +80,14 @@ TEST_F(LeafNodeFixtures, Read) {
 TEST_F(LeafNodeFixtures, Insert) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
 
-  ASSERT_TRUE(node->Insert("def", 3, 100, pool).IsOk());
-  ASSERT_TRUE(node->Insert("bdef", 4, 101, pool).IsOk());
-  ASSERT_TRUE(node->Insert("abc", 3, 102, pool).IsOk());
+  ASSERT_TRUE(node->Insert("def", 3, 100, pool, node_size).IsOk());
+  ASSERT_TRUE(node->Insert("bdef", 4, 101, pool, node_size).IsOk());
+  ASSERT_TRUE(node->Insert("abc", 3, 102, pool, node_size).IsOk());
   ASSERT_READ(node, "def", 3, 100);
   ASSERT_READ(node, "abc", 3, 102);
 
   auto *new_node = node->Consolidate(pool);
-  ASSERT_TRUE(new_node->Insert("apple", 5, 106, pool).IsOk());
+  ASSERT_TRUE(new_node->Insert("apple", 5, 106, pool, node_size).IsOk());
   ASSERT_READ(new_node, "bdef", 4, 101);
   ASSERT_READ(new_node, "apple", 5, 106);
 }
@@ -94,18 +95,18 @@ TEST_F(LeafNodeFixtures, Insert) {
 TEST_F(LeafNodeFixtures, DuplicateInsert) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
-  ASSERT_TRUE(node->Insert("10", 2, 111, pool).IsKeyExists());
-  ASSERT_TRUE(node->Insert("11", 2, 1212, pool).IsOk());
+  ASSERT_TRUE(node->Insert("10", 2, 111, pool, node_size).IsKeyExists());
+  ASSERT_TRUE(node->Insert("11", 2, 1212, pool, node_size).IsOk());
 
   ASSERT_READ(node, "10", 2, 10);
   ASSERT_READ(node, "11", 2, 1212);
 
   auto *new_node = node->Consolidate(pool);
 
-  ASSERT_TRUE(new_node->Insert("11", 2, 1213, pool).IsKeyExists());
+  ASSERT_TRUE(new_node->Insert("11", 2, 1213, pool, node_size).IsKeyExists());
   ASSERT_READ(new_node, "11", 2, 1212);
 
-  ASSERT_TRUE(new_node->Insert("201", 3, 201, pool).IsOk());
+  ASSERT_TRUE(new_node->Insert("201", 3, 201, pool, node_size).IsOk());
   ASSERT_READ(new_node, "201", 3, 201);
 }
 
@@ -128,17 +129,18 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
 
-  ASSERT_TRUE(node->Insert("abc", 3, 100, pool).IsOk());
-  ASSERT_TRUE(node->Insert("bdef", 4, 101, pool).IsOk());
-  ASSERT_TRUE(node->Insert("abcd", 4, 102, pool).IsOk());
-  ASSERT_TRUE(node->Insert("deadbeef", 8, 103, pool).IsOk());
-  ASSERT_TRUE(node->Insert("parker", 6, 104, pool).IsOk());
-  ASSERT_TRUE(node->Insert("deadpork", 8, 105, pool).IsOk());
-  ASSERT_TRUE(node->Insert("toronto", 7, 106, pool).IsOk());
+  ASSERT_TRUE(node->Insert("abc", 3, 100, pool, node_size).IsOk());
+  ASSERT_TRUE(node->Insert("bdef", 4, 101, pool, node_size).IsOk());
+  ASSERT_TRUE(node->Insert("abcd", 4, 102, pool, node_size).IsOk());
+  ASSERT_TRUE(node->Insert("deadbeef", 8, 103, pool, node_size).IsOk());
+  ASSERT_TRUE(node->Insert("parker", 6, 104, pool, node_size).IsOk());
+  ASSERT_TRUE(node->Insert("deadpork", 8, 105, pool, node_size).IsOk());
+  ASSERT_TRUE(node->Insert("toronto", 7, 106, pool, node_size).IsOk());
 
   bztree::Stack stack;
   bztree::LeafNode *left = nullptr;
   bztree::LeafNode *right = nullptr;
+  node->Freeze(pool);
   bztree::InternalNode *parent = node->PrepareForSplit(stack, 3000, pool, &left, &right);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
@@ -154,29 +156,6 @@ TEST_F(LeafNodeFixtures, Update) {
   ASSERT_READ(node, "200", 3, 200);
   ASSERT_TRUE(node->Update("200", 3, 201, pool).IsOk());
   ASSERT_READ(node, "200", 3, 201);
-}
-
-TEST_F(LeafNodeFixtures, Upsert) {
-  pmwcas::EpochGuard guard(pool->GetEpoch());
-  InsertDummy();
-  uint64_t payload;
-
-  ASSERT_READ(node, "20", 2, 20);
-  ASSERT_TRUE(node->Upsert("20", 2, 21, pool).IsOk());
-  ASSERT_READ(node, "20", 2, 21);
-
-  ASSERT_READ(node, "210", 3, 210);
-  ASSERT_TRUE(node->Upsert("210", 3, 211, pool).IsOk());
-  ASSERT_READ(node, "210", 3, 211);
-
-//  Non-existing upsert
-  ASSERT_TRUE(node->Read("21", 2, &payload, pool).IsNotFound());
-  ASSERT_TRUE(node->Upsert("21", 2, 21, pool).IsOk());
-  ASSERT_READ(node, "21", 2, 21);
-
-  ASSERT_TRUE(node->Read("211", 3, &payload, pool).IsNotFound());
-  ASSERT_TRUE(node->Upsert("211", 3, 211, pool).IsOk());
-  ASSERT_READ(node, "211", 3, 211);
 }
 
 TEST_F(LeafNodeFixtures, RangeScan) {
@@ -215,8 +194,8 @@ class BzTreeTest : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(5000, 1, nullptr, false);
-    bztree::BzTree::ParameterSet param(256, 128);
+    pool = new pmwcas::DescriptorPool(1000000, 1, nullptr, false);
+    bztree::BzTree::ParameterSet param(256, 128, 256);
     tree = new bztree::BzTree(param, pool);
   }
 
@@ -228,7 +207,7 @@ class BzTreeTest : public ::testing::Test {
 };
 
 TEST_F(BzTreeTest, Insert) {
-  static const uint32_t kMaxKey = 1400;
+  static const uint32_t kMaxKey = 100000;
   for (uint32_t i = 100; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);

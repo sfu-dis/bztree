@@ -27,6 +27,11 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 endif()
 
+if(${CMAKE_BUILD_TYPE} STREQUAL "Profile")
+  add_compile_definitions("PROFILE")
+  link_libraries("-lprofiler")
+endif()
+
 set_property(GLOBAL APPEND PROPERTY BZTREE_SRC
   ${CMAKE_CURRENT_SOURCE_DIR}/bztree.cc
 )
