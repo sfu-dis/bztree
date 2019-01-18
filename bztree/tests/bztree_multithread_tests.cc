@@ -191,20 +191,19 @@ GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
 //  tree->Dump();
 }
 
-//GTEST_TEST(BztreeTest, MiltiUpsertTest) {
-//  uint32_t thread_count = 5;
-//  uint32_t item_per_thread = 100;
-//  std::unique_ptr<pmwcas::DescriptorPool> pool(
-//      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
-//  );
-//  bztree::BzTree::ParameterSet param(256, 0, 256);
-//  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
-//  MultiThreadUpsertTest t(item_per_thread, thread_count, tree.get());
-//  t.Run(thread_count);
-//  pmwcas::Thread::ClearRegistry();
-//  tree->Dump();
-//  t.SanityCheck();
-//}
+GTEST_TEST(BztreeTest, MiltiUpsertTest) {
+  uint32_t thread_count = 50;
+  uint32_t item_per_thread = 1000;
+  std::unique_ptr<pmwcas::DescriptorPool> pool(
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+  );
+  bztree::BzTree::ParameterSet param(256, 0, 256);
+  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  MultiThreadUpsertTest t(item_per_thread, thread_count, tree.get());
+  t.Run(thread_count);
+  pmwcas::Thread::ClearRegistry();
+  t.SanityCheck();
+}
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

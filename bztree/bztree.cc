@@ -462,7 +462,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
       memset(ptr, 0, key_size);
       memset(ptr + padded_key_size, 0, sizeof(payload));
       offset = 0;
-      LOG(INFO) << "concurrent duplicate insert";
+//      LOG(INFO) << "concurrent duplicate insert";
     } else if (new_uniqueness == NodeFrozen) {
       return ReturnCode::NodeFrozen();
     }
