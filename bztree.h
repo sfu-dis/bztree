@@ -64,11 +64,11 @@ struct NodeHeader {
     StatusWord() : word(0) {}
     explicit StatusWord(uint64_t word) : word(word) {}
 
-    static const uint64_t kControlMask = uint64_t{0x7} << 61; // Bits 64-62
-    static const uint64_t kFrozenMask = uint64_t{0x1} << 60; // Bit 61
+    static const uint64_t kControlMask = uint64_t{0x7} << 61;           // Bits 64-62
+    static const uint64_t kFrozenMask = uint64_t{0x1} << 60;            // Bit 61
     static const uint64_t kRecordCountMask = uint64_t{0xFFFF} << 44;    // Bits 60-45
-    static const uint64_t kBlockSizeMask = uint64_t{0x3FFFFF} << 22;   // Bits 44-23
-    static const uint64_t kDeleteSizeMask = uint64_t{0x3FFFFF} << 0;  // Bits 22-1
+    static const uint64_t kBlockSizeMask = uint64_t{0x3FFFFF} << 22;    // Bits 44-23
+    static const uint64_t kDeleteSizeMask = uint64_t{0x3FFFFF} << 0;    // Bits 22-1
 
     inline void Freeze() { word |= kFrozenMask; }
     inline bool IsFrozen() { return (word & kFrozenMask) > 0; }
@@ -107,11 +107,11 @@ struct RecordMetadata {
   RecordMetadata() : meta(0) {}
   explicit RecordMetadata(uint64_t meta) : meta(meta) {}
 
-  static const uint64_t kControlMask = uint64_t{0x7} << 61; // Bits 64-62
-  static const uint64_t kVisibleMask = uint64_t{0x1} << 60; // Bit 61
-  static const uint64_t kOffsetMask = uint64_t{0xFFFFFFF} << 32;     // Bits 60-33
-  static const uint64_t kKeyLengthMask = uint64_t{0xFFFF} << 16;    // Bits 32-17
-  static const uint64_t kTotalLengthMask = uint64_t{0xFFFF};  // Bits 16-1
+  static const uint64_t kControlMask = uint64_t{0x7} << 61;           // Bits 64-62
+  static const uint64_t kVisibleMask = uint64_t{0x1} << 60;           // Bit 61
+  static const uint64_t kOffsetMask = uint64_t{0xFFFFFFF} << 32;      // Bits 60-33
+  static const uint64_t kKeyLengthMask = uint64_t{0xFFFF} << 16;      // Bits 32-17
+  static const uint64_t kTotalLengthMask = uint64_t{0xFFFF};          // Bits 16-1
 
   static const uint64_t kAllocationEpochMask = uint64_t{0x7FFFFFF} << 32;  // Bit 59-33
 
