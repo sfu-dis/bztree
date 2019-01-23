@@ -16,13 +16,14 @@
 namespace bztree {
 
 struct ReturnCode {
-  enum RC { RetInvalid,
-            RetOk,
-            RetKeyExists,
-            RetNotFound,
-            RetNodeFrozen,
-            RetPMWCASFail,
-            RetNotEnoughSpace
+  enum RC {
+    RetInvalid,
+    RetOk,
+    RetKeyExists,
+    RetNotFound,
+    RetNodeFrozen,
+    RetPMWCASFail,
+    RetNotEnoughSpace
   };
 
   uint8_t rc;
@@ -353,7 +354,7 @@ class LeafNode : public BaseNode {
 
   static inline uint32_t GetUsedSpace(NodeHeader::StatusWord status) {
     return sizeof(LeafNode) + status.GetBlockSize() +
-           status.GetRecordCount() * sizeof(RecordMetadata);
+        status.GetRecordCount() * sizeof(RecordMetadata);
   }
 
   explicit LeafNode(uint32_t node_size = 4096) : BaseNode(true, node_size) {}

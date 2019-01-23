@@ -453,7 +453,6 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 
   retry_phase2:
   // Re-check if the node is frozen
-
   if (uniqueness == ReCheck) {
     auto new_uniqueness = RecheckUnique(key, key_size,
                                         expected_status.GetRecordCount(),
