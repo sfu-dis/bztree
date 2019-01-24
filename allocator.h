@@ -60,7 +60,11 @@ class Allocator {
 
   inline PMEMobjpool *GetPool() { return pop; }
 
+  ~Allocator() {
+    pmemobj_close(pop);
+  }
+
  private:
   PMEMobjpool *pop;
-  Allocator(PMEMobjpool *pop) : pop(pop) {}
+  explicit Allocator(PMEMobjpool *pop) : pop(pop) {}
 };
