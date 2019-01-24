@@ -12,6 +12,7 @@
 
 #include "include/pmwcas.h"
 #include "mwcas/mwcas.h"
+#include "allocator.h"
 
 namespace bztree {
 
