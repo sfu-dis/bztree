@@ -11,13 +11,12 @@
 #define CREATE_MODE_RW (S_IWUSR | S_IRUSR)
 
 POBJ_LAYOUT_BEGIN(bztree);
-POBJ_LAYOUT_TOID(bztree, int);
+POBJ_LAYOUT_TOID(bztree, char);
 POBJ_LAYOUT_END(bztree);
 
 class Allocator {
 
-  Allocator(PMEMobjpool *pop) : pop(pop) {}
-
+ public:
   static bool FileExists(const char *pool_path) {
     struct stat buffer;
     return (stat(pool_path, &buffer) == 0);
@@ -37,6 +36,31 @@ class Allocator {
     return new Allocator(tmp_pool);
   }
 
+  /*
+   *  allocate size memory from pmem pool
+   * */
+  PMEMoid alloc(uint64_t size) {
+    TOID(char) mem;
+    POBJ_ALLOC(pop, &mem, char, sizeof(char) * size, NULL, NULL);
+    if (TOID_IS_NULL(mem)) {
+      LOG(FATAL) << "POBJ_ALLOC error" << std::endl;
+    }
+    pmemobj_persist(pop, D_RW(mem), size * sizeof(*D_RW(mem)));
+    return mem.oid;
+  }
+
+  /*
+   *  free a PM pointer
+   * */
+  void free(PMEMoid ptr) {
+    TOID(char) ptr_cpy;
+    TOID_ASSIGN(ptr_cpy, ptr);
+    POBJ_FREE(&ptr_cpy);
+  }
+
+  inline PMEMobjpool *GetPool() { return pop; }
+
  private:
   PMEMobjpool *pop;
+  Allocator(PMEMobjpool *pop) : pop(pop) {}
 };
