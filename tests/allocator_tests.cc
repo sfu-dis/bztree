@@ -8,15 +8,61 @@
 #include <glog/logging.h>
 #include "../allocator.h"
 
-TEST(AllocatorTest, MetaTest) {
-  auto allocator = Allocator::New("test_pool");
-  PMEMoid ptr = allocator->alloc(20);
-  auto raw_ptr = pmemobj_direct(ptr);
-  pmemobj_memcpy_persist(allocator->GetPool(), raw_ptr, "hello nvm!", 10);
+const char *pool_name = "test_pool";
 
+void init_pool() {
+  auto allocator = Allocator::New(pool_name);
+
+  PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(list));
+  list *raw_root = (list *) pmemobj_direct(root);
+
+  raw_root->value = 21;
+  raw_root->next = TOID_NULL(list).oid;
+
+  pmemobj_persist(allocator->GetPool(), raw_root, sizeof(list));
+  delete allocator;
+}
+
+TEST(AllocatorTest, MetaTest) {
+  init_pool();
+  auto allocator = Allocator::New(pool_name);
+
+  PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(list));
+  list *raw_root = (list *) pmemobj_direct(root);
+  assert(raw_root->value == 21);
+
+  auto prev = raw_root;
+  for (uint16_t i = 0; i < 32; i++) {
+    PMEMoid tmp_ptr = allocator->alloc(sizeof(list));
+    auto tmp_raw = (list *) pmemobj_direct(tmp_ptr);
+    tmp_raw->value = i;
+    tmp_raw->next = TOID_NULL(list).oid;
+
+    pmemobj_persist(allocator->GetPool(), tmp_raw, sizeof(list));
+
+    prev->next = tmp_ptr;
+    pmemobj_persist(allocator->GetPool(), &prev->next, sizeof(PMEMoid));
+
+    prev = tmp_raw;
+  }
   delete (allocator);
 
-  auto new_allocator = Allocator::New("test_pool");
-  raw_ptr = pmemobj_direct(ptr);
-  std::cout << *reinterpret_cast<char *> (raw_ptr ) << std::endl;
+  allocator = Allocator::New(pool_name);
+  root = pmemobj_root(allocator->GetPool(), sizeof(list));
+  raw_root = (list *) pmemobj_direct(root);
+  assert(raw_root->value == 21);
+
+  auto next = raw_root->next;
+  for (uint32_t i = 0; i < 32; i++) {
+    auto raw_next = (list *) pmemobj_direct(next);
+    std::cout << raw_next->value << std::endl;
+    assert(raw_next->value == i);
+    next = raw_next->next;
+  }
+  allocator->DeletePool();
+}
+
+int main(int argc, char **argv) {
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
 }

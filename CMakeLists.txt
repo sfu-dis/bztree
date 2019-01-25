@@ -25,7 +25,7 @@ set(PMDK_LIB_PATH "" CACHE STRING "PMDK shared library path")
 link_directories(${PMDK_LIB_PATH})
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
-set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt -lglog -lgtest -lgflags -lpmwcas")
+set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt -lglog -lgtest -lgflags -lpmwcas -lpmemobj")
 link_libraries(${LINK_FLAGS})
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")

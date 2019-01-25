@@ -7,11 +7,18 @@
 #pragma once
 #include <sys/stat.h>
 #include <libpmemobj.h>
+#include <stdio.h>
 
 #define CREATE_MODE_RW (S_IWUSR | S_IRUSR)
 
+struct list {
+  uint64_t value;
+  PMEMoid next;
+};
+
 POBJ_LAYOUT_BEGIN(bztree);
 POBJ_LAYOUT_TOID(bztree, char);
+POBJ_LAYOUT_TOID(bztree, list);
 POBJ_LAYOUT_END(bztree);
 
 class Allocator {
@@ -24,7 +31,7 @@ class Allocator {
 
   static Allocator *New(const char *pool_path) {
     PMEMobjpool *tmp_pool;
-    if (FileExists(pool_path)) {
+    if (!FileExists(pool_path)) {
       tmp_pool = pmemobj_create(pool_path, POBJ_LAYOUT_NAME(bztree),
                                 PMEMOBJ_MIN_POOL, CREATE_MODE_RW);
 
@@ -33,7 +40,7 @@ class Allocator {
       tmp_pool = pmemobj_open(pool_path, POBJ_LAYOUT_NAME(bztree));
       LOG_ASSERT(tmp_pool != NULL);
     }
-    return new Allocator(tmp_pool);
+    return new Allocator(tmp_pool, pool_path);
   }
 
   /*
@@ -60,11 +67,17 @@ class Allocator {
 
   inline PMEMobjpool *GetPool() { return pop; }
 
+  void DeletePool() {
+    pmemobj_close(pop);
+    remove(file_name);
+  }
+
   ~Allocator() {
     pmemobj_close(pop);
   }
 
  private:
   PMEMobjpool *pop;
-  explicit Allocator(PMEMobjpool *pop) : pop(pop) {}
+  const char *file_name;
+  explicit Allocator(PMEMobjpool *pop, const char *file_name) : pop(pop), file_name(file_name) {}
 };
