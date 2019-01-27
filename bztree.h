@@ -497,22 +497,8 @@ class BzTree {
     root = LeafNode::New(param.leaf_node_size);
   }
 
-  // create a persistent bztree
-  static BzTree *New(const char *pool_name, const char *layout_name,
-                     const ParameterSet &param, pmwcas::DescriptorPool *pool) {
-    auto allocator = Allocator::New(pool_name, layout_name);
-    PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(BzTree));
-    auto raw_root = reinterpret_cast<BzTree *> (pmemobj_direct(root));
-    new(raw_root) BzTree(param, pool);
-    pmemobj_persist(allocator->GetPool(), raw_root, sizeof(BzTree));
-    return raw_root;
-  }
-
-  static BzTree *Load(const char *pool_name, const char *layout_name) {
-    auto allocator = Allocator::New(pool_name, layout_name);
-    PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(BzTree));
-    return reinterpret_cast<BzTree *>(pmemobj_direct(root));
-  }
+  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, LeafNode *root)
+      : parameters(param), root(root), pmwcas_pool(pool) {}
 
   void Dump();
   inline pmwcas::DescriptorPool *GetPool() const {

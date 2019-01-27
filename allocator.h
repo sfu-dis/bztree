@@ -41,15 +41,28 @@ class Allocator {
 
   /*
    *  allocate size memory from pmem pool
+   *  return a pmemoid
    * */
-  PMEMoid Alloc(uint64_t size) {
+  PMEMoid Alloc(uint64_t size, bool zero_out = false) {
     TOID(char) mem;
-    POBJ_ALLOC(pop, &mem, char, sizeof(char) * size, NULL, NULL);
+    if (zero_out) {
+      POBJ_ZALLOC(pop, &mem, char, sizeof(char) * size);
+    } else {
+      POBJ_ALLOC(pop, &mem, char, sizeof(char) * size, NULL, NULL);
+    }
     if (TOID_IS_NULL(mem)) {
       LOG(FATAL) << "POBJ_ALLOC error" << std::endl;
     }
     pmemobj_persist(pop, D_RW(mem), size * sizeof(*D_RW(mem)));
     return mem.oid;
+  }
+
+  /*
+   *  allocate size memory from pmem pool
+   *  return the direct pointer
+   * */
+  void *AllocDirect(uint64_t size, bool zero_out = false) {
+    return pmemobj_direct(Alloc(size, zero_out));
   }
 
   /*
@@ -61,12 +74,16 @@ class Allocator {
     POBJ_FREE(&ptr_cpy);
   }
 
-  PMEMoid GetRoot(uint64_t size) {
+  inline PMEMoid GetRoot(uint64_t size) {
     return pmemobj_root(GetPool(), size);
   }
 
-  void *GetDirectRoot(uint64_t size) {
+  inline void *GetDirectRoot(uint64_t size) {
     return pmemobj_direct(GetRoot(size));
+  }
+
+  inline void PersistPtr(void *ptr, uint64_t size) {
+    pmemobj_persist(pop, ptr, size);
   }
 
   inline PMEMobjpool *GetPool() { return pop; }
@@ -76,7 +93,7 @@ class Allocator {
   }
 
   ~Allocator() {
-    LOG(INFO) << "closing the pool";
+    LOG(INFO) << "allocator destroyed, closing the pool";
     pmemobj_close(pop);
   }
 

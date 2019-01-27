@@ -13,19 +13,19 @@
 const uint32_t node_size = 4096;
 
 TEST(LeafNodePmemTest, ReadWriteTest) {
-  const char *leaf_pool = "leaf_pool";
-  const char *layout = "leaf_node";
+  const char *pool_name = "leaf_pool";
+  const char *layout_name = "leaf_node";
   auto pool = new pmwcas::DescriptorPool(1000, 1, nullptr);
 
   // creating
-  auto allocator = Allocator::New(leaf_pool, layout);
+  auto allocator = Allocator::New(pool_name, layout_name);
   auto raw_root = allocator->GetDirectRoot(sizeof(bztree::LeafNode));
   new(raw_root)bztree::LeafNode;
-  pmemobj_persist(allocator->GetPool(), raw_root, sizeof(bztree::LeafNode));
+  allocator->PersistPtr(raw_root, sizeof(bztree::LeafNode));
 
   // inserting
   allocator.reset();
-  allocator = Allocator::New(leaf_pool, layout);
+  allocator = Allocator::New(pool_name, layout_name);
   auto node = reinterpret_cast<bztree::LeafNode *>(
       allocator->GetDirectRoot(sizeof(bztree::LeafNode)));
 
@@ -37,7 +37,7 @@ TEST(LeafNodePmemTest, ReadWriteTest) {
 
   // read back
   allocator.reset();
-  allocator = Allocator::New(leaf_pool, layout);
+  allocator = Allocator::New(pool_name, layout_name);
   node = reinterpret_cast<bztree::LeafNode *>(
       allocator->GetDirectRoot(sizeof(bztree::LeafNode)));
   for (uint32_t i = 0; i < 100; i += 1) {
@@ -46,7 +46,48 @@ TEST(LeafNodePmemTest, ReadWriteTest) {
     node->Read(str.c_str(), str.length(), &tmp_payload, pool);
     ASSERT_EQ(tmp_payload, i);
   }
-  remove(leaf_pool);
+  remove(pool_name);
+}
+
+TEST(BzTreePmemTest, LeafOnlyTest) {
+  const char *pool_name = "bztree_pool";
+  const char *layout_name = "bztree_layout";
+  auto pool = std::make_unique<pmwcas::DescriptorPool>(1000, 1, nullptr);
+
+  // set root
+  auto allocator = Allocator::New(pool_name, layout_name);
+  auto root_tree = reinterpret_cast<bztree::BzTree *>(
+      allocator->GetDirectRoot(sizeof(bztree::BzTree)));
+
+  bztree::BzTree::ParameterSet param;
+  auto leaf_node = reinterpret_cast<bztree::LeafNode *>(
+      allocator->AllocDirect(sizeof(param.leaf_node_size), true));
+  new(leaf_node)bztree::LeafNode();
+  new(root_tree)bztree::BzTree(param, pool.get(), leaf_node);
+  allocator->PersistPtr(root_tree, sizeof(bztree::BzTree));
+
+  // insert
+  allocator.reset();
+  allocator = Allocator::New(pool_name, layout_name);
+  auto insert_tree = reinterpret_cast<bztree::BzTree *>(
+      allocator->GetDirectRoot(sizeof(bztree::BzTree)));
+  for (uint32_t i = 0; i < 64; i++) {
+    std::string str = std::to_string(i);
+    insert_tree->Insert(str.c_str(), str.length(), i);
+  }
+
+  // read back
+  allocator.reset();
+  allocator = Allocator::New(pool_name, layout_name);
+  auto read_tree = reinterpret_cast<bztree::BzTree *>(
+      allocator->GetDirectRoot(sizeof(bztree::BzTree))
+  );
+  for (uint32_t i = 0; i < 64; i++) {
+    std::string str = std::to_string(i);
+    uint64_t payload;
+    read_tree->Read(str.c_str(), str.length(), &payload);
+    ASSERT_EQ(payload, i);
+  }
 }
 
 int main(int argc, char **argv) {
