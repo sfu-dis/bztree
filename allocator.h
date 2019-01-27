@@ -65,6 +65,10 @@ class Allocator {
     return pmemobj_root(GetPool(), size);
   }
 
+  void *GetDirectRoot(uint64_t size) {
+    return pmemobj_direct(GetRoot(size));
+  }
+
   inline PMEMobjpool *GetPool() { return pop; }
 
   inline void ClosePool() {

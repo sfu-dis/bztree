@@ -19,16 +19,15 @@ TEST(LeafNodePmemTest, ReadWriteTest) {
 
   // creating
   auto allocator = Allocator::New(leaf_pool, layout);
-  auto root = allocator->GetRoot(sizeof(bztree::LeafNode));
-  auto raw_root = pmemobj_direct(root);
+  auto raw_root = allocator->GetDirectRoot(sizeof(bztree::LeafNode));
   new(raw_root)bztree::LeafNode;
   pmemobj_persist(allocator->GetPool(), raw_root, sizeof(bztree::LeafNode));
 
   // inserting
   allocator.reset();
   allocator = Allocator::New(leaf_pool, layout);
-  root = allocator->GetRoot(sizeof(bztree::LeafNode));
-  auto node = reinterpret_cast<bztree::LeafNode *>(pmemobj_direct(root));
+  auto node = reinterpret_cast<bztree::LeafNode *>(
+      allocator->GetDirectRoot(sizeof(bztree::LeafNode)));
 
   pmwcas::EpochGuard guard(pool->GetEpoch());
   for (uint32_t i = 0; i < 100; i += 1) {
@@ -39,8 +38,8 @@ TEST(LeafNodePmemTest, ReadWriteTest) {
   // read back
   allocator.reset();
   allocator = Allocator::New(leaf_pool, layout);
-  root = allocator->GetRoot(sizeof(bztree::LeafNode));
-  node = reinterpret_cast<bztree::LeafNode *>(pmemobj_direct(root));
+  node = reinterpret_cast<bztree::LeafNode *>(
+      allocator->GetDirectRoot(sizeof(bztree::LeafNode)));
   for (uint32_t i = 0; i < 100; i += 1) {
     auto str = std::to_string(i);
     uint64_t tmp_payload;
