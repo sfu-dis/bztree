@@ -52,9 +52,7 @@ class LeafNodeFixtures : public ::testing::Test {
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
     pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
-    node = (bztree::LeafNode *) malloc(node_size);
-    memset(node, 0, node_size);
-    new(node) bztree::LeafNode;
+    node = bztree::LeafNode::New(node_size);
   }
 
   void TearDown() override {

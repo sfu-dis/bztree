@@ -308,6 +308,13 @@ LeafNode *LeafNode::New(uint32_t node_size) {
   return node;
 }
 
+LeafNode *LeafNode::NewPmem(Allocator *allocator, uint32_t node_size) {
+  auto pmem_node = allocator->Alloc(node_size);
+  auto raw_node = reinterpret_cast<LeafNode *> (pmemobj_direct(pmem_node));
+  new(raw_node) LeafNode(node_size);
+  return raw_node;
+}
+
 void BaseNode::Dump(pmwcas::EpochManager *epoch) {
   std::cout << "-----------------------------" << std::endl;
   std::cout << " Dumping node: " << this << (is_leaf ? " (leaf)" : " (internal)") << std::endl;
@@ -505,7 +512,7 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
   // when get back, this meta may have finished inserting, so the following if will be false
   // however, this key may not be duplicate, so we need to compare the key again
   // even if this key is not duplicate, we need to return a "Recheck"
-  if (!meta_data.IsInserting(epoch->current_epoch_)) {
+  if (meta_data.IsInserting(epoch->current_epoch_)) {
     return ReCheck;
   }
   char *curr_key = GetKey(meta_data);

@@ -352,6 +352,7 @@ struct Record;
 class LeafNode : public BaseNode {
  public:
   static LeafNode *New(uint32_t node_size);
+  static LeafNode *NewPmem(Allocator *allocator, uint32_t node_size);
 
   static inline uint32_t GetUsedSpace(NodeHeader::StatusWord status) {
     return sizeof(LeafNode) + status.GetBlockSize() +
@@ -501,10 +502,16 @@ class BzTree {
                      const ParameterSet &param, pmwcas::DescriptorPool *pool) {
     auto allocator = Allocator::New(pool_name, layout_name);
     PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(BzTree));
-    auto raw_root = (BzTree *) pmemobj_direct(root);
+    auto raw_root = reinterpret_cast<BzTree *> (pmemobj_direct(root));
     new(raw_root) BzTree(param, pool);
     pmemobj_persist(allocator->GetPool(), raw_root, sizeof(BzTree));
-    delete allocator;
+    return raw_root;
+  }
+
+  static BzTree *Load(const char *pool_name, const char *layout_name) {
+    auto allocator = Allocator::New(pool_name, layout_name);
+    PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(BzTree));
+    return reinterpret_cast<BzTree *>(pmemobj_direct(root));
   }
 
   void Dump();

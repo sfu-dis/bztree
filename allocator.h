@@ -23,7 +23,9 @@ class Allocator {
     return (stat(pool_path, &buffer) == 0);
   }
 
-  static Allocator *New(const char *pool_path, const char *layout) {
+  explicit Allocator(PMEMobjpool *pop, const char *file_name) : pop(pop), file_name(file_name) {}
+
+  static std::unique_ptr<Allocator> New(const char *pool_path, const char *layout) {
     PMEMobjpool *tmp_pool;
     if (!FileExists(pool_path)) {
       tmp_pool = pmemobj_create(pool_path, layout,
@@ -34,13 +36,13 @@ class Allocator {
       tmp_pool = pmemobj_open(pool_path, layout);
       LOG_ASSERT(tmp_pool != nullptr);
     }
-    return new Allocator(tmp_pool, pool_path);
+    return std::make_unique<Allocator>(tmp_pool, pool_path);
   }
 
   /*
    *  allocate size memory from pmem pool
    * */
-  PMEMoid alloc(uint64_t size) {
+  PMEMoid Alloc(uint64_t size) {
     TOID(char) mem;
     POBJ_ALLOC(pop, &mem, char, sizeof(char) * size, NULL, NULL);
     if (TOID_IS_NULL(mem)) {
@@ -53,28 +55,28 @@ class Allocator {
   /*
    *  free a PM pointer
    * */
-  void free(PMEMoid ptr) {
+  void Free(PMEMoid ptr) {
     TOID(char) ptr_cpy;
     TOID_ASSIGN(ptr_cpy, ptr);
     POBJ_FREE(&ptr_cpy);
   }
 
+  PMEMoid GetRoot(uint64_t size) {
+    return pmemobj_root(GetPool(), size);
+  }
+
   inline PMEMobjpool *GetPool() { return pop; }
 
-  /*
-   * delete the pool file
-   * */
-  void DeletePool() {
+  inline void ClosePool() {
     pmemobj_close(pop);
-    remove(file_name);
   }
 
   ~Allocator() {
+    LOG(INFO) << "closing the pool";
     pmemobj_close(pop);
   }
 
  private:
   PMEMobjpool *pop;
   const char *file_name;
-  explicit Allocator(PMEMobjpool *pop, const char *file_name) : pop(pop), file_name(file_name) {}
 };

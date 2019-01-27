@@ -30,7 +30,6 @@ void init_pool() {
   raw_root->next = TOID_NULL(list).oid;
 
   pmemobj_persist(allocator->GetPool(), raw_root, sizeof(list));
-  delete allocator;
 }
 
 TEST(AllocatorTest, MetaTest) {
@@ -43,7 +42,7 @@ TEST(AllocatorTest, MetaTest) {
 
   auto prev = raw_root;
   for (uint16_t i = 0; i < 32; i++) {
-    PMEMoid tmp_ptr = allocator->alloc(sizeof(list));
+    PMEMoid tmp_ptr = allocator->Alloc(sizeof(list));
     auto tmp_raw = (list *) pmemobj_direct(tmp_ptr);
     tmp_raw->value = i;
     tmp_raw->next = TOID_NULL(list).oid;
@@ -55,8 +54,8 @@ TEST(AllocatorTest, MetaTest) {
 
     prev = tmp_raw;
   }
-  delete (allocator);
 
+  allocator.reset();
   allocator = Allocator::New(pool_name, layout_name);
   root = pmemobj_root(allocator->GetPool(), sizeof(list));
   raw_root = (list *) pmemobj_direct(root);
@@ -68,7 +67,8 @@ TEST(AllocatorTest, MetaTest) {
     assert(raw_next->value == i);
     next = raw_next->next;
   }
-  allocator->DeletePool();
+  allocator.reset();
+  remove(pool_name);
 }
 
 int main(int argc, char **argv) {
