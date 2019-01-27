@@ -11,14 +11,8 @@
 
 #define CREATE_MODE_RW (S_IWUSR | S_IRUSR)
 
-struct list {
-  uint64_t value;
-  PMEMoid next;
-};
-
 POBJ_LAYOUT_BEGIN(bztree);
 POBJ_LAYOUT_TOID(bztree, char);
-POBJ_LAYOUT_TOID(bztree, list);
 POBJ_LAYOUT_END(bztree);
 
 class Allocator {
@@ -29,16 +23,16 @@ class Allocator {
     return (stat(pool_path, &buffer) == 0);
   }
 
-  static Allocator *New(const char *pool_path) {
+  static Allocator *New(const char *pool_path, const char *layout) {
     PMEMobjpool *tmp_pool;
     if (!FileExists(pool_path)) {
-      tmp_pool = pmemobj_create(pool_path, POBJ_LAYOUT_NAME(bztree),
+      tmp_pool = pmemobj_create(pool_path, layout,
                                 PMEMOBJ_MIN_POOL, CREATE_MODE_RW);
 
-      LOG_ASSERT(tmp_pool != NULL);
+      LOG_ASSERT(tmp_pool != nullptr);
     } else {
-      tmp_pool = pmemobj_open(pool_path, POBJ_LAYOUT_NAME(bztree));
-      LOG_ASSERT(tmp_pool != NULL);
+      tmp_pool = pmemobj_open(pool_path, layout);
+      LOG_ASSERT(tmp_pool != nullptr);
     }
     return new Allocator(tmp_pool, pool_path);
   }
@@ -67,6 +61,9 @@ class Allocator {
 
   inline PMEMobjpool *GetPool() { return pop; }
 
+  /*
+   * delete the pool file
+   * */
   void DeletePool() {
     pmemobj_close(pop);
     remove(file_name);

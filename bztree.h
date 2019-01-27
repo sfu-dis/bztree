@@ -495,6 +495,18 @@ class BzTree {
       : parameters(param), root(nullptr), pmwcas_pool(pool) {
     root = LeafNode::New(param.leaf_node_size);
   }
+
+  // create a persistent bztree
+  static BzTree *New(const char *pool_name, const char *layout_name,
+                     const ParameterSet &param, pmwcas::DescriptorPool *pool) {
+    auto allocator = Allocator::New(pool_name, layout_name);
+    PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(BzTree));
+    auto raw_root = (BzTree *) pmemobj_direct(root);
+    new(raw_root) BzTree(param, pool);
+    pmemobj_persist(allocator->GetPool(), raw_root, sizeof(BzTree));
+    delete allocator;
+  }
+
   void Dump();
   inline pmwcas::DescriptorPool *GetPool() const {
     return pmwcas_pool;
@@ -576,4 +588,10 @@ class Iterator {
   std::vector<std::unique_ptr<Record>>::iterator item_it;
 };
 
+POBJ_LAYOUT_BEGIN(bztree);
+POBJ_LAYOUT_TOID(bztree, BzTree);
+POBJ_LAYOUT_TOID(bztree, InternalNode);
+POBJ_LAYOUT_TOID(bztree, LeafNode);
+POBJ_LAYOUT_TOID(bztree, BaseNode);
+POBJ_LAYOUT_END(bztree);
 }  // namespace bztree

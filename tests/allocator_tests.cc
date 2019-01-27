@@ -9,9 +9,19 @@
 #include "../allocator.h"
 
 const char *pool_name = "test_pool";
+const char *layout_name = "linked_list";
+
+struct list {
+  uint64_t value;
+  PMEMoid next;
+};
+
+POBJ_LAYOUT_BEGIN(linked_list);
+POBJ_LAYOUT_TOID(linked_list, list);
+POBJ_LAYOUT_END(linked_list);
 
 void init_pool() {
-  auto allocator = Allocator::New(pool_name);
+  auto allocator = Allocator::New(pool_name, layout_name);
 
   PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(list));
   list *raw_root = (list *) pmemobj_direct(root);
@@ -25,7 +35,7 @@ void init_pool() {
 
 TEST(AllocatorTest, MetaTest) {
   init_pool();
-  auto allocator = Allocator::New(pool_name);
+  auto allocator = Allocator::New(pool_name, layout_name);
 
   PMEMoid root = pmemobj_root(allocator->GetPool(), sizeof(list));
   list *raw_root = (list *) pmemobj_direct(root);
@@ -47,7 +57,7 @@ TEST(AllocatorTest, MetaTest) {
   }
   delete (allocator);
 
-  allocator = Allocator::New(pool_name);
+  allocator = Allocator::New(pool_name, layout_name);
   root = pmemobj_root(allocator->GetPool(), sizeof(list));
   raw_root = (list *) pmemobj_direct(root);
   assert(raw_root->value == 21);
@@ -55,7 +65,6 @@ TEST(AllocatorTest, MetaTest) {
   auto next = raw_root->next;
   for (uint32_t i = 0; i < 32; i++) {
     auto raw_next = (list *) pmemobj_direct(next);
-    std::cout << raw_next->value << std::endl;
     assert(raw_next->value == i);
     next = raw_next->next;
   }
