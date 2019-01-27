@@ -15,7 +15,7 @@ const uint32_t node_size = 4096;
 TEST(LeafNodePmemTest, ReadWriteTest) {
   const char *leaf_pool = "leaf_pool";
   const char *layout = "leaf_node";
-  auto pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
+  auto pool = new pmwcas::DescriptorPool(1000, 1, nullptr);
 
   // creating
   auto allocator = Allocator::New(leaf_pool, layout);
@@ -25,6 +25,7 @@ TEST(LeafNodePmemTest, ReadWriteTest) {
   pmemobj_persist(allocator->GetPool(), raw_root, sizeof(bztree::LeafNode));
 
   // inserting
+  allocator.reset();
   allocator = Allocator::New(leaf_pool, layout);
   root = allocator->GetRoot(sizeof(bztree::LeafNode));
   auto node = reinterpret_cast<bztree::LeafNode *>(pmemobj_direct(root));
@@ -36,6 +37,7 @@ TEST(LeafNodePmemTest, ReadWriteTest) {
   }
 
   // read back
+  allocator.reset();
   allocator = Allocator::New(leaf_pool, layout);
   root = allocator->GetRoot(sizeof(bztree::LeafNode));
   node = reinterpret_cast<bztree::LeafNode *>(pmemobj_direct(root));
@@ -45,9 +47,14 @@ TEST(LeafNodePmemTest, ReadWriteTest) {
     node->Read(str.c_str(), str.length(), &tmp_payload, pool);
     ASSERT_EQ(tmp_payload, i);
   }
+  remove(leaf_pool);
 }
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
+  pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
+                      pmwcas::TlsAllocator::Destroy,
+                      pmwcas::LinuxEnvironment::Create,
+                      pmwcas::LinuxEnvironment::Destroy);
   return RUN_ALL_TESTS();
 }
