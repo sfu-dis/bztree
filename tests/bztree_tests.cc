@@ -192,7 +192,7 @@ class BzTreeTest : public ::testing::Test {
                         pmwcas::TlsAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(1000000, 1, nullptr, false);
+    pool = new pmwcas::DescriptorPool(20000, 1, nullptr, false);
     bztree::BzTree::ParameterSet param(256, 128, 256);
     tree = new bztree::BzTree(param, pool);
   }
@@ -205,7 +205,7 @@ class BzTreeTest : public ::testing::Test {
 };
 
 TEST_F(BzTreeTest, Insert) {
-  static const uint32_t kMaxKey = 100000;
+  static const uint32_t kMaxKey = 5000;
   for (uint32_t i = 100; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);

@@ -241,7 +241,7 @@ class BaseNode {
   // 2. [*key] - pointer to the key (could be nullptr)
   // 3. [payload] - 8-byte payload
   inline bool GetRawRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload,
-                           pmwcas::EpochManager *epoch, bool safe_get = false) {
+                           pmwcas::EpochManager *epoch = nullptr, bool safe_get = false) {
     if (!meta.IsVisible()) {
       return false;
     }
@@ -258,7 +258,7 @@ class BaseNode {
 
     if (payload != nullptr) {
       uint64_t tmp_payload;
-      if (safe_get) {
+      if (epoch != nullptr) {
         tmp_payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
             tmp_data + padded_key_len)->GetValue(epoch);
       } else {
@@ -276,25 +276,20 @@ class Stack;
 class InternalNode : public BaseNode {
  public:
   static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr,
-                           pmwcas::EpochManager *epoch);
+                           uint64_t left_child_addr, uint64_t right_child_addr);
   static InternalNode *New(const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr,
-                           pmwcas::EpochManager *epoch);
+                           uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
                     const char *key, uint32_t key_size,
                     uint64_t left_child_addr, uint64_t right_child_addr,
-                    pmwcas::EpochManager *epoch,
                     uint64_t left_most_child_addr = 0);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr,
-               pmwcas::EpochManager *epoch);
+               uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode(uint32_t node_size, InternalNode *src_node,
                uint32_t begin_meta_idx, uint32_t nr_records,
                const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr,
-               pmwcas::EpochManager *epoch,
                uint64_t left_most_child_addr = 0);
   ~InternalNode() = default;
 
@@ -313,7 +308,7 @@ class InternalNode : public BaseNode {
                          pmwcas::DescriptorPool *pool, bool get_le = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
-    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch, true);
+    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
     return reinterpret_cast<BaseNode *> (child_addr);
   }
   void Dump(pmwcas::EpochManager *epoch, bool dump_children = false);

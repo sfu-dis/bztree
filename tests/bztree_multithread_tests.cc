@@ -193,7 +193,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
 
 GTEST_TEST(BztreeTest, MiltiUpsertTest) {
   uint32_t thread_count = 50;
-  uint32_t item_per_thread = 1000;
+  uint32_t item_per_thread = 10000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
