@@ -241,7 +241,7 @@ class BaseNode {
   // 2. [*key] - pointer to the key (could be nullptr)
   // 3. [payload] - 8-byte payload
   inline bool GetRawRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload,
-                           pmwcas::EpochManager *epoch = nullptr, bool safe_get = false) {
+                           pmwcas::EpochManager *epoch = nullptr) {
     if (!meta.IsVisible()) {
       return false;
     }
@@ -276,13 +276,16 @@ class Stack;
 class InternalNode : public BaseNode {
  public:
   static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
+                           uint64_t left_child_addr, uint64_t right_child_addr,
+                           Allocator *allocator = nullptr);
   static InternalNode *New(const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
+                           uint64_t left_child_addr, uint64_t right_child_addr,
+                           Allocator *allocator = nullptr);
   InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
                     const char *key, uint32_t key_size,
                     uint64_t left_child_addr, uint64_t right_child_addr,
-                    uint64_t left_most_child_addr = 0);
+                    uint64_t left_most_child_addr,
+                    Allocator *allocator = nullptr);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);

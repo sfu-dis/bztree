@@ -18,32 +18,51 @@ InternalNode *InternalNode::New(InternalNode *src_node,
                                 const char *key,
                                 uint32_t key_size,
                                 uint64_t left_child_addr,
-                                uint64_t right_child_addr) {
-  // FIXME(tzwang): use a better allocator
+                                uint64_t right_child_addr,
+                                Allocator *allocator) {
+  //  // FIXME(tzwang): use a better allocator
   uint32_t alloc_size = src_node->GetHeader()->size +
       RecordMetadata::PadKeyLength(key_size) +
       sizeof(right_child_addr) + sizeof(RecordMetadata);
-  InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
-  memset(node, 0, alloc_size);
-  new(node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
-                         key, key_size, left_child_addr, right_child_addr);
-  return node;
+  if (allocator == nullptr) {
+    InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
+    memset(node, 0, alloc_size);
+    new(node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
+                           key, key_size, left_child_addr, right_child_addr);
+    return node;
+  } else {
+    auto *node = reinterpret_cast<InternalNode *>(
+        allocator->AllocDirect(alloc_size, true));
+    new(node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
+                           key, key_size, left_child_addr, right_child_addr);
+    allocator->PersistPtr(node, alloc_size);
+    return node;
+  }
 }
 
 // Create an internal node with a single separator key and two pointers
 InternalNode *InternalNode::New(const char *key,
                                 uint32_t key_size,
                                 uint64_t left_child_addr,
-                                uint64_t right_child_addr) {
+                                uint64_t right_child_addr,
+                                Allocator *allocator) {
   uint32_t alloc_size = sizeof(InternalNode) +
       RecordMetadata::PadKeyLength(key_size) +
       sizeof(left_child_addr) +
       sizeof(right_child_addr) +
       sizeof(RecordMetadata) * 2;
-  InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
-  memset(node, 0, alloc_size);
-  new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
-  return node;
+  if (allocator == nullptr) {
+    InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
+    memset(node, 0, alloc_size);
+    new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
+    return node;
+  } else {
+    auto *node = reinterpret_cast<InternalNode *>(
+        allocator->AllocDirect(alloc_size, true));
+    new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
+    allocator->PersistPtr(node, alloc_size);
+    return node;
+  }
 }
 
 // Create an internal node with keys and pointers in the provided range from an
@@ -52,7 +71,8 @@ InternalNode *InternalNode::New(InternalNode *src_node,
                                 uint32_t begin_meta_idx, uint32_t nr_records,
                                 const char *key, uint32_t key_size,
                                 uint64_t left_child_addr, uint64_t right_child_addr,
-                                uint64_t left_most_child_addr) {
+                                uint64_t left_most_child_addr,
+                                Allocator *allocator) {
   // Figure out how large the new node will be
   uint32_t alloc_size = sizeof(InternalNode);
   if (begin_meta_idx > 0) {
@@ -73,12 +93,23 @@ InternalNode *InternalNode::New(InternalNode *src_node,
         (RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t) + sizeof(RecordMetadata));
   }
 
-  InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
-  memset(node, 0, alloc_size);
-  new(node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
-                         key, key_size, left_child_addr, right_child_addr,
-                         left_most_child_addr);
-  return node;
+  if (allocator == nullptr) {
+    InternalNode *node = reinterpret_cast<InternalNode *>(malloc(alloc_size));
+    memset(node, 0, alloc_size);
+    new(node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+                           key, key_size, left_child_addr, right_child_addr,
+                           left_most_child_addr);
+    return node;
+  } else {
+    auto *node = reinterpret_cast<InternalNode *>(
+        allocator->AllocDirect(alloc_size, true)
+    );
+    new(node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+                           key, key_size, left_child_addr, right_child_addr,
+                           left_most_child_addr);
+    allocator->PersistPtr(node, alloc_size);
+    return node;
+  }
 }
 
 InternalNode::InternalNode(uint32_t node_size,
@@ -256,11 +287,11 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
   if (cmp < 0) {
     // Should go to left
     left = InternalNode::New(this, 0, n_left, key, key_size,
-                             left_child_addr, right_child_addr);
+                             left_child_addr, right_child_addr, 0);
     right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
                               nullptr, 0, 0, 0, separator_payload);
   } else {
-    left = InternalNode::New(this, 0, n_left, nullptr, 0, 0, 0);
+    left = InternalNode::New(this, 0, n_left, nullptr, 0, 0, 0, 0);
     right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
                               key, key_size, left_child_addr, right_child_addr,
                               separator_payload);
