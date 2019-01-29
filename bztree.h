@@ -276,16 +276,13 @@ class Stack;
 class InternalNode : public BaseNode {
  public:
   static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr,
-                           Allocator *allocator = nullptr);
+                           uint64_t left_child_addr, uint64_t right_child_addr);
   static InternalNode *New(const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr,
-                           Allocator *allocator = nullptr);
+                           uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
                     const char *key, uint32_t key_size,
                     uint64_t left_child_addr, uint64_t right_child_addr,
-                    uint64_t left_most_child_addr,
-                    Allocator *allocator = nullptr);
+                    uint64_t left_most_child_addr);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);

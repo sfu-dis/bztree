@@ -12,7 +12,7 @@
 #include "util/performance_test.h"
 #include "../bztree.h"
 
-uint32_t descriptor_pool_size = 500000;
+uint32_t descriptor_pool_size = 50000;
 
 struct MultiThreadRead : public pmwcas::PerformanceTest {
   bztree::BzTree *tree;
@@ -166,7 +166,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
   uint32_t thread_count = 10;
   uint32_t item_per_thread = 300;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
-      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+      new pmwcas::DescriptorPool(5000, thread_count, nullptr)
   );
   bztree::BzTree::ParameterSet param;
   std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
@@ -193,7 +193,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
 
 GTEST_TEST(BztreeTest, MiltiUpsertTest) {
   uint32_t thread_count = 50;
-  uint32_t item_per_thread = 10000;
+  uint32_t item_per_thread = 1000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
@@ -207,8 +207,8 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
-                      pmwcas::TlsAllocator::Destroy,
+  pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
+                      pmwcas::DefaultAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
   return RUN_ALL_TESTS();
