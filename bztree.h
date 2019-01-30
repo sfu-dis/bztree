@@ -499,6 +499,14 @@ class BzTree {
   inline pmwcas::DescriptorPool *GetPool() const {
     return pmwcas_pool;
   }
+
+  static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {
+    auto tree = reinterpret_cast<BzTree *>(
+        pmwcas::Allocator::Get()->Allocate(sizeof(BzTree)));
+    new(tree) BzTree(param, pool);
+    return tree;
+  }
+
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
@@ -576,10 +584,4 @@ class Iterator {
   std::vector<std::unique_ptr<Record>>::iterator item_it;
 };
 
-POBJ_LAYOUT_BEGIN(bztree);
-POBJ_LAYOUT_TOID(bztree, BzTree);
-POBJ_LAYOUT_TOID(bztree, InternalNode);
-POBJ_LAYOUT_TOID(bztree, LeafNode);
-POBJ_LAYOUT_TOID(bztree, BaseNode);
-POBJ_LAYOUT_END(bztree);
 }  // namespace bztree

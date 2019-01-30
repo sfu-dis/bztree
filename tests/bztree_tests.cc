@@ -47,8 +47,8 @@ class LeafNodeFixtures : public ::testing::Test {
   pmwcas::DescriptorPool *pool;
   bztree::LeafNode *node;
   void SetUp() override {
-    pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
-                        pmwcas::TlsAllocator::Destroy,
+    pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
+                        pmwcas::DefaultAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
     pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
@@ -188,13 +188,13 @@ class BzTreeTest : public ::testing::Test {
   }
 
   void SetUp() override {
-    pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
-                        pmwcas::TlsAllocator::Destroy,
+    pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
+                        pmwcas::DefaultAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(20000, 1, nullptr, false);
+    pool = new pmwcas::DescriptorPool(2000, 1, nullptr, false);
     bztree::BzTree::ParameterSet param(256, 128, 256);
-    tree = new bztree::BzTree(param, pool);
+    tree = bztree::BzTree::New(param, pool);
   }
 
   void TearDown() override {

@@ -23,7 +23,6 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   uint32_t alloc_size = src_node->GetHeader()->size +
       RecordMetadata::PadKeyLength(key_size) +
       sizeof(right_child_addr) + sizeof(RecordMetadata);
-  LOG(INFO) << "allocating: " << alloc_size;
   auto *node = reinterpret_cast<InternalNode *>(
       pmwcas::Allocator::Get()->Allocate(alloc_size));
   memset(node, 0, alloc_size);
@@ -42,7 +41,6 @@ InternalNode *InternalNode::New(const char *key,
       sizeof(left_child_addr) +
       sizeof(right_child_addr) +
       sizeof(RecordMetadata) * 2;
-  LOG(INFO) << "allocating: " << alloc_size;
   auto *node = reinterpret_cast<InternalNode *>(
       pmwcas::Allocator::Get()->Allocate(alloc_size));
   memset(node, 0, alloc_size);
@@ -77,7 +75,6 @@ InternalNode *InternalNode::New(InternalNode *src_node,
         (RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t) + sizeof(RecordMetadata));
   }
 
-  LOG(INFO) << "allocating: " << alloc_size;
   auto *node = reinterpret_cast<InternalNode *>(
       pmwcas::Allocator::Get()->Allocate(alloc_size));
   memset(node, 0, alloc_size);
@@ -302,18 +299,11 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
 }
 
 LeafNode *LeafNode::New(uint32_t node_size) {
-  // FIXME(tzwang): use a better allocator
-  LeafNode *node = reinterpret_cast<LeafNode *>(malloc(node_size));
+  auto *node = reinterpret_cast<LeafNode *>(
+      pmwcas::Allocator::Get()->Allocate(node_size));
   memset(node, 0, node_size);
   new(node) LeafNode(node_size);
   return node;
-}
-
-LeafNode *LeafNode::NewPmem(Allocator *allocator, uint32_t node_size) {
-  auto pmem_node = allocator->Alloc(node_size);
-  auto raw_node = reinterpret_cast<LeafNode *> (pmemobj_direct(pmem_node));
-  new(raw_node) LeafNode(node_size);
-  return raw_node;
 }
 
 void BaseNode::Dump(pmwcas::EpochManager *epoch) {

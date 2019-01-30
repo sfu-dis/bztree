@@ -89,12 +89,64 @@ TEST(BzTreePmemTest, LeafOnlyTest) {
     ASSERT_EQ(payload, i);
   }
 }
+class BzTreePMEMTest : public ::testing::Test {
+ protected:
+  pmwcas::DescriptorPool *pool;
+  bztree::BzTree *tree;
+
+  void SetUp() override {
+    pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create,
+                        pmwcas::PMDKAllocator::Destroy,
+                        pmwcas::LinuxEnvironment::Create,
+                        pmwcas::LinuxEnvironment::Destroy);
+    pool = new pmwcas::DescriptorPool(2000, 1, nullptr, false);
+  }
+
+  void TearDown() override {
+    delete pool;
+    pmwcas::Thread::ClearRegistry();
+    pmwcas::UninitLibrary();
+  }
+};
+
+TEST_F(BzTreePMEMTest, InsertTest) {
+  auto pmdk_allocator = reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
+  bztree::BzTree::ParameterSet param(256, 128, 256);
+  auto root = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
+  new(root)bztree::BzTree(param, pool);
+  pmdk_allocator->PersistPtr(root, sizeof(bztree::BzTree));
+  tree = root;
+
+  static const uint32_t kMaxKey = 50;
+  for (uint32_t i = 1; i < kMaxKey; ++i) {
+    std::string key = std::to_string(i);
+    auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);
+    ASSERT_TRUE(rc.IsOk());
+
+    uint64_t payload = 0;
+    rc = tree->Read(key.c_str(), key.length(), &payload);
+    ASSERT_TRUE(rc.IsOk());
+    ASSERT_TRUE(payload == i + 2000);
+  }
+}
+
+TEST_F(BzTreePMEMTest, ReadTest) {
+  // Read everything back
+  auto pmdk_allocator = reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
+  auto root = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
+  tree = root;
+
+  const uint32_t kMaxKey = 50;
+  for (uint32_t i = 1; i < kMaxKey; ++i) {
+    std::string key = std::to_string(i);
+    uint64_t payload = 0;
+    auto rc = tree->Read(key.c_str(), key.length(), &payload);
+    ASSERT_TRUE(rc.IsOk());
+    ASSERT_TRUE(payload == i + 2000);
+  }
+}
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
-                      pmwcas::TlsAllocator::Destroy,
-                      pmwcas::LinuxEnvironment::Create,
-                      pmwcas::LinuxEnvironment::Destroy);
   return RUN_ALL_TESTS();
 }
