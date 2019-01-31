@@ -12,7 +12,6 @@
 
 #include "include/pmwcas.h"
 #include "mwcas/mwcas.h"
-#include "allocator.h"
 
 namespace bztree {
 
@@ -347,7 +346,6 @@ struct Record;
 class LeafNode : public BaseNode {
  public:
   static LeafNode *New(uint32_t node_size);
-  static LeafNode *NewPmem(Allocator *allocator, uint32_t node_size);
 
   static inline uint32_t GetUsedSpace(NodeHeader::StatusWord status) {
     return sizeof(LeafNode) + status.GetBlockSize() +
