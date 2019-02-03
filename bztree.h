@@ -15,6 +15,20 @@
 
 namespace bztree {
 
+#ifdef PMEM
+struct Allocator {
+  static pmwcas::PMDKAllocator *allocator_;
+  static void Init(pmwcas::PMDKAllocator *allocator) {
+    allocator_ = allocator;
+  }
+  template<typename T>
+  static inline T *GetDirect(T *pmem_offset) {
+    return reinterpret_cast<T *>(
+        reinterpret_cast<uint64_t>(pmem_offset) + reinterpret_cast<char *>(allocator_->GetPool()));
+  }
+};
+
+#endif
 struct ReturnCode {
   enum RC {
     RetInvalid,
@@ -308,7 +322,12 @@ class InternalNode : public BaseNode {
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
     GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
+
+#ifdef PMEM
+    return Allocator::GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
+#else
     return reinterpret_cast<BaseNode *> (child_addr);
+#endif
   }
   void Dump(pmwcas::EpochManager *epoch, bool dump_children = false);
 };
@@ -488,14 +507,42 @@ class BzTree {
   BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool)
       : parameters(param), root(nullptr), pmwcas_pool(pool) {
     root = LeafNode::New(param.leaf_node_size);
+    pmwcas_pool = pool;
   }
 
-  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, LeafNode *root)
-      : parameters(param), root(root), pmwcas_pool(pool) {}
+#ifdef PMEM
+  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool,
+         PMEMobjpool *pmdk_pool)
+      : parameters(param), root(nullptr), pmwcas_pool(pool) {
+    root = LeafNode::New(param.leaf_node_size);
+    pmwcas_pool = pool;
+    this->pmdk_pool = pmdk_pool;
+    root = reinterpret_cast<LeafNode *>(
+        reinterpret_cast<char *>(root) - reinterpret_cast<char *>(pmdk_pool));
+    pmwcas_pool = reinterpret_cast<pmwcas::DescriptorPool *>(
+        reinterpret_cast<char *>(pmwcas_pool) - reinterpret_cast<char *>(pmdk_pool));
+  }
+
+  template<typename T>
+  inline T *GetDirect(T *pmem_offset) {
+    return GetDirect<T>(pmem_offset, pmdk_pool);
+  }
+
+  template<typename T>
+  static inline T *GetDirect(T *pmem_offset, PMEMobjpool *pmdk_pool) {
+    return reinterpret_cast<T *>(
+        reinterpret_cast<uint64_t>(pmem_offset) + reinterpret_cast<char *>(pmdk_pool));
+  }
+#endif
 
   void Dump();
-  inline pmwcas::DescriptorPool *GetPool() const {
+
+  inline pmwcas::DescriptorPool *GetPMWCASPool() {
+#ifdef PMEM
+    return Allocator::GetDirect<pmwcas::DescriptorPool>(pmwcas_pool);
+#else
     return pmwcas_pool;
+#endif
   }
 
   static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {
@@ -525,10 +572,15 @@ class BzTree {
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
+
   BaseNode *GetRootNodeSafe() {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        &root)->GetValue(pmwcas_pool->GetEpoch());
-    return reinterpret_cast< BaseNode *>(root_node);
+        &root)->GetValue(GetPMWCASPool()->GetEpoch());
+#ifdef PMEM
+    return GetDirect<BaseNode>(reinterpret_cast<BaseNode *>(root_node));
+#else
+    return reinterpret_cast<BaseNode *>(root_node);
+#endif
   }
 };
 
@@ -545,7 +597,7 @@ class Iterator {
     this->end_size = end_size;
     this->tree = tree;
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+    node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
     item_it = item_vec.begin();
   }
 
@@ -562,7 +614,7 @@ class Iterator {
                                         false);
       if (node != nullptr) {
         item_vec.clear();
-        node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+        node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
         item_it = item_vec.begin();
         return GetNext();
       } else {

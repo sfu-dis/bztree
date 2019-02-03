@@ -996,11 +996,11 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
   assert(node);
   while (!node->IsLeaf()) {
     parent = reinterpret_cast<InternalNode *>(node);
-    meta_index = parent->GetChildIndex(key, key_size, pmwcas_pool, le_child);
-    node = parent->GetChildByMetaIndex(meta_index, pmwcas_pool->GetEpoch());
+    meta_index = parent->GetChildIndex(key, key_size, GetPMWCASPool(), le_child);
+    node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
     assert(node);
     if (stack != nullptr) {
-      stack->Push(parent, parent->GetMetadata(meta_index, pmwcas_pool->GetEpoch()));
+      stack->Push(parent, parent->GetMetadata(meta_index, GetPMWCASPool()->GetEpoch()));
     }
   }
   return reinterpret_cast<LeafNode *>(node);
@@ -1010,13 +1010,13 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
   thread_local Stack stack;
   stack.tree = this;
   ReturnCode rc;
-  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+  pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
   do {
     stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+    LeafNode *node = TraverseToLeaf(&stack, key, key_size);
 
     // Try to insert to the leaf node
-    rc = node->Insert(key, key_size, payload, pmwcas_pool, parameters.split_threshold);
+    rc = node->Insert(key, key_size, payload, GetPMWCASPool(), parameters.split_threshold);
     if (!rc.IsNotEnoughSpace()) {
       continue;
     }
@@ -1113,14 +1113,14 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
   thread_local Stack stack;
   stack.tree = this;
   stack.Clear();
-  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+  pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
 
-  LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+  LeafNode *node = TraverseToLeaf(&stack, key, key_size);
   if (node == nullptr) {
     return ReturnCode::NotFound();
   }
   uint64_t tmp_payload;
-  auto rc = node->Read(key, key_size, &tmp_payload, pmwcas_pool);
+  auto rc = node->Read(key, key_size, &tmp_payload, GetPMWCASPool());
   if (rc.IsOk()) {
     *payload = tmp_payload;
   }

@@ -34,28 +34,28 @@ struct RootObj {
 
 TEST_F(BzTreePMEMTest, InsertTest) {
   auto pmdk_allocator = reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
-  auto root_obj = reinterpret_cast<RootObj *>(pmdk_allocator->GetRoot(sizeof(RootObj)));
-  root_obj->pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-      pmdk_allocator->Allocate(sizeof(pmwcas::DescriptorPool)));
-  root_obj->tree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->Allocate(sizeof(bztree::BzTree)));
+  bztree::Allocator::Init(pmdk_allocator);
 
-  new(root_obj->pool) pmwcas::DescriptorPool(2000, 1, nullptr, false);
+  auto bztree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
+  auto pool = reinterpret_cast<pmwcas::DescriptorPool *>(
+      pmdk_allocator->AllocateDirect(sizeof(pmwcas::DescriptorPool)));
+
+  new(pool) pmwcas::DescriptorPool(2000, 1, nullptr, false);
   bztree::BzTree::ParameterSet param;
-  new(root_obj->tree)bztree::BzTree(param, root_obj->pool);
-  pmdk_allocator->PersistPtr(root_obj->tree, sizeof(bztree::BzTree));
-  pmdk_allocator->PersistPtr(root_obj->pool, sizeof(pmwcas::DescriptorPool));
-  pmdk_allocator->PersistPtr(root_obj, sizeof(RootObj));
+  new(bztree)bztree::BzTree(param, pool, pmdk_allocator->GetPool());
+  pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
+  pmdk_allocator->PersistPtr(pool, sizeof(pmwcas::DescriptorPool));
 
-  tree = root_obj->tree;
+  tree = bztree;
 
   static const uint32_t kMaxKey = 50;
   for (uint32_t i = 1; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
-    auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);
+    auto rc = bztree->Insert(key.c_str(), key.length(), i + 2000);
     ASSERT_TRUE(rc.IsOk());
 
     uint64_t payload = 0;
-    rc = tree->Read(key.c_str(), key.length(), &payload);
+    rc = bztree->Read(key.c_str(), key.length(), &payload);
     ASSERT_TRUE(rc.IsOk());
     ASSERT_TRUE(payload == i + 2000);
   }
