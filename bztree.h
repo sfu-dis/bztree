@@ -21,10 +21,19 @@ struct Allocator {
   static void Init(pmwcas::PMDKAllocator *allocator) {
     allocator_ = allocator;
   }
+  static pmwcas::PMDKAllocator *Get() {
+    return allocator_;
+  }
   template<typename T>
   static inline T *GetDirect(T *pmem_offset) {
     return reinterpret_cast<T *>(
         reinterpret_cast<uint64_t>(pmem_offset) + reinterpret_cast<char *>(allocator_->GetPool()));
+  }
+
+  template<typename T>
+  static inline T *GetOffset(T *pmem_direct) {
+    return reinterpret_cast<T *>(
+        reinterpret_cast<char *>(pmem_direct) - reinterpret_cast<char *>(allocator_->GetPool()));
   }
 };
 #endif
@@ -508,11 +517,6 @@ class BzTree {
       : parameters(param), root(nullptr), pmwcas_pool(pool) {
     root = LeafNode::New(param.leaf_node_size);
     pmwcas_pool = pool;
-#ifdef PMEM
-    root = reinterpret_cast<LeafNode *>(
-        reinterpret_cast<char *>(root) -
-            reinterpret_cast<char *>(Allocator::allocator_->GetPool()));
-#endif
   }
 
   void Dump();

@@ -36,7 +36,7 @@ TEST_F(BzTreePMEMTest, InsertTest) {
       pmdk_allocator->Allocate(sizeof(pmwcas::DescriptorPool)));
 
   new(pool) pmwcas::DescriptorPool(2000, 1, nullptr, false);
-  bztree::BzTree::ParameterSet param;
+  bztree::BzTree::ParameterSet param(1024, 0, 1024);
   new(bztree)bztree::BzTree(param, pool);
   pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
   pmdk_allocator->PersistPtr(pool, sizeof(pmwcas::DescriptorPool));
@@ -78,6 +78,7 @@ TEST_F(BzTreePMEMTest, ReadTest) {
     ASSERT_TRUE(rc.IsOk());
     ASSERT_TRUE(payload == i + 2000);
   }
+  tree->Dump();
 }
 
 int main(int argc, char **argv) {

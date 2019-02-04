@@ -49,7 +49,11 @@ InternalNode *InternalNode::New(const char *key,
       pmwcas::Allocator::Get()->Allocate(alloc_size));
   memset(node, 0, alloc_size);
   new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
+#ifdef PMEM
+  return Allocator::GetOffset(node);
+#else
   return node;
+#endif
 }
 
 // Create an internal node with keys and pointers in the provided range from an
@@ -307,7 +311,11 @@ LeafNode *LeafNode::New(uint32_t node_size) {
       pmwcas::Allocator::Get()->Allocate(node_size));
   memset(node, 0, node_size);
   new(node) LeafNode(node_size);
+#ifdef PMEM
+  return Allocator::GetOffset(node);
+#else
   return node;
+#endif
 }
 
 void BaseNode::Dump(pmwcas::EpochManager *epoch) {
@@ -382,11 +390,15 @@ void InternalNode::Dump(pmwcas::EpochManager *epoch, bool dump_children) {
   if (dump_children) {
     for (uint32_t i = 0; i < header.sorted_count; ++i) {
       uint64_t node_addr = *GetPayloadPtr(record_metadata[i]);
+#ifdef  PMEM
+      BaseNode *node = Allocator::GetDirect(reinterpret_cast<BaseNode *>(node_addr));
+#else
       BaseNode *node = reinterpret_cast<BaseNode *>(node_addr);
+#endif
       if (node->IsLeaf()) {
-        (reinterpret_cast<LeafNode *>(node_addr))->Dump(epoch);
+        (reinterpret_cast<LeafNode *>(node))->Dump(epoch);
       } else {
-        (reinterpret_cast<InternalNode *>(node_addr))->Dump(epoch, true);
+        (reinterpret_cast<InternalNode *>(node))->Dump(epoch, true);
       }
     }
   }
@@ -827,13 +839,15 @@ void LeafNode::CopyFrom(LeafNode *node,
 
     // Setup new metadata
     record_metadata[nrecords].FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
-    assert(record_metadata[nrecords].GetTotalLength() < 100);
     ++nrecords;
   }
   // Finalize header stats
   header.status.SetBlockSize(this->header.size - offset);
   header.status.SetRecordCount(nrecords);
   header.sorted_count = nrecords;
+#ifdef PMEM
+  Allocator::Get()->PersistPtr(this, this->header.size);
+#endif
 }
 
 ReturnCode InternalNode::Update(RecordMetadata meta,
@@ -902,7 +916,6 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
   LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
-  // FIXME(tzwang): not PM-safe, might leak
   *left = LeafNode::New(this->header.size);
   *right = LeafNode::New(this->header.size);
 
@@ -923,8 +936,13 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
 
   // TODO(tzwang): also put the new insert here to save some cycles
   auto left_end_it = meta_vec.begin() + nleft;
+#ifdef PMEM
+  (Allocator::GetDirect(*left))->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
+  (Allocator::GetDirect(*right))->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
+#else
   (*left)->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
   (*right)->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
+#endif
 
   // Separator exists in the new left leaf node, i.e., when traversing the tree,
   // we go left if <=, and go right if >.
@@ -1202,11 +1220,12 @@ void BzTree::Dump() {
   std::cout << "-----------------------------" << std::endl;
   std::cout << "Dumping tree with root node: " << root << std::endl;
   // Traverse each level and dump each node
-  if (root->IsLeaf()) {
-    (reinterpret_cast<LeafNode *>(root))->Dump(pmwcas_pool->GetEpoch());
+  auto real_root = GetRootNodeSafe();
+  if (real_root->IsLeaf()) {
+    (reinterpret_cast<LeafNode *>(real_root)->Dump(GetPMWCASPool()->GetEpoch()));
   } else {
-    (reinterpret_cast<InternalNode *>(root))->Dump(
-        pmwcas_pool->GetEpoch(), true /* inlcude children */);
+    (reinterpret_cast<InternalNode *>(real_root))->Dump(
+        GetPMWCASPool()->GetEpoch(), true /* inlcude children */);
   }
 }
 
