@@ -27,8 +27,8 @@ struct Allocator {
         reinterpret_cast<uint64_t>(pmem_offset) + reinterpret_cast<char *>(allocator_->GetPool()));
   }
 };
-
 #endif
+
 struct ReturnCode {
   enum RC {
     RetInvalid,
@@ -508,41 +508,21 @@ class BzTree {
       : parameters(param), root(nullptr), pmwcas_pool(pool) {
     root = LeafNode::New(param.leaf_node_size);
     pmwcas_pool = pool;
-  }
-
 #ifdef PMEM
-  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool,
-         PMEMobjpool *pmdk_pool)
-      : parameters(param), root(nullptr), pmwcas_pool(pool) {
-    root = LeafNode::New(param.leaf_node_size);
-    pmwcas_pool = pool;
-    this->pmdk_pool = pmdk_pool;
     root = reinterpret_cast<LeafNode *>(
-        reinterpret_cast<char *>(root) - reinterpret_cast<char *>(pmdk_pool));
-    pmwcas_pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-        reinterpret_cast<char *>(pmwcas_pool) - reinterpret_cast<char *>(pmdk_pool));
-  }
-
-  template<typename T>
-  inline T *GetDirect(T *pmem_offset) {
-    return GetDirect<T>(pmem_offset, pmdk_pool);
-  }
-
-  template<typename T>
-  static inline T *GetDirect(T *pmem_offset, PMEMobjpool *pmdk_pool) {
-    return reinterpret_cast<T *>(
-        reinterpret_cast<uint64_t>(pmem_offset) + reinterpret_cast<char *>(pmdk_pool));
-  }
+        reinterpret_cast<char *>(root) -
+            reinterpret_cast<char *>(Allocator::allocator_->GetPool()));
 #endif
+  }
 
   void Dump();
 
   inline pmwcas::DescriptorPool *GetPMWCASPool() {
-#ifdef PMEM
-    return Allocator::GetDirect<pmwcas::DescriptorPool>(pmwcas_pool);
-#else
+//#ifdef PMEM
+//    return Allocator::GetDirect<pmwcas::DescriptorPool>(pmwcas_pool);
+//#else
     return pmwcas_pool;
-#endif
+//#endif
   }
 
   static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {
@@ -567,6 +547,10 @@ class BzTree {
   BaseNode *TraverseToNode(Stack *stack, const char *key,
                            uint16_t key_size, BaseNode *stop_at);
 
+  void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
+    this->pmwcas_pool = pool;
+  }
+
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
   ParameterSet parameters;
@@ -577,7 +561,7 @@ class BzTree {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
         &root)->GetValue(GetPMWCASPool()->GetEpoch());
 #ifdef PMEM
-    return GetDirect<BaseNode>(reinterpret_cast<BaseNode *>(root_node));
+    return Allocator::GetDirect<BaseNode>(reinterpret_cast<BaseNode *>(root_node));
 #else
     return reinterpret_cast<BaseNode *>(root_node);
 #endif

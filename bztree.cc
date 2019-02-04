@@ -12,6 +12,10 @@
 
 namespace bztree {
 
+#ifdef PMEM
+pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
+#endif
+
 // Create an internal node with a new key and associated child pointers inserted
 // based on an existing internal node
 InternalNode *InternalNode::New(InternalNode *src_node,
