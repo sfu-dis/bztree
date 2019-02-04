@@ -36,14 +36,14 @@ TEST_F(BzTreePMEMTest, InsertTest) {
       pmdk_allocator->Allocate(sizeof(pmwcas::DescriptorPool)));
 
   new(pool) pmwcas::DescriptorPool(2000, 1, nullptr, false);
-  bztree::BzTree::ParameterSet param(1024, 0, 1024);
+  bztree::BzTree::ParameterSet param(256, 0, 256);
   new(bztree)bztree::BzTree(param, pool);
   pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
   pmdk_allocator->PersistPtr(pool, sizeof(pmwcas::DescriptorPool));
 
   tree = bztree;
 
-  static const uint32_t kMaxKey = 50;
+  static const uint32_t kMaxKey = 200;
   for (uint32_t i = 1; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     auto rc = bztree->Insert(key.c_str(), key.length(), i + 2000);
@@ -70,7 +70,7 @@ TEST_F(BzTreePMEMTest, ReadTest) {
   tree = root_obj;
   tree->SetPMWCASPool(pool);
 
-  const uint32_t kMaxKey = 50;
+  const uint32_t kMaxKey = 200;
   for (uint32_t i = 1; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     uint64_t payload = 0;

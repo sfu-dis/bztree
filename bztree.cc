@@ -32,7 +32,11 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   memset(node, 0, alloc_size);
   new(node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                          key, key_size, left_child_addr, right_child_addr);
+#ifdef PMEM
+  return Allocator::GetOffset(node);
+#else
   return node;
+#endif
 }
 
 // Create an internal node with a single separator key and two pointers
@@ -89,7 +93,11 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   new(node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                          key, key_size, left_child_addr, right_child_addr,
                          left_most_child_addr);
+#ifdef PMEM
+  return Allocator::GetOffset(node);
+#else
   return node;
+#endif
 }
 
 InternalNode::InternalNode(uint32_t node_size,
@@ -995,16 +1003,16 @@ BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
   while (node != stop_at) {
     assert(!node->IsLeaf());
     parent = reinterpret_cast<InternalNode *>(node);
-    meta_index = parent->GetChildIndex(key, key_size, pmwcas_pool);
-    node = parent->GetChildByMetaIndex(meta_index, pmwcas_pool->GetEpoch());
+    meta_index = parent->GetChildIndex(key, key_size, GetPMWCASPool());
+    node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
     assert(node);
     if (stack != nullptr) {
-      stack->Push(parent, parent->GetMetadata(meta_index, pmwcas_pool->GetEpoch()));
+      stack->Push(parent, parent->GetMetadata(meta_index, GetPMWCASPool()->GetEpoch()));
     }
   }
   if (stack != nullptr) {
     stack->Push(reinterpret_cast<InternalNode *>(node),
-                node->GetMetadata(meta_index, pmwcas_pool->GetEpoch()));
+                node->GetMetadata(meta_index, GetPMWCASPool()->GetEpoch()));
   }
   return node;
 }
@@ -1052,7 +1060,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
 
     LeafNode *left = nullptr;
     LeafNode *right = nullptr;
-    if (!node->Freeze(pmwcas_pool)) {
+    if (!node->Freeze(GetPMWCASPool())) {
       continue;
     }
     // Note that when we split internal nodes (if needed), stack will get
@@ -1073,7 +1081,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     // the new parent node returned by leaf.PrepareForSplit to the grandparent.
     InternalNode *parent = node->PrepareForSplit(stack,
                                                  parameters.split_threshold,
-                                                 pmwcas_pool, &left, &right);
+                                                 GetPMWCASPool(), &left, &right);
     assert(parent);
 
     do {
@@ -1093,7 +1101,11 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         assert(old_parent);
         // There is a grand parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent.
-        auto result = grand_parent->Update(top->meta, old_parent, parent, pmwcas_pool);
+#ifdef PMEM
+        auto result = grand_parent->Update(top->meta, Allocator::GetOffset(old_parent), parent, GetPMWCASPool());
+#else
+        auto result = grand_parent->Update(top->meta, old_parent, parent, GetPMWCASPool());
+#endif
         if (result.IsOk()) {
           break;
         }
