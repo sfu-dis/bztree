@@ -16,6 +16,12 @@ include_directories(
 # Define PMEM for PMwCAS
 add_definitions(-DPMEM)
 
+# Pick a different def for pmdk
+option(DEFINE_PMDK "option to enable pmem" ON)
+if(DEFINE_PMDK)
+  add_definitions(-DPMDK)
+endif(DEFINE_PMDK)
+
 set(PMWCAS_LIB_PATH "" CACHE STRING "PMwCAS shared library path")
 link_directories(${PMWCAS_LIB_PATH})
 

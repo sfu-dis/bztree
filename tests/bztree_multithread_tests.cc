@@ -207,8 +207,8 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create,
-                      pmwcas::PMDKAllocator::Destroy,
+  pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
+                      pmwcas::DefaultAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
   return RUN_ALL_TESTS();

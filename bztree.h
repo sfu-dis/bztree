@@ -15,7 +15,7 @@
 
 namespace bztree {
 
-#ifdef PMEM
+#ifdef PMDK
 struct Allocator {
   static pmwcas::PMDKAllocator *allocator_;
   static void Init(pmwcas::PMDKAllocator *allocator) {
@@ -332,7 +332,7 @@ class InternalNode : public BaseNode {
     uint64_t child_addr;
     GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
 
-#ifdef PMEM
+#ifdef PMDK
     return Allocator::GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
 #else
     return reinterpret_cast<BaseNode *> (child_addr);
@@ -522,7 +522,7 @@ class BzTree {
   void Dump();
 
   inline pmwcas::DescriptorPool *GetPMWCASPool() {
-//#ifdef PMEM
+//#ifdef PMDK
 //    return Allocator::GetDirect<pmwcas::DescriptorPool>(pmwcas_pool);
 //#else
     return pmwcas_pool;
@@ -564,8 +564,8 @@ class BzTree {
   BaseNode *GetRootNodeSafe() {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
         &root)->GetValue(GetPMWCASPool()->GetEpoch());
-#ifdef PMEM
-    return Allocator::GetDirect<BaseNode>(reinterpret_cast<BaseNode *>(root_node));
+#ifdef PMDK
+    return Allocator::GetDirect(reinterpret_cast<BaseNode *>(root_node));
 #else
     return reinterpret_cast<BaseNode *>(root_node);
 #endif

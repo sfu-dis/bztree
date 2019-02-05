@@ -32,7 +32,7 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   memset(node, 0, alloc_size);
   new(node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                          key, key_size, left_child_addr, right_child_addr);
-#ifdef PMEM
+#ifdef PMDK
   return Allocator::GetOffset(node);
 #else
   return node;
@@ -53,7 +53,7 @@ InternalNode *InternalNode::New(const char *key,
       pmwcas::Allocator::Get()->Allocate(alloc_size));
   memset(node, 0, alloc_size);
   new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
-#ifdef PMEM
+#ifdef PMDK
   return Allocator::GetOffset(node);
 #else
   return node;
@@ -93,7 +93,7 @@ InternalNode *InternalNode::New(InternalNode *src_node,
   new(node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                          key, key_size, left_child_addr, right_child_addr,
                          left_most_child_addr);
-#ifdef PMEM
+#ifdef PMDK
   return Allocator::GetOffset(node);
 #else
   return node;
@@ -319,7 +319,7 @@ LeafNode *LeafNode::New(uint32_t node_size) {
       pmwcas::Allocator::Get()->Allocate(node_size));
   memset(node, 0, node_size);
   new(node) LeafNode(node_size);
-#ifdef PMEM
+#ifdef PMDK
   return Allocator::GetOffset(node);
 #else
   return node;
@@ -398,7 +398,7 @@ void InternalNode::Dump(pmwcas::EpochManager *epoch, bool dump_children) {
   if (dump_children) {
     for (uint32_t i = 0; i < header.sorted_count; ++i) {
       uint64_t node_addr = *GetPayloadPtr(record_metadata[i]);
-#ifdef  PMEM
+#ifdef  PMDK
       BaseNode *node = Allocator::GetDirect(reinterpret_cast<BaseNode *>(node_addr));
 #else
       BaseNode *node = reinterpret_cast<BaseNode *>(node_addr);
@@ -471,7 +471,10 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   memcpy(ptr, key, key_size);
   memcpy(ptr + padded_key_size, &payload, sizeof(payload));
   // Flush the word
+
+#ifdef PMDK
   pmwcas::NVRAM::Flush(total_size, ptr);
+#endif
 
   retry_phase2:
   // Re-check if the node is frozen
@@ -788,7 +791,9 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
   LeafNode *new_leaf = LeafNode::New(this->header.size);
   new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end(), pmwcas_pool->GetEpoch());
 
+#ifdef PMDK
   pmwcas::NVRAM::Flush(this->header.size, new_leaf);
+#endif
 
   return new_leaf;
 }
@@ -853,7 +858,7 @@ void LeafNode::CopyFrom(LeafNode *node,
   header.status.SetBlockSize(this->header.size - offset);
   header.status.SetRecordCount(nrecords);
   header.sorted_count = nrecords;
-#ifdef PMEM
+#ifdef PMDK
   Allocator::Get()->PersistPtr(this, this->header.size);
 #endif
 }
@@ -944,7 +949,7 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
 
   // TODO(tzwang): also put the new insert here to save some cycles
   auto left_end_it = meta_vec.begin() + nleft;
-#ifdef PMEM
+#ifdef PMDK
   (Allocator::GetDirect(*left))->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
   (Allocator::GetDirect(*right))->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
 #else
@@ -1101,7 +1106,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         assert(old_parent);
         // There is a grand parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent.
-#ifdef PMEM
+#ifdef PMDK
         auto result = grand_parent->Update(top->meta, Allocator::GetOffset(old_parent), parent, GetPMWCASPool());
 #else
         auto result = grand_parent->Update(top->meta, old_parent, parent, GetPMWCASPool());
@@ -1165,14 +1170,14 @@ ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) 
   thread_local Stack stack;
   stack.tree = this;
   ReturnCode rc;
-  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+  pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
   do {
     stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+    LeafNode *node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
-    rc = node->Update(key, key_size, payload, pmwcas_pool);
+    rc = node->Update(key, key_size, payload, GetPMWCASPool());
   } while (rc.IsPMWCASFailure());
   return rc;
 }
@@ -1181,16 +1186,16 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
   thread_local Stack stack;
   stack.tree = this;
   stack.Clear();
-  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+  pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
 
-  LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+  LeafNode *node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
   // FIXME(tzwang): be more clever here to get the node this record would be
   // landing in?
   if (node == nullptr) {
     return Insert(key, key_size, payload);
   }
   uint64_t tmp_payload;
-  auto rc = node->Read(key, key_size, &tmp_payload, pmwcas_pool);
+  auto rc = node->Read(key, key_size, &tmp_payload, GetPMWCASPool());
   if (rc.IsNotFound()) {
     return Insert(key, key_size, payload);
   } else if (rc.IsOk()) {
