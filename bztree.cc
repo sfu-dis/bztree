@@ -12,7 +12,7 @@
 
 namespace bztree {
 
-#ifdef PMEM
+#ifdef PMDK
 pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
 #endif
 
