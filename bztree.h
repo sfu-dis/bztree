@@ -297,14 +297,17 @@ class Stack;
 // Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
  public:
-  static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
-  static InternalNode *New(const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr);
-  InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
-                    const char *key, uint32_t key_size,
-                    uint64_t left_child_addr, uint64_t right_child_addr,
-                    uint64_t left_most_child_addr);
+  static void New(InternalNode *src_node, const char *key, uint32_t key_size,
+                  uint64_t left_child_addr, uint64_t right_child_addr,
+                  InternalNode **mem);
+  static void New(const char *key, uint32_t key_size,
+                  uint64_t left_child_addr, uint64_t right_child_addr,
+                  InternalNode **mem);
+  static void New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
+                  const char *key, uint32_t key_size,
+                  uint64_t left_child_addr, uint64_t right_child_addr,
+                  InternalNode **mem,
+                  uint64_t left_most_child_addr);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
@@ -315,10 +318,11 @@ class InternalNode : public BaseNode {
                uint64_t left_most_child_addr = 0);
   ~InternalNode() = default;
 
-  InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
-                                const char *key, uint32_t key_size,
-                                uint64_t left_child_addr, uint64_t right_child_addr,
-                                pmwcas::DescriptorPool *pool);
+  void PrepareForSplit(Stack &stack, uint32_t split_threshold,
+                       const char *key, uint32_t key_size,
+                       uint64_t left_child_addr, uint64_t right_child_addr,
+                       InternalNode **new_node,
+                       pmwcas::DescriptorPool *pool);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
     char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
@@ -373,7 +377,7 @@ struct Record;
 
 class LeafNode : public BaseNode {
  public:
-  static LeafNode *New(uint32_t node_size);
+  static void New(LeafNode **mem, uint32_t node_size);
 
   static inline uint32_t GetUsedSpace(NodeHeader::StatusWord status) {
     return sizeof(LeafNode) + status.GetBlockSize() +
@@ -385,9 +389,10 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold);
-  InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
-                                pmwcas::DescriptorPool *pmwcas_pool,
-                                LeafNode **left, LeafNode **right);
+  void PrepareForSplit(Stack &stack, uint32_t split_threshold,
+                       pmwcas::DescriptorPool *pmwcas_pool,
+                       LeafNode **left, LeafNode **right,
+                       InternalNode **new_parent);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
@@ -515,18 +520,24 @@ class BzTree {
 
   BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool)
       : parameters(param), root(nullptr), pmwcas_pool(pool) {
-    root = LeafNode::New(param.leaf_node_size);
-    pmwcas_pool = pool;
+    pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
+    auto *pd = pool->AllocateDescriptor();
+    auto index = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&root),
+                                        reinterpret_cast<uint64_t>(nullptr),
+                                        pmwcas::Descriptor::kRecycleOnRecovery);
+    auto root_ptr = pd->GetNewValuePtr(index);
+    LeafNode::New(reinterpret_cast<LeafNode **>(root_ptr), param.leaf_node_size);
+    pd->MwCAS();
   }
 
   void Dump();
 
   inline pmwcas::DescriptorPool *GetPMWCASPool() {
-//#ifdef PMDK
+// #ifdef PMDK
 //    return Allocator::GetDirect<pmwcas::DescriptorPool>(pmwcas_pool);
-//#else
+// #else
     return pmwcas_pool;
-//#endif
+// #endif
   }
 
   static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {

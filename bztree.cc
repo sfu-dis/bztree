@@ -18,55 +18,62 @@ pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
 
 // Create an internal node with a new key and associated child pointers inserted
 // based on an existing internal node
-InternalNode *InternalNode::New(InternalNode *src_node,
-                                const char *key,
-                                uint32_t key_size,
-                                uint64_t left_child_addr,
-                                uint64_t right_child_addr) {
+void InternalNode::New(InternalNode *src_node,
+                       const char *key,
+                       uint32_t key_size,
+                       uint64_t left_child_addr,
+                       uint64_t right_child_addr,
+                       InternalNode **mem) {
   //  // FIXME(tzwang): use a better allocator
   uint32_t alloc_size = src_node->GetHeader()->size +
       RecordMetadata::PadKeyLength(key_size) +
       sizeof(right_child_addr) + sizeof(RecordMetadata);
-  auto *node = reinterpret_cast<InternalNode *>(
-      pmwcas::Allocator::Get()->Allocate(alloc_size));
-  memset(node, 0, alloc_size);
-  new(node) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
+
+#ifdef  PMDK
+  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
+  new(*mem) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                          key, key_size, left_child_addr, right_child_addr);
-#ifdef PMDK
-  return Allocator::GetOffset(node);
+  *mem = Allocator::GetOffset(*mem);
 #else
-  return node;
+  auto *mem = reinterpret_cast<InternalNode *>(
+     pmwcas::Allocator::Get()->Allocate(alloc_size));
+  memset(*mem, 0, alloc_size);
+  new(*mem) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
+                        key, key_size, left_child_addr, right_child_addr);
 #endif
 }
 
 // Create an internal node with a single separator key and two pointers
-InternalNode *InternalNode::New(const char *key,
-                                uint32_t key_size,
-                                uint64_t left_child_addr,
-                                uint64_t right_child_addr) {
+void InternalNode::New(const char *key,
+                       uint32_t key_size,
+                       uint64_t left_child_addr,
+                       uint64_t right_child_addr,
+                       InternalNode **mem) {
   uint32_t alloc_size = sizeof(InternalNode) +
       RecordMetadata::PadKeyLength(key_size) +
       sizeof(left_child_addr) +
       sizeof(right_child_addr) +
       sizeof(RecordMetadata) * 2;
-  auto *node = reinterpret_cast<InternalNode *>(
-      pmwcas::Allocator::Get()->Allocate(alloc_size));
-  memset(node, 0, alloc_size);
-  new(node) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
 #ifdef PMDK
-  return Allocator::GetOffset(node);
+  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
+  new(*mem) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
+  *mem = Allocator::GetOffset(*mem);
 #else
-  return node;
+  *mem = reinterpret_cast<InternalNode *>(
+      pmwcas::Allocator::Get()->Allocate(alloc_size));
+  memset(*mem, 0, alloc_size);
+  new(*mem) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
 #endif
 }
 
 // Create an internal node with keys and pointers in the provided range from an
 // existing source node
-InternalNode *InternalNode::New(InternalNode *src_node,
-                                uint32_t begin_meta_idx, uint32_t nr_records,
-                                const char *key, uint32_t key_size,
-                                uint64_t left_child_addr, uint64_t right_child_addr,
-                                uint64_t left_most_child_addr) {
+void InternalNode::New(InternalNode *src_node,
+                       uint32_t begin_meta_idx, uint32_t nr_records,
+                       const char *key, uint32_t key_size,
+                       uint64_t left_child_addr, uint64_t right_child_addr,
+                       InternalNode **new_node,
+                       uint64_t left_most_child_addr) {
   // Figure out how large the new node will be
   uint32_t alloc_size = sizeof(InternalNode);
   if (begin_meta_idx > 0) {
@@ -87,16 +94,19 @@ InternalNode *InternalNode::New(InternalNode *src_node,
         (RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t) + sizeof(RecordMetadata));
   }
 
-  auto *node = reinterpret_cast<InternalNode *>(
+#ifdef PMDK
+  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(new_node), alloc_size);
+  new(*new_node)InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+                             key, key_size, left_child_addr, right_child_addr,
+                             left_most_child_addr);
+  *new_node = Allocator::GetOffset(*new_node);
+#else
+  *new_node = reinterpret_cast<InternalNode *>(
       pmwcas::Allocator::Get()->Allocate(alloc_size));
-  memset(node, 0, alloc_size);
-  new(node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+  memset(*new_node, 0, alloc_size);
+  new(*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                          key, key_size, left_child_addr, right_child_addr,
                          left_most_child_addr);
-#ifdef PMDK
-  return Allocator::GetOffset(node);
-#else
-  return node;
 #endif
 }
 
@@ -233,20 +243,22 @@ InternalNode::InternalNode(uint32_t node_size,
 
 // insert record to this internal node
 // The node is freezed at this time.
-InternalNode *InternalNode::PrepareForSplit(Stack &stack,
-                                            uint32_t split_threshold,
-                                            const char *key,
-                                            uint32_t key_size,
-                                            uint64_t left_child_addr,
-                                            uint64_t right_child_addr,
-                                            pmwcas::DescriptorPool *pool) {
+void InternalNode::PrepareForSplit(Stack &stack,
+                                   uint32_t split_threshold,
+                                   const char *key,
+                                   uint32_t key_size,
+                                   uint64_t left_child_addr,
+                                   uint64_t right_child_addr,
+                                   InternalNode **new_node,
+                                   pmwcas::DescriptorPool *pool) {
   uint32_t data_size = header.size + key_size +
       sizeof(right_child_addr) + sizeof(RecordMetadata);
   uint32_t new_node_size = sizeof(InternalNode) + data_size;
   if (new_node_size < split_threshold) {
     // good boy
-    return InternalNode::New(this, key, key_size, left_child_addr,
-                             right_child_addr);
+    InternalNode::New(this, key, key_size, left_child_addr,
+                      right_child_addr, new_node);
+    return;
   }
 
   // After adding a key and pointers the new node would be too large. This
@@ -257,6 +269,16 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
 
   InternalNode *left = nullptr;
   InternalNode *right = nullptr;
+  auto *pd = pool->AllocateDescriptor();
+  auto index_l = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
+                                        reinterpret_cast<uint64_t>(nullptr),
+                                        pmwcas::Descriptor::kRecycleOnRecovery);
+  auto ptr_l = pd->GetNewValuePtr(index_l);
+
+  auto index_r = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
+                                        reinterpret_cast<uint64_t>(nullptr),
+                                        pmwcas::Descriptor::kRecycleOnRecovery);
+  auto ptr_r = pd->GetNewValuePtr(index_r);
 
   // Figure out where does the new key will go
   auto separator_meta = record_metadata[n_left];
@@ -274,18 +296,21 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
   LOG_IF(FATAL, cmp == 0);
   if (cmp < 0) {
     // Should go to left
-    left = InternalNode::New(this, 0, n_left, key, key_size,
-                             left_child_addr, right_child_addr, 0);
-    right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
-                              nullptr, 0, 0, 0, separator_payload);
+    InternalNode::New(this, 0, n_left, key, key_size,
+                      left_child_addr, right_child_addr,
+                      reinterpret_cast<InternalNode **>(ptr_l), 0);
+    InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
+                      nullptr, 0, 0, 0,
+                      reinterpret_cast<InternalNode **>(ptr_r), separator_payload);
   } else {
-    left = InternalNode::New(this, 0, n_left, nullptr, 0, 0, 0, 0);
-    right = InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
-                              key, key_size, left_child_addr, right_child_addr,
-                              separator_payload);
+    InternalNode::New(this, 0, n_left, nullptr, 0, 0, 0,
+                      reinterpret_cast<InternalNode **>(ptr_l), 0);
+    InternalNode::New(this, n_left + 1, header.sorted_count - n_left - 1,
+                      key, key_size, left_child_addr, right_child_addr,
+                      reinterpret_cast<InternalNode **>(ptr_r), separator_payload);
   }
-  assert(left);
-  assert(right);
+  assert(*ptr_l);
+  assert(*ptr_r);
 
   // Pop here as if this were a leaf node so that when we get back to the
   // original caller, we get stack top as the "parent"
@@ -296,14 +321,18 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
                          stack.Top()->node : nullptr;
   if (parent == nullptr) {
     // Good!
-    return InternalNode::New(separator_key, separator_key_size,
-                             (uint64_t) left, (uint64_t) right);
+    InternalNode::New(separator_key, separator_key_size,
+                      (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node);
+    pd->Abort();
+    return;
   }
   while (true) {
     if (parent->Freeze(pool)) {
-      return parent->PrepareForSplit(stack, split_threshold,
-                                     separator_key, separator_key_size,
-                                     (uint64_t) left, (uint64_t) right, pool);
+      parent->PrepareForSplit(stack, split_threshold,
+                              separator_key, separator_key_size,
+                              (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node, pool);
+      pd->Abort();
+      return;
     } else {
       stack.Clear();
       stack.tree->TraverseToNode(&stack, separator_key, separator_key_size, this);
@@ -314,15 +343,16 @@ InternalNode *InternalNode::PrepareForSplit(Stack &stack,
   }
 }
 
-LeafNode *LeafNode::New(uint32_t node_size) {
-  auto *node = reinterpret_cast<LeafNode *>(
-      pmwcas::Allocator::Get()->Allocate(node_size));
-  memset(node, 0, node_size);
-  new(node) LeafNode(node_size);
+void LeafNode::New(LeafNode **mem, uint32_t node_size) {
 #ifdef PMDK
-  return Allocator::GetOffset(node);
+  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), node_size);
+  new(*mem)LeafNode(node_size);
+  *mem = Allocator::GetOffset(*mem);
 #else
-  return node;
+  *mem = reinterpret_cast<LeafNode *>(
+        pmwcas::Allocator::Get()->Allocate(node_size));
+  memset(*mem, 0, node_size);
+  new(*mem) LeafNode(node_size);
 #endif
 }
 
@@ -788,7 +818,8 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
   SortMetadataByKey(meta_vec, true, pmwcas_pool->GetEpoch());
 
   // Allocate and populate a new node
-  LeafNode *new_leaf = LeafNode::New(this->header.size);
+  LeafNode *new_leaf = nullptr;
+  LeafNode::New(&new_leaf, this->header.size);
   new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end(), pmwcas_pool->GetEpoch());
 
 #ifdef PMDK
@@ -922,15 +953,16 @@ uint32_t InternalNode::GetChildIndex(const char *key,
   }
 }
 
-InternalNode *LeafNode::PrepareForSplit(Stack &stack,
-                                        uint32_t split_threshold,
-                                        pmwcas::DescriptorPool *pmwcas_pool,
-                                        LeafNode **left, LeafNode **right) {
+void LeafNode::PrepareForSplit(Stack &stack,
+                               uint32_t split_threshold,
+                               pmwcas::DescriptorPool *pmwcas_pool,
+                               LeafNode **left, LeafNode **right,
+                               InternalNode **new_parent) {
   LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
-  *left = LeafNode::New(this->header.size);
-  *right = LeafNode::New(this->header.size);
+  LeafNode::New(left, this->header.size);
+  LeafNode::New(right, this->header.size);
 
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
@@ -950,8 +982,10 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
   // TODO(tzwang): also put the new insert here to save some cycles
   auto left_end_it = meta_vec.begin() + nleft;
 #ifdef PMDK
-  (Allocator::GetDirect(*left))->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
-  (Allocator::GetDirect(*right))->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
+  (Allocator::GetDirect(*left))->CopyFrom(this, meta_vec.begin(),
+                                          left_end_it, pmwcas_pool->GetEpoch());
+  (Allocator::GetDirect(*right))->CopyFrom(this, left_end_it,
+                                           meta_vec.end(), pmwcas_pool->GetEpoch());
 #else
   (*left)->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
   (*right)->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
@@ -970,9 +1004,11 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
                          stack.Top()->node : nullptr;
   if (parent == nullptr) {
     // Good boy!
-    return InternalNode::New(key, separator_meta.GetKeyLength(),
-                             reinterpret_cast<uint64_t>(*left),
-                             reinterpret_cast<uint64_t>(*right));
+    InternalNode::New(key, separator_meta.GetKeyLength(),
+                      reinterpret_cast<uint64_t>(*left),
+                      reinterpret_cast<uint64_t>(*right),
+                      new_parent);
+    return;
   }
 
   while (true) {
@@ -980,11 +1016,13 @@ InternalNode *LeafNode::PrepareForSplit(Stack &stack,
     // parent node as well, and if so, return a new (possibly upper-level) parent
     // node that needs to be installed to its parent
     if (parent->Freeze(pmwcas_pool)) {
-      return parent->PrepareForSplit(stack, split_threshold, key,
-                                     separator_meta.GetKeyLength(),
-                                     reinterpret_cast<uint64_t>(*left),
-                                     reinterpret_cast<uint64_t>(*right),
-                                     pmwcas_pool);
+      parent->PrepareForSplit(stack, split_threshold, key,
+                              separator_meta.GetKeyLength(),
+                              reinterpret_cast<uint64_t>(*left),
+                              reinterpret_cast<uint64_t>(*right),
+                              new_parent,
+                              pmwcas_pool);
+      return;
     } else {
       // for whatever reason cannot freeze the node
       // re-traverse the tree to find the new node.
@@ -1062,12 +1100,28 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     //    root
     // 3. We have a grandparent - update the child pointer in the grandparent
     //    to point to the new [parent] (might further cause splits up the tree)
-
-    LeafNode *left = nullptr;
-    LeafNode *right = nullptr;
     if (!node->Freeze(GetPMWCASPool())) {
       continue;
     }
+
+    LeafNode *left = nullptr;
+    LeafNode *right = nullptr;
+    InternalNode *parent = nullptr;
+    auto *pd = GetPMWCASPool()->AllocateDescriptor();
+    // TODO(hao): should implement a cascading memory recycle callback
+    auto index_l = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
+                                          reinterpret_cast<uint64_t>(nullptr),
+                                          pmwcas::Descriptor::kRecycleOnRecovery);
+    auto ptr_l = pd->GetNewValuePtr(index_l);
+    auto index_r = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
+                                          reinterpret_cast<uint64_t>(nullptr),
+                                          pmwcas::Descriptor::kRecycleOnRecovery);
+    auto ptr_r = pd->GetNewValuePtr(index_r);
+
+    auto index_parent = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&parent),
+                                               reinterpret_cast<uint64_t>(nullptr),
+                                               pmwcas::Descriptor::kRecycleOnRecovery);
+    auto ptr_parent = pd->GetNewValuePtr(index_parent);
     // Note that when we split internal nodes (if needed), stack will get
     // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
     // So we save the root node here in case we need to change root later.
@@ -1084,10 +1138,14 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     // on its top the "parent" node and the "grandparent" node (if any) that
     // points to the parent node. As a result, we directly install a pointer to
     // the new parent node returned by leaf.PrepareForSplit to the grandparent.
-    InternalNode *parent = node->PrepareForSplit(stack,
-                                                 parameters.split_threshold,
-                                                 GetPMWCASPool(), &left, &right);
-    assert(parent);
+    node->PrepareForSplit(stack,
+                          parameters.split_threshold,
+                          GetPMWCASPool(),
+                          reinterpret_cast<LeafNode **>(ptr_l),
+                          reinterpret_cast<LeafNode **>(ptr_r),
+                          reinterpret_cast<InternalNode **>(ptr_parent));
+
+    assert(*ptr_parent);
 
     do {
       auto *top = stack.Pop();
@@ -1107,11 +1165,15 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         // There is a grand parent. We need to swap out the pointer to the old
         // parent and install the pointer to the new parent.
 #ifdef PMDK
-        auto result = grand_parent->Update(top->meta, Allocator::GetOffset(old_parent), parent, GetPMWCASPool());
+        auto result = grand_parent->Update(
+            top->meta, Allocator::GetOffset(old_parent),
+            reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
 #else
-        auto result = grand_parent->Update(top->meta, old_parent, parent, GetPMWCASPool());
+        auto result = grand_parent->Update(top->meta, old_parent,
+            reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
 #endif
         if (result.IsOk()) {
+          pd->Abort();
           break;
         }
         stack.Clear();
@@ -1124,8 +1186,10 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         // once it's freezed, other thread cannot install new root.
 //        assert(old_parent == nullptr || old_parent == stack.tree->root);
         auto root_now = stack.tree->root;
-        auto result = ChangeRoot(reinterpret_cast<uint64_t>(root_now), parent);
+        auto result = ChangeRoot(reinterpret_cast<uint64_t>(root_now),
+                                 reinterpret_cast<InternalNode *>(*ptr_parent));
         if (result) {
+          pd->Abort();
           break;
         }
         LOG(INFO) << "Root not installed";
