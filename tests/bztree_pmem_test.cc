@@ -113,8 +113,8 @@ GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
                       pmwcas::PMDKAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
-  uint32_t thread_count = 4;
-  uint32_t item_per_thread = 2000;
+  uint32_t thread_count = 20;
+  uint32_t item_per_thread = 1000;
   auto pmdk_allocator = reinterpret_cast<pmwcas::PMDKAllocator *>(
       pmwcas::Allocator::Get());
   bztree::Allocator::Init(pmdk_allocator);
@@ -140,8 +140,8 @@ GTEST_TEST(BztreePMEMTest, MultiThreadReadback) {
                       pmwcas::PMDKAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
-  uint32_t thread_count = 4;
-  uint32_t item_per_thread = 2000;
+  uint32_t thread_count = 20;
+  uint32_t item_per_thread = 1000;
   auto pmdk_allocator = reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
   bztree::Allocator::Init(pmdk_allocator);
 

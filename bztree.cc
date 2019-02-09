@@ -33,6 +33,7 @@ void InternalNode::New(InternalNode *src_node,
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
   new(*mem) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                          key, key_size, left_child_addr, right_child_addr);
+  pmwcas::NVRAM::Flush(alloc_size, *mem);
   *mem = Allocator::GetOffset(*mem);
 #else
   auto *mem = reinterpret_cast<InternalNode *>(
@@ -57,6 +58,7 @@ void InternalNode::New(const char *key,
 #ifdef PMDK
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
   new(*mem) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
+  pmwcas::NVRAM::Flush(alloc_size, *mem);
   *mem = Allocator::GetOffset(*mem);
 #else
   *mem = reinterpret_cast<InternalNode *>(
@@ -99,6 +101,7 @@ void InternalNode::New(InternalNode *src_node,
   new(*new_node)InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                              key, key_size, left_child_addr, right_child_addr,
                              left_most_child_addr);
+  pmwcas::NVRAM::Flush(alloc_size, new_node);
   *new_node = Allocator::GetOffset(*new_node);
 #else
   *new_node = reinterpret_cast<InternalNode *>(
@@ -347,6 +350,7 @@ void LeafNode::New(LeafNode **mem, uint32_t node_size) {
 #ifdef PMDK
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), node_size);
   new(*mem)LeafNode(node_size);
+  pmwcas::NVRAM::Flush(node_size, *mem);
   *mem = Allocator::GetOffset(*mem);
 #else
   *mem = reinterpret_cast<LeafNode *>(
