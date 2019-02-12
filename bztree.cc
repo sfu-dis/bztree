@@ -326,7 +326,7 @@ void InternalNode::PrepareForSplit(Stack &stack,
     // Good!
     InternalNode::New(separator_key, separator_key_size,
                       (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node);
-    pd->Abort();
+    pd->Finish();
     return;
   }
   while (true) {
@@ -334,7 +334,7 @@ void InternalNode::PrepareForSplit(Stack &stack,
       parent->PrepareForSplit(stack, split_threshold,
                               separator_key, separator_key_size,
                               (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node, pool);
-      pd->Abort();
+      pd->Finish();
       return;
     } else {
       stack.Clear();
@@ -1177,7 +1177,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
             reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
 #endif
         if (result.IsOk()) {
-          pd->Abort();
+          pd->Finish();
           break;
         }
         stack.Clear();
@@ -1193,7 +1193,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
         auto result = ChangeRoot(reinterpret_cast<uint64_t>(root_now),
                                  reinterpret_cast<InternalNode *>(*ptr_parent));
         if (result) {
-          pd->Abort();
+          pd->Finish();
           break;
         }
         LOG(INFO) << "Root not installed";

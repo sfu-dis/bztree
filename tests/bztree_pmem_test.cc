@@ -87,7 +87,7 @@ struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
       : tree(tree), thread_count(thread_count), item_per_thread(item_per_thread) {}
 
   void SanityCheck() {
-    for (uint32_t i = 0; i < (thread_count ) * item_per_thread; i += 1) {
+    for (uint32_t i = 0; i < (thread_count) * item_per_thread; i += 1) {
       auto i_str = std::to_string(i);
       uint64_t payload;
       auto rc = tree->Read(i_str.c_str(), static_cast<uint16_t>(i_str.length()), &payload);
@@ -98,7 +98,7 @@ struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
 
   void Entry(size_t thread_index) override {
     WaitForStart();
-    for (uint32_t i = 0; i < item_per_thread ; i++) {
+    for (uint32_t i = 0; i < item_per_thread; i++) {
       auto value = i + item_per_thread * thread_index;
       auto str_value = std::to_string(value);
       auto rc = tree->Insert(str_value.c_str(),
@@ -123,11 +123,9 @@ GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
   auto pool = reinterpret_cast<pmwcas::DescriptorPool *>(
       pmdk_allocator->Allocate(sizeof(pmwcas::DescriptorPool)));
 
-  new(pool) pmwcas::DescriptorPool(100000, thread_count, nullptr, false);
+  new(pool) pmwcas::DescriptorPool(10000, thread_count, nullptr, false);
   bztree::BzTree::ParameterSet param;
-  new(bztree)bztree::BzTree(param, pool);
-  pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
-  pmdk_allocator->PersistPtr(pool, sizeof(pmwcas::DescriptorPool));
+  new(bztree)bztree::BzTree(param, pool, reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));
 
   MultiThreadUpsertTest t(item_per_thread, thread_count, bztree);
   t.Run(thread_count);
@@ -145,11 +143,12 @@ GTEST_TEST(BztreePMEMTest, MultiThreadReadback) {
   auto pmdk_allocator = reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
   bztree::Allocator::Init(pmdk_allocator);
 
-  auto pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-      pmdk_allocator->Allocate(sizeof(pmwcas::DescriptorPool)));
-  new(pool) pmwcas::DescriptorPool(100000, thread_count, nullptr, false);
-
   auto root_obj = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
+  auto pool = root_obj->GetPMWCASPool();
+  new(pool) pmwcas::DescriptorPool(10000,
+                                   thread_count,
+                                   pool->GetDescriptor(),
+                                   false);
 
   auto tree = root_obj;
   tree->SetPMWCASPool(pool);
