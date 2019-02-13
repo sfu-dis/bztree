@@ -28,7 +28,7 @@ link_directories(${PMWCAS_LIB_PATH})
 set(PMDK_SRC_PATH "" CACHE STRING "PMDK source path")
 include_directories(${PMDK_SRC_PATH}/src/include)
 set(PMDK_LIB_PATH "" CACHE STRING "PMDK shared library path")
-link_directories(${PMDK_LIB_PATH})
+link_directories(${PMDK_LIB_PATH}/src/nondebug)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
 set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt -lglog -lgtest -lgflags -lpmwcas -lpmemobj")
