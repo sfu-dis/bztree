@@ -10,8 +10,8 @@
 #include <memory>
 #include <optional>
 
-#include "include/pmwcas.h"
-#include "mwcas/mwcas.h"
+#include <pmwcas.h>
+#include <mwcas/mwcas.h>
 
 namespace bztree {
 
