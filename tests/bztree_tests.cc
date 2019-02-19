@@ -52,7 +52,7 @@ class LeafNodeFixtures : public ::testing::Test {
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
     pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
-    node = bztree::LeafNode::New(node_size);
+    bztree::LeafNode::New(&node, node_size);
   }
 
   void TearDown() override {
@@ -139,7 +139,8 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   bztree::LeafNode *left = nullptr;
   bztree::LeafNode *right = nullptr;
   node->Freeze(pool);
-  bztree::InternalNode *parent = node->PrepareForSplit(stack, 3000, pool, &left, &right);
+  bztree::InternalNode *parent = nullptr;
+  node->PrepareForSplit(stack, 3000, pool, &left, &right, &parent);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);

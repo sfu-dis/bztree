@@ -36,12 +36,14 @@ void InternalNode::New(InternalNode *src_node,
   pmwcas::NVRAM::Flush(alloc_size, *mem);
   *mem = Allocator::GetOffset(*mem);
 #else
-  auto *mem = reinterpret_cast<InternalNode *>(
-     pmwcas::Allocator::Get()->Allocate(alloc_size));
+  *mem = reinterpret_cast<InternalNode *>(pmwcas::Allocator::Get()->Allocate(alloc_size));
   memset(*mem, 0, alloc_size);
   new(*mem) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                         key, key_size, left_child_addr, right_child_addr);
-#endif
+#ifdef PMEM
+  pmwcas::NVRAM::Flush(alloc_size, *mem);
+#endif  // PMEM
+#endif  // PMDK
 }
 
 // Create an internal node with a single separator key and two pointers
@@ -65,7 +67,10 @@ void InternalNode::New(const char *key,
       pmwcas::Allocator::Get()->Allocate(alloc_size));
   memset(*mem, 0, alloc_size);
   new(*mem) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
-#endif
+#ifdef PMEM
+  pmwcas::NVRAM::Flush(alloc_size, *mem);
+#endif  // PMEM
+#endif  // PMDK
 }
 
 // Create an internal node with keys and pointers in the provided range from an
@@ -357,7 +362,10 @@ void LeafNode::New(LeafNode **mem, uint32_t node_size) {
         pmwcas::Allocator::Get()->Allocate(node_size));
   memset(*mem, 0, node_size);
   new(*mem) LeafNode(node_size);
-#endif
+#ifdef PMEM
+  pmwcas::NVRAM::Flush(node_size, *mem);
+#endif  // PMEM
+#endif  // PMDK
 }
 
 void BaseNode::Dump(pmwcas::EpochManager *epoch) {
@@ -506,7 +514,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   memcpy(ptr + padded_key_size, &payload, sizeof(payload));
   // Flush the word
 
-#ifdef PMDK
+#ifdef PMEM
   pmwcas::NVRAM::Flush(total_size, ptr);
 #endif
 
@@ -826,7 +834,7 @@ LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
   LeafNode::New(&new_leaf, this->header.size);
   new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end(), pmwcas_pool->GetEpoch());
 
-#ifdef PMDK
+#ifdef PMEM
   pmwcas::NVRAM::Flush(this->header.size, new_leaf);
 #endif
 

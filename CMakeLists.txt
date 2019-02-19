@@ -7,15 +7,49 @@ include(ExternalProject)
 project(bztree)
 cmake_minimum_required(VERSION 3.2.2)
 
+# Set backend to PMDK by default to build persistent version. This will be passed
+# in directly to PMwCAS which provides persistence support.
+set(PMEM_BACKEND "PMDK" CACHE STRING "Persistent memory backend type")
+string(TOUPPER ${PMEM_BACKEND} PMEM_BACKEND)
+
+# Both volatile and persistent versions are supported, by setting PMEM_BACKEND to:
+# PMDK    : use PMDK for persistence
+# EMU     : use simple shared memory for emulating persistent memory. This
+#           should only be used for experimental and profiling purpose. No real
+#           persistence is guaranteed.
+# VOLATILE: turn off persistence and build a volatile version, no persistence
+#           whatsoever. Equivalent to the original MwCAS operation.
+#
+# If persistent memory support is turned on, in the code we define both PMEM and
+# the corresponding macro for the backend. Code that is agnostic to the backend
+# is wrapped by PMEM; code that is specific to the backend is wrapped around by
+# PMEMEMU (for using emulation) or PMDK (for using PMDK).
+#
+# Note: these macros definitions follow strictly those in PMwCAS and are needed
+# to make sure of the inclusion of code in PMwCAS headers in included by BzTree.
+if(${PMEM_BACKEND} STREQUAL "PMDK")
+  add_definitions(-DPMEM)
+  add_definitions(-DPMDK)
+  message(STATUS "Persistence support: PMDK")
+elseif(${PMEM_BACKEND} STREQUAL "EMU")
+  add_definitions(-DPMEM)
+  add_definitions(-DPMEMEMU)
+  message(STATUS "Persistence support: emulation")
+elseif(${PMEM_BACKEND} STREQUAL "VOLATILE")
+  message(STATUS "Persistence support: off")
+else()
+  message(FATAL_ERROR "Unsupported persistent memory backend: ${PMEM_BACKEND}")
+endif()
+
 ##################### PMwCAS #########################
 set(PMWCAS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/pmwcas")
 ExternalProject_Add(PMWCAS
   PREFIX "${PMWCAS_PREFIX}"
   GIT_REPOSITORY git@github.com:HaoPatrick/pmwcas.git
-  GIT_TAG master
+  GIT_TAG df416b2e50a59b65b13443c77a2ccc3382132778
   INSTALL_COMMAND ""
   BUILD_COMMAND $(MAKE)
-  CMAKE_ARGS -DWITH_PMEM=1 -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+  CMAKE_ARGS -DPMEM_BACKEND=${PMEM_BACKEND} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
   LOG_DOWNLOAD ON
   LOG_CONFIGURE ON
   LOG_BUILD ON
@@ -28,24 +62,13 @@ include_directories(
   ${PMWCAS_PREFIX}/src/PMWCAS/include
   ${PMWCAS_PREFIX}/src/PMWCAS-build/pmdk/src/PMDK/src/include
 )
-
-# Define PMEM for PMwCAS
-add_definitions(-DPMEM)
-
-# Pick a different def for pmdk
-option(DEFINE_PMDK "option to enable pmem" ON)
-if(DEFINE_PMDK)
-  add_definitions(-DPMDK)
-endif()
-message("Persistence support using PMDK: ${DEFINE_PMDK}")
-
 link_directories(${PMWCAS_PREFIX}/src/PMWCAS-build/)
 
 ####################################################
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
 set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt -lglog -lgtest -lgflags -lpmwcas")
-if(DEFINE_PMDK)
+if(${PMEM_BACKEND} STREQUAL "PMDK")
   set(LINK_FLAGS "${LINK_FLAGS} -lpmemobj")
   if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
     link_directories(${PMWCAS_PREFIX}/src/PMWCAS-build/pmdk/src/PMDK/src/debug)
@@ -71,16 +94,16 @@ get_property(BZTREE_LIB_SRC GLOBAL PROPERTY BZTREE_SRC)
 
 add_library(bztree SHARED ${BZTREE_LIB_SRC})
 
-if(NOT DEFINE_PMDK)
+if((${PMEM_BACKEND} STREQUAL "PMDK"))
+  add_executable(bztree_pmem_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_pmem_test.cc)
+  target_link_libraries(bztree_pmem_tests bztree)
+else()
   add_executable(bztree_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_tests.cc)
   add_executable(bztree_thread_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_multithread_tests.cc)
   target_link_libraries(bztree_tests bztree)
   target_link_libraries(bztree_thread_tests bztree)
   add_dependencies(bztree_tests cpplint)
 endif()
-
-add_executable(bztree_pmem_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_pmem_test.cc)
-target_link_libraries(bztree_pmem_tests bztree)
 
 add_custom_target(
   cpplint ALL
