@@ -24,19 +24,10 @@ struct Allocator {
   static pmwcas::PMDKAllocator *Get() {
     return allocator_;
   }
-  template<typename T>
-  static inline T *GetDirect(T *pmem_offset) {
-    return reinterpret_cast<T *>(
-        reinterpret_cast<uint64_t>(pmem_offset) + reinterpret_cast<char *>(allocator_->GetPool()));
-  }
-
-  template<typename T>
-  static inline T *GetOffset(T *pmem_direct) {
-    return reinterpret_cast<T *>(
-        reinterpret_cast<char *>(pmem_direct) - reinterpret_cast<char *>(allocator_->GetPool()));
-  }
 };
 #endif
+
+static uint64_t global_epoch;
 
 struct ReturnCode {
   enum RC {
@@ -190,11 +181,11 @@ struct RecordMetadata {
     }
     assert(GetKeyLength() == key_len);
   }
-  inline bool IsInserting(uint64_t epoch_index) {
+  inline bool IsInserting() {
     // record is not visible
     // and record allocation epoch equal to global index epoch
     return !IsVisible() && OffsetIsEpoch() &&
-        ((meta & kAllocationEpochMask) >> 32 == epoch_index);
+        ((meta & kAllocationEpochMask) >> 32 == global_epoch);
   }
 };
 
@@ -337,7 +328,7 @@ class InternalNode : public BaseNode {
     GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
 
 #ifdef PMDK
-    return Allocator::GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
+    return Allocator::Get()->GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
 #else
     return reinterpret_cast<BaseNode *> (child_addr);
 #endif
@@ -519,7 +510,8 @@ class BzTree {
   };
 
   BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, uint64_t pmdk_addr = 0)
-      : parameters(param), root(nullptr), pmdk_addr(pmdk_addr) {
+      : parameters(param), root(nullptr), pmdk_addr(pmdk_addr), index_epoch(0) {
+    global_epoch = index_epoch;
     SetPMWCASPool(pool);
     pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
     auto *pd = pool->AllocateDescriptor();
@@ -575,18 +567,23 @@ class BzTree {
     return pmdk_addr;
   }
 
+  uint64_t GetEpoch(){
+    return index_epoch;
+  }
+
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
   uint64_t pmdk_addr;
+  uint64_t index_epoch;
 
   BaseNode *GetRootNodeSafe() {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
         &root)->GetValue(GetPMWCASPool()->GetEpoch());
 #ifdef PMDK
-    return Allocator::GetDirect(reinterpret_cast<BaseNode *>(root_node));
+    return Allocator::Get()->GetDirect(reinterpret_cast<BaseNode *>(root_node));
 #else
     return reinterpret_cast<BaseNode *>(root_node);
 #endif
