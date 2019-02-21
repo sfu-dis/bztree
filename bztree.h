@@ -528,8 +528,18 @@ class BzTree {
 
   // recover from nvm
   BzTree() {
+    this->index_epoch += 1;
+
+    // avoid multiple increment if there are multiple bztrees
+    if (global_epoch != index_epoch) {
+      global_epoch = index_epoch;
+    }
     pmwcas::DescriptorPool *pool = GetPMWCASPool();
     new(pool) pmwcas::DescriptorPool(pool);
+
+#ifdef PMEM
+    pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
+#endif
   }
 
   void Dump();

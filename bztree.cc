@@ -26,7 +26,6 @@ void InternalNode::New(InternalNode *src_node,
                        uint64_t left_child_addr,
                        uint64_t right_child_addr,
                        InternalNode **mem) {
-  //  // FIXME(tzwang): use a better allocator
   uint32_t alloc_size = src_node->GetHeader()->size +
       RecordMetadata::PadKeyLength(key_size) +
       sizeof(right_child_addr) + sizeof(RecordMetadata);
@@ -1221,10 +1220,10 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
 bool BzTree::ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root) {
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
 
-  // TODO(tzwang): specify memory policy for new leaf nodes
   pd->AddEntry(reinterpret_cast<uint64_t *>(&root),
                expected_root_addr,
-               reinterpret_cast<uint64_t>(new_root));
+               reinterpret_cast<uint64_t>(new_root),
+               pmwcas::Descriptor::kRecycleOnRecovery);
   return pd->MwCAS();
 }
 
