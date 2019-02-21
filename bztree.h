@@ -27,7 +27,7 @@ struct Allocator {
 };
 #endif
 
-static uint64_t global_epoch;
+extern uint64_t global_epoch;
 
 struct ReturnCode {
   enum RC {
@@ -168,7 +168,7 @@ struct RecordMetadata {
     // allocation epoch and fill in the rest offset bits with global epoch
     assert(epoch < (uint64_t{1} << 27));
     meta = (uint64_t{1} << 59) | (epoch << 32);
-    assert(IsInserting(epoch));
+    assert(IsInserting());
   }
   inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
     // Set the actual offset, the visible bit, key/total length

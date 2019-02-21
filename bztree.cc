@@ -16,7 +16,7 @@ namespace bztree {
 pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
 #endif
 
-uint32_t global_epoch = 0;
+uint64_t global_epoch = 0;
 
 // Create an internal node with a new key and associated child pointers inserted
 // based on an existing internal node

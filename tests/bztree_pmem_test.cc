@@ -109,8 +109,8 @@ struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
 };
 
 static uint32_t pool_size = 50000;
-static uint32_t item_per_thread = 1000;
-static uint32_t thread_count = 40;
+static uint32_t item_per_thread = 10;
+static uint32_t thread_count = 2;
 GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
   pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create,
                       pmwcas::PMDKAllocator::Destroy,
