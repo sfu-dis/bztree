@@ -13,6 +13,8 @@
 #include <pmwcas.h>
 #include <mwcas/mwcas.h>
 
+#define MAX_FREEZE_RETRY 10000
+
 namespace bztree {
 
 #ifdef PMDK
@@ -24,19 +26,10 @@ struct Allocator {
   static pmwcas::PMDKAllocator *Get() {
     return allocator_;
   }
-  template<typename T>
-  static inline T *GetDirect(T *pmem_offset) {
-    return reinterpret_cast<T *>(
-        reinterpret_cast<uint64_t>(pmem_offset) + reinterpret_cast<char *>(allocator_->GetPool()));
-  }
-
-  template<typename T>
-  static inline T *GetOffset(T *pmem_direct) {
-    return reinterpret_cast<T *>(
-        reinterpret_cast<char *>(pmem_direct) - reinterpret_cast<char *>(allocator_->GetPool()));
-  }
 };
 #endif
+
+extern uint64_t global_epoch;
 
 struct ReturnCode {
   enum RC {
@@ -166,7 +159,7 @@ struct RecordMetadata {
       meta = meta & (~kVisibleMask);
     }
   }
-  inline void PrepareForInsert(uint64_t epoch) {
+  inline void PrepareForInsert() {
     assert(IsVacant());
     // This only has to do with the offset field, which serves the dual
     // purpose of (1) storing a true record offset, and (2) storing the
@@ -175,9 +168,9 @@ struct RecordMetadata {
     //
     // Flip the high order bit of [offset] to indicate this field contains an
     // allocation epoch and fill in the rest offset bits with global epoch
-    assert(epoch < (uint64_t{1} << 27));
-    meta = (uint64_t{1} << 59) | (epoch << 32);
-    assert(IsInserting(epoch));
+    assert(global_epoch < (uint64_t{1} << 27));
+    meta = (uint64_t{1} << 59) | (global_epoch << 32);
+    assert(IsInserting());
   }
   inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
     // Set the actual offset, the visible bit, key/total length
@@ -190,11 +183,11 @@ struct RecordMetadata {
     }
     assert(GetKeyLength() == key_len);
   }
-  inline bool IsInserting(uint64_t epoch_index) {
+  inline bool IsInserting() {
     // record is not visible
     // and record allocation epoch equal to global index epoch
     return !IsVisible() && OffsetIsEpoch() &&
-        ((meta & kAllocationEpochMask) >> 32 == epoch_index);
+        ((meta & kAllocationEpochMask) >> 32 == global_epoch);
   }
 };
 
@@ -337,7 +330,7 @@ class InternalNode : public BaseNode {
     GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
 
 #ifdef PMDK
-    return Allocator::GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
+    return Allocator::Get()->GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
 #else
     return reinterpret_cast<BaseNode *> (child_addr);
 #endif
@@ -518,8 +511,10 @@ class BzTree {
     ~ParameterSet() {}
   };
 
+  // init a new tree
   BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, uint64_t pmdk_addr = 0)
-      : parameters(param), root(nullptr) {
+      : parameters(param), root(nullptr), pmdk_addr(pmdk_addr), index_epoch(0) {
+    global_epoch = index_epoch;
     SetPMWCASPool(pool);
     pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
     auto *pd = pool->AllocateDescriptor();
@@ -529,6 +524,22 @@ class BzTree {
     auto root_ptr = pd->GetNewValuePtr(index);
     LeafNode::New(reinterpret_cast<LeafNode **>(root_ptr), param.leaf_node_size);
     pd->MwCAS();
+  }
+
+  // recover from nvm
+  BzTree() {
+    this->index_epoch += 1;
+
+    // avoid multiple increment if there are multiple bztrees
+    if (global_epoch != index_epoch) {
+      global_epoch = index_epoch;
+    }
+    pmwcas::DescriptorPool *pool = GetPMWCASPool();
+    new(pool) pmwcas::DescriptorPool(pool);
+
+#ifdef PMEM
+    pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
+#endif
   }
 
   void Dump();
@@ -571,17 +582,27 @@ class BzTree {
 #endif
   }
 
+  uint64_t GetPMDKAddr() {
+    return pmdk_addr;
+  }
+
+  uint64_t GetEpoch() {
+    return index_epoch;
+  }
+
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
+  uint64_t pmdk_addr;
+  uint64_t index_epoch;
 
   BaseNode *GetRootNodeSafe() {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
         &root)->GetValue(GetPMWCASPool()->GetEpoch());
 #ifdef PMDK
-    return Allocator::GetDirect(reinterpret_cast<BaseNode *>(root_node));
+    return Allocator::Get()->GetDirect(reinterpret_cast<BaseNode *>(root_node));
 #else
     return reinterpret_cast<BaseNode *>(root_node);
 #endif
