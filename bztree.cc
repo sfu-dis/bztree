@@ -331,8 +331,10 @@ void InternalNode::PrepareForSplit(Stack &stack,
     pd->Finish();
     return;
   }
+
+  uint64_t freeze_retry = 0;
   while (true) {
-    if (parent->Freeze(pool)) {
+    if (parent->Freeze(pool) || freeze_retry > MAX_FREEZE_RETRY) {
       parent->PrepareForSplit(stack, split_threshold,
                               separator_key, separator_key_size,
                               (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node, pool);
@@ -344,6 +346,7 @@ void InternalNode::PrepareForSplit(Stack &stack,
       assert(stack.Top());
       stack.Pop();
       parent = stack.Top()->node;
+      freeze_retry += 1;
     }
   }
 }
@@ -989,9 +992,9 @@ void LeafNode::PrepareForSplit(Stack &stack,
   auto left_end_it = meta_vec.begin() + nleft;
 #ifdef PMDK
   (Allocator::Get()->GetDirect(*left))->CopyFrom(this, meta_vec.begin(),
-                                          left_end_it, pmwcas_pool->GetEpoch());
+                                                 left_end_it, pmwcas_pool->GetEpoch());
   (Allocator::Get()->GetDirect(*right))->CopyFrom(this, left_end_it,
-                                           meta_vec.end(), pmwcas_pool->GetEpoch());
+                                                  meta_vec.end(), pmwcas_pool->GetEpoch());
 #else
   (*left)->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
   (*right)->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
@@ -1017,11 +1020,12 @@ void LeafNode::PrepareForSplit(Stack &stack,
     return;
   }
 
+  uint64_t freeze_retry = 0;
   while (true) {
     // Has a parent node. PrepareForSplit will see if we need to split this
     // parent node as well, and if so, return a new (possibly upper-level) parent
     // node that needs to be installed to its parent
-    if (parent->Freeze(pmwcas_pool)) {
+    if (parent->Freeze(pmwcas_pool) || freeze_retry > MAX_FREEZE_RETRY) {
       parent->PrepareForSplit(stack, split_threshold, key,
                               separator_meta.GetKeyLength(),
                               reinterpret_cast<uint64_t>(*left),
@@ -1039,7 +1043,7 @@ void LeafNode::PrepareForSplit(Stack &stack,
       assert(stack.Top());
       stack.Pop();
       parent = stack.Top()->node;
-      // Fixme(hao): I believe spinning is not desired, we should help the parent to finish op
+      freeze_retry += 1;
     }
   }
 }
@@ -1090,6 +1094,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
   stack.tree = this;
   ReturnCode rc;
   pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
+  uint64_t freeze_retry = 0;
   do {
     stack.Clear();
     LeafNode *node = TraverseToLeaf(&stack, key, key_size);
@@ -1100,15 +1105,20 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       continue;
     }
 
+    // node may be frozen upon recovery
+    if (!node->Freeze(GetPMWCASPool())) {
+      freeze_retry += 1;
+      if (freeze_retry <= MAX_FREEZE_RETRY) {
+        continue;
+      }
+    }
+
     // Should split and we have three cases to handle:
     // 1. Root node is a leaf node - install [parent] as the new root
     // 2. We have a parent but no grandparent - install [parent] as the new
     //    root
     // 3. We have a grandparent - update the child pointer in the grandparent
     //    to point to the new [parent] (might further cause splits up the tree)
-    if (!node->Freeze(GetPMWCASPool())) {
-      continue;
-    }
 
     LeafNode *left = nullptr;
     LeafNode *right = nullptr;

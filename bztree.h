@@ -13,6 +13,8 @@
 #include <pmwcas.h>
 #include <mwcas/mwcas.h>
 
+#define MAX_FREEZE_RETRY 10000
+
 namespace bztree {
 
 #ifdef PMDK
@@ -567,7 +569,7 @@ class BzTree {
     return pmdk_addr;
   }
 
-  uint64_t GetEpoch(){
+  uint64_t GetEpoch() {
     return index_epoch;
   }
 
