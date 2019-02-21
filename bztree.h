@@ -511,6 +511,7 @@ class BzTree {
     ~ParameterSet() {}
   };
 
+  // init a new tree
   BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, uint64_t pmdk_addr = 0)
       : parameters(param), root(nullptr), pmdk_addr(pmdk_addr), index_epoch(0) {
     global_epoch = index_epoch;
@@ -523,6 +524,12 @@ class BzTree {
     auto root_ptr = pd->GetNewValuePtr(index);
     LeafNode::New(reinterpret_cast<LeafNode **>(root_ptr), param.leaf_node_size);
     pd->MwCAS();
+  }
+
+  // recover from nvm
+  BzTree() {
+    pmwcas::DescriptorPool *pool = GetPMWCASPool();
+    new(pool) pmwcas::DescriptorPool(pool);
   }
 
   void Dump();
