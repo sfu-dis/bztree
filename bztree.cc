@@ -492,7 +492,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   }
 
   RecordMetadata desired_meta;
-  desired_meta.PrepareForInsert(global_epoch);
+  desired_meta.PrepareForInsert();
 
   // Now do the PMwCAS
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();

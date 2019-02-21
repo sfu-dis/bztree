@@ -159,7 +159,7 @@ struct RecordMetadata {
       meta = meta & (~kVisibleMask);
     }
   }
-  inline void PrepareForInsert(uint64_t epoch) {
+  inline void PrepareForInsert() {
     assert(IsVacant());
     // This only has to do with the offset field, which serves the dual
     // purpose of (1) storing a true record offset, and (2) storing the
@@ -168,8 +168,8 @@ struct RecordMetadata {
     //
     // Flip the high order bit of [offset] to indicate this field contains an
     // allocation epoch and fill in the rest offset bits with global epoch
-    assert(epoch < (uint64_t{1} << 27));
-    meta = (uint64_t{1} << 59) | (epoch << 32);
+    assert(global_epoch < (uint64_t{1} << 27));
+    meta = (uint64_t{1} << 59) | (global_epoch << 32);
     assert(IsInserting());
   }
   inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
