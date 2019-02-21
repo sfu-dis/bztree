@@ -519,7 +519,7 @@ class BzTree {
   };
 
   BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, uint64_t pmdk_addr = 0)
-      : parameters(param), root(nullptr), pmdk_addr(pmdk_addr) {
+      : parameters(param), root(nullptr) {
     SetPMWCASPool(pool);
     pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
     auto *pd = pool->AllocateDescriptor();
@@ -571,16 +571,11 @@ class BzTree {
 #endif
   }
 
-  uint64_t GetPMDKAddr() {
-    return pmdk_addr;
-  }
-
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
-  uint64_t pmdk_addr;
 
   BaseNode *GetRootNodeSafe() {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
