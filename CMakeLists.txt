@@ -116,6 +116,9 @@ add_custom_target(
   || (exit 0)
 )
 
+set(MAX_FREEZE_RETRY 1000 CACHE STRING "MAX retry on frozen node")
+target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
+
 add_dependencies(bztree cpplint)
 add_dependencies(bztree PMWCAS)
 

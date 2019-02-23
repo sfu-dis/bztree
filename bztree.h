@@ -13,8 +13,6 @@
 #include <pmwcas.h>
 #include <mwcas/mwcas.h>
 
-#define MAX_FREEZE_RETRY 10000
-
 namespace bztree {
 
 #ifdef PMDK
