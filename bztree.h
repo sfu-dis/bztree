@@ -526,16 +526,14 @@ class BzTree {
     pd->MwCAS();
   }
 
-  // recover from nvm
-  BzTree() {
-    this->index_epoch += 1;
-
+  void Recovery() {
+    index_epoch += 1;
     // avoid multiple increment if there are multiple bztrees
     if (global_epoch != index_epoch) {
       global_epoch = index_epoch;
     }
     pmwcas::DescriptorPool *pool = GetPMWCASPool();
-    new(pool) pmwcas::DescriptorPool(pool);
+    pool->Recovery(false);
 
 #ifdef PMEM
     pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
@@ -545,8 +543,8 @@ class BzTree {
   void Dump();
 
   static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {
-    auto tree = reinterpret_cast<BzTree *>(
-        pmwcas::Allocator::Get()->Allocate(sizeof(BzTree)));
+    BzTree *tree;
+    pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(&tree), sizeof(BzTree));
     new(tree) BzTree(param, pool);
     return tree;
   }

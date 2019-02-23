@@ -11,12 +11,15 @@
 #include "../bztree.h"
 #include "util/performance_test.h"
 
+#define TEST_POOL_NAME "pool_bztree" 
+#define TEST_LAYOUT_NAME "layout_bztree"
+
 class BzTreePMEMTest : public ::testing::Test {
  protected:
   bztree::BzTree *tree;
 
   void SetUp() override {
-    pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create,
+    pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create(TEST_POOL_NAME, TEST_LAYOUT_NAME, 1024 * 1024 * 1024),
                         pmwcas::PMDKAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
@@ -32,10 +35,10 @@ TEST_F(BzTreePMEMTest, InsertTest) {
   bztree::Allocator::Init(pmdk_allocator);
 
   auto bztree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  auto pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-      pmdk_allocator->Allocate(sizeof(pmwcas::DescriptorPool)));
+  pmwcas::DescriptorPool *pool = nullptr;
+  pmdk_allocator->Allocate((void **) &pool, sizeof(pmwcas::DescriptorPool));
 
-  new(pool) pmwcas::DescriptorPool(100000, 1, nullptr, false);
+  new(pool) pmwcas::DescriptorPool(100000, 1, false);
   bztree::BzTree::ParameterSet param(256, 0, 256);
   new(bztree)bztree::BzTree(param, pool);
   pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
@@ -61,9 +64,9 @@ TEST_F(BzTreePMEMTest, ReadTest) {
   auto pmdk_allocator = reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
   bztree::Allocator::Init(pmdk_allocator);
 
-  auto pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-      pmdk_allocator->Allocate(sizeof(pmwcas::DescriptorPool)));
-  new(pool) pmwcas::DescriptorPool(2000, 1, nullptr, false);
+  pmwcas::DescriptorPool *pool;
+  pmdk_allocator->Allocate((void **) &pool, sizeof(pmwcas::DescriptorPool));
+  new(pool) pmwcas::DescriptorPool(2000, 1, false);
 
   auto root_obj = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
 
@@ -109,10 +112,12 @@ struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
 };
 
 static uint32_t pool_size = 50000;
-static uint32_t item_per_thread = 10;
-static uint32_t thread_count = 2;
+static uint32_t item_per_thread = 1000;
+static uint32_t thread_count = 20;
 GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
-  pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create,
+  pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create(TEST_POOL_NAME,
+                                                    TEST_LAYOUT_NAME,
+                                                    1024 * 1024 * 1024),
                       pmwcas::PMDKAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
@@ -121,10 +126,10 @@ GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
   bztree::Allocator::Init(pmdk_allocator);
 
   auto bztree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  auto pool = reinterpret_cast<pmwcas::DescriptorPool *>(
-      pmdk_allocator->Allocate(sizeof(pmwcas::DescriptorPool)));
+  pmwcas::DescriptorPool *pool;
+  pmdk_allocator->Allocate((void **) &pool, sizeof(pmwcas::DescriptorPool));
+  new(pool) pmwcas::DescriptorPool(pool_size, thread_count, false);
 
-  new(pool) pmwcas::DescriptorPool(pool_size, thread_count, nullptr, false);
   bztree::BzTree::ParameterSet param(1024, 0, 2014);
   new(bztree)bztree::BzTree(param, pool, reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));
 
@@ -135,7 +140,7 @@ GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
 }
 
 GTEST_TEST(BztreePMEMTest, MultiThreadReadback) {
-  pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create,
+  pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create(TEST_POOL_NAME, TEST_LAYOUT_NAME, 1024 * 1024 * 1024),
                       pmwcas::PMDKAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
@@ -143,14 +148,14 @@ GTEST_TEST(BztreePMEMTest, MultiThreadReadback) {
   bztree::Allocator::Init(pmdk_allocator);
 
   auto tree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  new(tree)bztree::BzTree();
+  tree->Recovery();
 
   MultiThreadUpsertTest t(item_per_thread, thread_count, tree);
   t.SanityCheck();
 }
 
 GTEST_TEST(BztreePMEMTest, TreeSanityCheck) {
-  pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create,
+  pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create(TEST_POOL_NAME, TEST_LAYOUT_NAME, 1024 * 1024 * 1024),
                       pmwcas::PMDKAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
@@ -158,7 +163,7 @@ GTEST_TEST(BztreePMEMTest, TreeSanityCheck) {
   bztree::Allocator::Init(pmdk_allocator);
 
   auto tree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  new(tree)bztree::BzTree();
+  tree->Recovery();
   tree->Dump();
 }
 
