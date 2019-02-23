@@ -116,6 +116,9 @@ void InternalNode::New(InternalNode *src_node,
   new(*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                          key, key_size, left_child_addr, right_child_addr,
                          left_most_child_addr);
+#ifdef PMEM
+  pmwcas::NVRAM::Flush(alloc_size, *new_node);
+#endif  // PMEM
 #endif
 }
 
@@ -250,14 +253,13 @@ InternalNode::InternalNode(uint32_t node_size,
   header.sorted_count = insert_idx;
 }
 
-// insert record to this internal node
-// The node is freezed at this time.
+// Insert record to this internal node. The node is frozen at this time.
 void InternalNode::PrepareForSplit(Stack &stack,
                                    uint32_t split_threshold,
                                    const char *key,
                                    uint32_t key_size,
-                                   uint64_t left_child_addr,
-                                   uint64_t right_child_addr,
+                                   uint64_t left_child_addr,   // [key]'s left child pointer
+                                   uint64_t right_child_addr,  // [key]'s right child pointer
                                    InternalNode **new_node,
                                    pmwcas::DescriptorPool *pool) {
   uint32_t data_size = header.size + key_size +
@@ -289,7 +291,7 @@ void InternalNode::PrepareForSplit(Stack &stack,
                                         pmwcas::Descriptor::kRecycleOnRecovery);
   auto ptr_r = pd->GetNewValuePtr(index_r);
 
-  // Figure out where does the new key will go
+  // Figure out where the new key will go
   auto separator_meta = record_metadata[n_left];
   char *separator_key = nullptr;
   uint16_t separator_key_size = separator_meta.GetKeyLength();
