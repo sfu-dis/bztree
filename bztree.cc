@@ -417,12 +417,15 @@ void LeafNode::Dump(pmwcas::EpochManager *epoch) {
   std::cout << " Key-Payload Pairs:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
     RecordMetadata meta = record_metadata[i];
-    uint64_t payload = 0;
-    char *key = nullptr;
-    GetRawRecord(meta, &key, &payload, epoch);
-    std::string keystr(key, key + meta.GetKeyLength());
-    std::cout << " - record " << i << ": key = " << keystr
-              << ", payload = " << payload << std::endl;
+    if (meta.IsVisible()) {
+      uint64_t payload = 0;
+      char *key = nullptr;
+      GetRawRecord(meta, &key, &payload, epoch);
+      assert(key);
+      std::string keystr(key, key + meta.GetKeyLength());
+      std::cout << " - record " << i << ": key = " << keystr
+                << ", payload = " << payload << std::endl;
+    }
   }
 
   std::cout << "-----------------------------" << std::endl;
