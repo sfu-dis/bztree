@@ -51,7 +51,7 @@ class LeafNodeFixtures : public ::testing::Test {
                         pmwcas::DefaultAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
+    pool = new pmwcas::DescriptorPool(1000, 1, false);
     bztree::LeafNode::New(&node, node_size);
   }
 
@@ -193,7 +193,7 @@ class BzTreeTest : public ::testing::Test {
                         pmwcas::DefaultAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(2000, 1, nullptr, false);
+    pool = new pmwcas::DescriptorPool(2000, 1, false);
     bztree::BzTree::ParameterSet param(256, 128, 256);
     tree = bztree::BzTree::New(param, pool);
   }

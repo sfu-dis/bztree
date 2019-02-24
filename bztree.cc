@@ -37,8 +37,7 @@ void InternalNode::New(InternalNode *src_node,
   pmwcas::NVRAM::Flush(alloc_size, *mem);
   *mem = Allocator::Get()->GetOffset(*mem);
 #else
-  *mem = reinterpret_cast<InternalNode *>(pmwcas::Allocator::Get()->Allocate(alloc_size));
-  memset(*mem, 0, alloc_size);
+  pmwcas::Allocator::Get()->Allocate((void **)mem, alloc_size);
   new(*mem) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                         key, key_size, left_child_addr, right_child_addr);
 #ifdef PMEM
@@ -64,9 +63,7 @@ void InternalNode::New(const char *key,
   pmwcas::NVRAM::Flush(alloc_size, *mem);
   *mem = Allocator::Get()->GetOffset(*mem);
 #else
-  *mem = reinterpret_cast<InternalNode *>(
-      pmwcas::Allocator::Get()->Allocate(alloc_size));
-  memset(*mem, 0, alloc_size);
+  pmwcas::Allocator::Get()->Allocate((void **)mem, alloc_size);
   new(*mem) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
 #ifdef PMEM
   pmwcas::NVRAM::Flush(alloc_size, *mem);
@@ -110,16 +107,14 @@ void InternalNode::New(InternalNode *src_node,
   pmwcas::NVRAM::Flush(alloc_size, new_node);
   *new_node = Allocator::Get()->GetOffset(*new_node);
 #else
-  *new_node = reinterpret_cast<InternalNode *>(
-      pmwcas::Allocator::Get()->Allocate(alloc_size));
-  memset(*new_node, 0, alloc_size);
+  pmwcas::Allocator::Get()->Allocate((void **)new_node, alloc_size);
   new(*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                          key, key_size, left_child_addr, right_child_addr,
                          left_most_child_addr);
 #ifdef PMEM
   pmwcas::NVRAM::Flush(alloc_size, *new_node);
 #endif  // PMEM
-#endif
+#endif  // PMDK
 }
 
 InternalNode::InternalNode(uint32_t node_size,
@@ -364,9 +359,7 @@ void LeafNode::New(LeafNode **mem, uint32_t node_size) {
   pmwcas::NVRAM::Flush(node_size, *mem);
   *mem = Allocator::Get()->GetOffset(*mem);
 #else
-  *mem = reinterpret_cast<LeafNode *>(
-        pmwcas::Allocator::Get()->Allocate(node_size));
-  memset(*mem, 0, node_size);
+  pmwcas::Allocator::Get()->Allocate((void **)mem, node_size);
   new(*mem) LeafNode(node_size);
 #ifdef PMEM
   pmwcas::NVRAM::Flush(node_size, *mem);

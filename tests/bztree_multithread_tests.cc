@@ -137,7 +137,7 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
 //  auto thread_count = pmwcas::Environment::Get()->GetCoreCount();
   uint32_t thread_count = 8;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
-      new pmwcas::DescriptorPool(descriptor_pool_size, 5, nullptr)
+      new pmwcas::DescriptorPool(descriptor_pool_size, 5, false)
   );
   bztree::BzTree::ParameterSet param;
   std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
@@ -150,7 +150,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
   uint32_t thread_count = 50;
   uint32_t item_per_thread = 100;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
-      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
   const auto kb = 1024;
   bztree::BzTree::ParameterSet param(kb * kb, 0, kb * kb);
@@ -166,7 +166,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
   uint32_t thread_count = 10;
   uint32_t item_per_thread = 300;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
-      new pmwcas::DescriptorPool(50000, thread_count, nullptr)
+      new pmwcas::DescriptorPool(50000, thread_count, false)
   );
   bztree::BzTree::ParameterSet param;
   std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
@@ -180,7 +180,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
   uint32_t thread_count = 50;
   uint32_t item_per_thread = 10000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
-      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
   bztree::BzTree::ParameterSet param(256, 0, 256);
   std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
@@ -195,7 +195,7 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
   uint32_t thread_count = 50;
   uint32_t item_per_thread = 1000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
-      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
   bztree::BzTree::ParameterSet param(256, 0, 256);
   std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
