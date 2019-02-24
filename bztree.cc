@@ -32,12 +32,14 @@ void InternalNode::New(InternalNode *src_node,
 
 #ifdef  PMDK
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
+  memset(*mem, 0, alloc_size);
   new(*mem) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                          key, key_size, left_child_addr, right_child_addr);
   pmwcas::NVRAM::Flush(alloc_size, *mem);
   *mem = Allocator::Get()->GetOffset(*mem);
 #else
   pmwcas::Allocator::Get()->Allocate((void **)mem, alloc_size);
+  memset(*mem, 0, alloc_size);
   new(*mem) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
                         key, key_size, left_child_addr, right_child_addr);
 #ifdef PMEM
@@ -59,11 +61,13 @@ void InternalNode::New(const char *key,
       sizeof(RecordMetadata) * 2;
 #ifdef PMDK
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
+  memset(*mem, 0, alloc_size);
   new(*mem) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
   pmwcas::NVRAM::Flush(alloc_size, *mem);
   *mem = Allocator::Get()->GetOffset(*mem);
 #else
   pmwcas::Allocator::Get()->Allocate((void **)mem, alloc_size);
+  memset(*mem, 0, alloc_size);
   new(*mem) InternalNode(alloc_size, key, key_size, left_child_addr, right_child_addr);
 #ifdef PMEM
   pmwcas::NVRAM::Flush(alloc_size, *mem);
@@ -101,6 +105,7 @@ void InternalNode::New(InternalNode *src_node,
 
 #ifdef PMDK
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(new_node), alloc_size);
+  memset(*mem, 0, alloc_size);
   new(*new_node)InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                              key, key_size, left_child_addr, right_child_addr,
                              left_most_child_addr);
@@ -108,6 +113,7 @@ void InternalNode::New(InternalNode *src_node,
   *new_node = Allocator::Get()->GetOffset(*new_node);
 #else
   pmwcas::Allocator::Get()->Allocate((void **)new_node, alloc_size);
+  memset(*new_node, 0, alloc_size);
   new(*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                          key, key_size, left_child_addr, right_child_addr,
                          left_most_child_addr);
@@ -355,11 +361,13 @@ void InternalNode::PrepareForSplit(Stack &stack,
 void LeafNode::New(LeafNode **mem, uint32_t node_size) {
 #ifdef PMDK
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), node_size);
+  memset(*mem, 0, node_size);
   new(*mem)LeafNode(node_size);
   pmwcas::NVRAM::Flush(node_size, *mem);
   *mem = Allocator::Get()->GetOffset(*mem);
 #else
   pmwcas::Allocator::Get()->Allocate((void **)mem, node_size);
+  memset(*mem, 0, node_size);
   new(*mem) LeafNode(node_size);
 #ifdef PMEM
   pmwcas::NVRAM::Flush(node_size, *mem);
