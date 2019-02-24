@@ -12,7 +12,7 @@
 #include "util/performance_test.h"
 #include "../bztree.h"
 
-uint32_t descriptor_pool_size = 500000;
+uint32_t descriptor_pool_size = 50000;
 
 struct MultiThreadRead : public pmwcas::PerformanceTest {
   bztree::BzTree *tree;
@@ -72,7 +72,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
     for (const auto &pair:value_missing) {
       std::cout << "Value missing i = " << pair.first << std::endl
                 << "=================" << std::endl;
-      pair.second->Dump(tree->GetPool()->GetEpoch(), true);
+      pair.second->Dump(tree->GetPMWCASPool()->GetEpoch(), true);
     }
     std::cout << std::endl;
     if (value_missing.size() > 0) {
@@ -140,7 +140,7 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
       new pmwcas::DescriptorPool(descriptor_pool_size, 5, nullptr)
   );
   bztree::BzTree::ParameterSet param;
-  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
   MultiThreadRead t(10000, tree.get());
   t.Run(thread_count);
   pmwcas::Thread::ClearRegistry();
@@ -154,7 +154,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
   );
   const auto kb = 1024;
   bztree::BzTree::ParameterSet param(kb * kb, 0, kb * kb);
-  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
 
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
@@ -166,10 +166,10 @@ GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
   uint32_t thread_count = 10;
   uint32_t item_per_thread = 300;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
-      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
+      new pmwcas::DescriptorPool(50000, thread_count, nullptr)
   );
   bztree::BzTree::ParameterSet param;
-  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
   pmwcas::Thread::ClearRegistry();
@@ -183,7 +183,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
   bztree::BzTree::ParameterSet param(256, 0, 256);
-  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
   pmwcas::Thread::ClearRegistry();
@@ -198,7 +198,7 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, nullptr)
   );
   bztree::BzTree::ParameterSet param(256, 0, 256);
-  std::unique_ptr<bztree::BzTree> tree(new bztree::BzTree(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
   MultiThreadUpsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
   pmwcas::Thread::ClearRegistry();
@@ -207,8 +207,8 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
 
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
-  pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
-                      pmwcas::TlsAllocator::Destroy,
+  pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
+                      pmwcas::DefaultAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
   return RUN_ALL_TESTS();

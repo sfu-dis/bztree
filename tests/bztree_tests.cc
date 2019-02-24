@@ -47,14 +47,12 @@ class LeafNodeFixtures : public ::testing::Test {
   pmwcas::DescriptorPool *pool;
   bztree::LeafNode *node;
   void SetUp() override {
-    pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
-                        pmwcas::TlsAllocator::Destroy,
+    pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
+                        pmwcas::DefaultAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
     pool = new pmwcas::DescriptorPool(1000, 1, nullptr, false);
-    node = (bztree::LeafNode *) malloc(node_size);
-    memset(node, 0, node_size);
-    new(node) bztree::LeafNode;
+    bztree::LeafNode::New(&node, node_size);
   }
 
   void TearDown() override {
@@ -141,7 +139,8 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   bztree::LeafNode *left = nullptr;
   bztree::LeafNode *right = nullptr;
   node->Freeze(pool);
-  bztree::InternalNode *parent = node->PrepareForSplit(stack, 3000, pool, &left, &right);
+  bztree::InternalNode *parent = nullptr;
+  node->PrepareForSplit(stack, 3000, pool, &left, &right, &parent);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);
@@ -190,13 +189,13 @@ class BzTreeTest : public ::testing::Test {
   }
 
   void SetUp() override {
-    pmwcas::InitLibrary(pmwcas::TlsAllocator::Create,
-                        pmwcas::TlsAllocator::Destroy,
+    pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
+                        pmwcas::DefaultAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(1000000, 1, nullptr, false);
+    pool = new pmwcas::DescriptorPool(2000, 1, nullptr, false);
     bztree::BzTree::ParameterSet param(256, 128, 256);
-    tree = new bztree::BzTree(param, pool);
+    tree = bztree::BzTree::New(param, pool);
   }
 
   void TearDown() override {
@@ -207,7 +206,7 @@ class BzTreeTest : public ::testing::Test {
 };
 
 TEST_F(BzTreeTest, Insert) {
-  static const uint32_t kMaxKey = 100000;
+  static const uint32_t kMaxKey = 5000;
   for (uint32_t i = 100; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);

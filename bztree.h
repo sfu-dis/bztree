@@ -10,19 +10,34 @@
 #include <memory>
 #include <optional>
 
-#include "include/pmwcas.h"
-#include "mwcas/mwcas.h"
+#include <pmwcas.h>
+#include <mwcas/mwcas.h>
 
 namespace bztree {
 
+#ifdef PMDK
+struct Allocator {
+  static pmwcas::PMDKAllocator *allocator_;
+  static void Init(pmwcas::PMDKAllocator *allocator) {
+    allocator_ = allocator;
+  }
+  static pmwcas::PMDKAllocator *Get() {
+    return allocator_;
+  }
+};
+#endif
+
+extern uint64_t global_epoch;
+
 struct ReturnCode {
-  enum RC { RetInvalid,
-            RetOk,
-            RetKeyExists,
-            RetNotFound,
-            RetNodeFrozen,
-            RetPMWCASFail,
-            RetNotEnoughSpace
+  enum RC {
+    RetInvalid,
+    RetOk,
+    RetKeyExists,
+    RetNotFound,
+    RetNodeFrozen,
+    RetPMWCASFail,
+    RetNotEnoughSpace
   };
 
   uint8_t rc;
@@ -63,11 +78,11 @@ struct NodeHeader {
     StatusWord() : word(0) {}
     explicit StatusWord(uint64_t word) : word(word) {}
 
-    static const uint64_t kControlMask = uint64_t{0x7} << 61; // Bits 64-62
-    static const uint64_t kFrozenMask = uint64_t{0x1} << 60; // Bit 61
+    static const uint64_t kControlMask = uint64_t{0x7} << 61;           // Bits 64-62
+    static const uint64_t kFrozenMask = uint64_t{0x1} << 60;            // Bit 61
     static const uint64_t kRecordCountMask = uint64_t{0xFFFF} << 44;    // Bits 60-45
-    static const uint64_t kBlockSizeMask = uint64_t{0x3FFFFF} << 22;   // Bits 44-23
-    static const uint64_t kDeleteSizeMask = uint64_t{0x3FFFFF} << 0;  // Bits 22-1
+    static const uint64_t kBlockSizeMask = uint64_t{0x3FFFFF} << 22;    // Bits 44-23
+    static const uint64_t kDeleteSizeMask = uint64_t{0x3FFFFF} << 0;    // Bits 22-1
 
     inline void Freeze() { word |= kFrozenMask; }
     inline bool IsFrozen() { return (word & kFrozenMask) > 0; }
@@ -106,11 +121,11 @@ struct RecordMetadata {
   RecordMetadata() : meta(0) {}
   explicit RecordMetadata(uint64_t meta) : meta(meta) {}
 
-  static const uint64_t kControlMask = uint64_t{0x7} << 61; // Bits 64-62
-  static const uint64_t kVisibleMask = uint64_t{0x1} << 60; // Bit 61
-  static const uint64_t kOffsetMask = uint64_t{0xFFFFFFF} << 32;     // Bits 60-33
-  static const uint64_t kKeyLengthMask = uint64_t{0xFFFF} << 16;    // Bits 32-17
-  static const uint64_t kTotalLengthMask = uint64_t{0xFFFF};  // Bits 16-1
+  static const uint64_t kControlMask = uint64_t{0x7} << 61;           // Bits 64-62
+  static const uint64_t kVisibleMask = uint64_t{0x1} << 60;           // Bit 61
+  static const uint64_t kOffsetMask = uint64_t{0xFFFFFFF} << 32;      // Bits 60-33
+  static const uint64_t kKeyLengthMask = uint64_t{0xFFFF} << 16;      // Bits 32-17
+  static const uint64_t kTotalLengthMask = uint64_t{0xFFFF};          // Bits 16-1
 
   static const uint64_t kAllocationEpochMask = uint64_t{0x7FFFFFF} << 32;  // Bit 59-33
 
@@ -142,7 +157,7 @@ struct RecordMetadata {
       meta = meta & (~kVisibleMask);
     }
   }
-  inline void PrepareForInsert(uint64_t epoch) {
+  inline void PrepareForInsert() {
     assert(IsVacant());
     // This only has to do with the offset field, which serves the dual
     // purpose of (1) storing a true record offset, and (2) storing the
@@ -151,9 +166,9 @@ struct RecordMetadata {
     //
     // Flip the high order bit of [offset] to indicate this field contains an
     // allocation epoch and fill in the rest offset bits with global epoch
-    assert(epoch < (uint64_t{1} << 27));
-    meta = (uint64_t{1} << 59) | (epoch << 32);
-    assert(IsInserting(epoch));
+    assert(global_epoch < (uint64_t{1} << 27));
+    meta = (uint64_t{1} << 59) | (global_epoch << 32);
+    assert(IsInserting());
   }
   inline void FinalizeForInsert(uint64_t offset, uint64_t key_len, uint64_t total_len) {
     // Set the actual offset, the visible bit, key/total length
@@ -166,11 +181,11 @@ struct RecordMetadata {
     }
     assert(GetKeyLength() == key_len);
   }
-  inline bool IsInserting(uint64_t epoch_index) {
+  inline bool IsInserting() {
     // record is not visible
     // and record allocation epoch equal to global index epoch
     return !IsVisible() && OffsetIsEpoch() &&
-        ((meta & kAllocationEpochMask) >> 32 == epoch_index);
+        ((meta & kAllocationEpochMask) >> 32 == global_epoch);
   }
 };
 
@@ -239,7 +254,7 @@ class BaseNode {
   // 2. [*key] - pointer to the key (could be nullptr)
   // 3. [payload] - 8-byte payload
   inline bool GetRawRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload,
-                           pmwcas::EpochManager *epoch, bool safe_get = false) {
+                           pmwcas::EpochManager *epoch = nullptr) {
     if (!meta.IsVisible()) {
       return false;
     }
@@ -256,7 +271,7 @@ class BaseNode {
 
     if (payload != nullptr) {
       uint64_t tmp_payload;
-      if (safe_get) {
+      if (epoch != nullptr) {
         tmp_payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
             tmp_data + padded_key_len)->GetValue(epoch);
       } else {
@@ -273,33 +288,32 @@ class Stack;
 // Internal node: immutable once created, no free space, keys are always sorted
 class InternalNode : public BaseNode {
  public:
-  static InternalNode *New(InternalNode *src_node, const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr,
-                           pmwcas::EpochManager *epoch);
-  static InternalNode *New(const char *key, uint32_t key_size,
-                           uint64_t left_child_addr, uint64_t right_child_addr,
-                           pmwcas::EpochManager *epoch);
-  InternalNode *New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
-                    const char *key, uint32_t key_size,
-                    uint64_t left_child_addr, uint64_t right_child_addr,
-                    pmwcas::EpochManager *epoch,
-                    uint64_t left_most_child_addr = 0);
+  static void New(InternalNode *src_node, const char *key, uint32_t key_size,
+                  uint64_t left_child_addr, uint64_t right_child_addr,
+                  InternalNode **mem);
+  static void New(const char *key, uint32_t key_size,
+                  uint64_t left_child_addr, uint64_t right_child_addr,
+                  InternalNode **mem);
+  static void New(InternalNode *src_node, uint32_t begin_meta_idx, uint32_t nr_records,
+                  const char *key, uint32_t key_size,
+                  uint64_t left_child_addr, uint64_t right_child_addr,
+                  InternalNode **mem,
+                  uint64_t left_most_child_addr);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
-               uint64_t left_child_addr, uint64_t right_child_addr,
-               pmwcas::EpochManager *epoch);
+               uint64_t left_child_addr, uint64_t right_child_addr);
   InternalNode(uint32_t node_size, InternalNode *src_node,
                uint32_t begin_meta_idx, uint32_t nr_records,
                const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr,
-               pmwcas::EpochManager *epoch,
                uint64_t left_most_child_addr = 0);
   ~InternalNode() = default;
 
-  InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
-                                const char *key, uint32_t key_size,
-                                uint64_t left_child_addr, uint64_t right_child_addr,
-                                pmwcas::DescriptorPool *pool);
+  void PrepareForSplit(Stack &stack, uint32_t split_threshold,
+                       const char *key, uint32_t key_size,
+                       uint64_t left_child_addr, uint64_t right_child_addr,
+                       InternalNode **new_node,
+                       pmwcas::DescriptorPool *pool);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
     char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
@@ -311,8 +325,13 @@ class InternalNode : public BaseNode {
                          pmwcas::DescriptorPool *pool, bool get_le = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
-    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch, true);
+    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
+
+#ifdef PMDK
+    return Allocator::Get()->GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
+#else
     return reinterpret_cast<BaseNode *> (child_addr);
+#endif
   }
   void Dump(pmwcas::EpochManager *epoch, bool dump_children = false);
 };
@@ -349,11 +368,11 @@ struct Record;
 
 class LeafNode : public BaseNode {
  public:
-  static LeafNode *New(uint32_t node_size);
+  static void New(LeafNode **mem, uint32_t node_size);
 
   static inline uint32_t GetUsedSpace(NodeHeader::StatusWord status) {
     return sizeof(LeafNode) + status.GetBlockSize() +
-           status.GetRecordCount() * sizeof(RecordMetadata);
+        status.GetRecordCount() * sizeof(RecordMetadata);
   }
 
   explicit LeafNode(uint32_t node_size = 4096) : BaseNode(true, node_size) {}
@@ -361,9 +380,10 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold);
-  InternalNode *PrepareForSplit(Stack &stack, uint32_t split_threshold,
-                                pmwcas::DescriptorPool *pmwcas_pool,
-                                LeafNode **left, LeafNode **right);
+  void PrepareForSplit(Stack &stack, uint32_t split_threshold,
+                       pmwcas::DescriptorPool *pmwcas_pool,
+                       LeafNode **left, LeafNode **right,
+                       InternalNode **new_parent);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
@@ -489,14 +509,44 @@ class BzTree {
     ~ParameterSet() {}
   };
 
-  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool)
-      : parameters(param), root(nullptr), pmwcas_pool(pool) {
-    root = LeafNode::New(param.leaf_node_size);
+  // init a new tree
+  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, uint64_t pmdk_addr = 0)
+      : parameters(param), root(nullptr), pmdk_addr(pmdk_addr), index_epoch(0) {
+    global_epoch = index_epoch;
+    SetPMWCASPool(pool);
+    pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
+    auto *pd = pool->AllocateDescriptor();
+    auto index = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&root),
+                                        reinterpret_cast<uint64_t>(nullptr),
+                                        pmwcas::Descriptor::kRecycleOnRecovery);
+    auto root_ptr = pd->GetNewValuePtr(index);
+    LeafNode::New(reinterpret_cast<LeafNode **>(root_ptr), param.leaf_node_size);
+    pd->MwCAS();
   }
+
+  void Recovery() {
+    index_epoch += 1;
+    // avoid multiple increment if there are multiple bztrees
+    if (global_epoch != index_epoch) {
+      global_epoch = index_epoch;
+    }
+    pmwcas::DescriptorPool *pool = GetPMWCASPool();
+    pool->Recovery(false);
+
+#ifdef PMEM
+    pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
+#endif
+  }
+
   void Dump();
-  inline pmwcas::DescriptorPool *GetPool() const {
-    return pmwcas_pool;
+
+  static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {
+    BzTree *tree;
+    pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(&tree), sizeof(BzTree));
+    new(tree) BzTree(param, pool);
+    return tree;
   }
+
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
@@ -512,15 +562,46 @@ class BzTree {
   BaseNode *TraverseToNode(Stack *stack, const char *key,
                            uint16_t key_size, BaseNode *stop_at);
 
+  void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
+#ifdef PMDK
+    this->pmwcas_pool = Allocator::Get()->GetOffset(pool);
+#else
+    this->pmwcas_pool = pool;
+#endif
+  }
+
+  inline pmwcas::DescriptorPool *GetPMWCASPool() {
+#ifdef PMDK
+    return Allocator::Get()->GetDirect(pmwcas_pool);
+#else
+    return pmwcas_pool;
+#endif
+  }
+
+  uint64_t GetPMDKAddr() {
+    return pmdk_addr;
+  }
+
+  uint64_t GetEpoch() {
+    return index_epoch;
+  }
+
  private:
   bool ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root);
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
+  uint64_t pmdk_addr;
+  uint64_t index_epoch;
+
   BaseNode *GetRootNodeSafe() {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        &root)->GetValue(pmwcas_pool->GetEpoch());
-    return reinterpret_cast< BaseNode *>(root_node);
+        &root)->GetValue(GetPMWCASPool()->GetEpoch());
+#ifdef PMDK
+    return Allocator::Get()->GetDirect(reinterpret_cast<BaseNode *>(root_node));
+#else
+    return reinterpret_cast<BaseNode *>(root_node);
+#endif
   }
 };
 
@@ -537,7 +618,7 @@ class Iterator {
     this->end_size = end_size;
     this->tree = tree;
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+    node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
     item_it = item_vec.begin();
   }
 
@@ -554,7 +635,7 @@ class Iterator {
                                         false);
       if (node != nullptr) {
         item_vec.clear();
-        node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPool());
+        node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
         item_it = item_vec.begin();
         return GetNext();
       } else {
