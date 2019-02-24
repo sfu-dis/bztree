@@ -21,7 +21,7 @@ struct Allocator {
   static void Init(pmwcas::PMDKAllocator *allocator) {
     allocator_ = allocator;
   }
-  static pmwcas::PMDKAllocator *Get() {
+  inline static pmwcas::PMDKAllocator *Get() {
     return allocator_;
   }
 };
@@ -353,12 +353,13 @@ struct Stack {
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
   inline void Push(InternalNode *node, RecordMetadata meta) {
+    LOG_IF(FATAL, num_frames >= kMaxFrames) << "Not enough space in stack.";
     auto &frame = frames[num_frames++];
     frame.node = node;
     frame.meta = meta;
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
-  inline void Clear() { num_frames = 0; }
+  inline void Clear() { root = nullptr; num_frames = 0; }
   inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
   inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
@@ -480,14 +481,14 @@ struct Record {
     return item;
   }
 
-  const uint64_t GetPayload() {
+  inline const uint64_t GetPayload() {
     return *reinterpret_cast<uint64_t *>(data + meta.GetPaddedKeyLength());
   }
-  const char *GetKey() const {
+  inline const char *GetKey() const {
     return data;
   }
 
-  bool operator<(const Record &out) {
+  inline bool operator<(const Record &out) {
     auto out_key = out.GetKey();
     auto cmp = BaseNode::KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
                                     out.GetKey(), out.meta.GetKeyLength());
@@ -540,7 +541,7 @@ class BzTree {
 
   void Dump();
 
-  static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {
+  inline static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {
     BzTree *tree;
     pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(&tree), sizeof(BzTree));
     new(tree) BzTree(param, pool);
@@ -578,11 +579,11 @@ class BzTree {
 #endif
   }
 
-  uint64_t GetPMDKAddr() {
+  inline uint64_t GetPMDKAddr() {
     return pmdk_addr;
   }
 
-  uint64_t GetEpoch() {
+  inline uint64_t GetEpoch() {
     return index_epoch;
   }
 
@@ -594,7 +595,7 @@ class BzTree {
   uint64_t pmdk_addr;
   uint64_t index_epoch;
 
-  BaseNode *GetRootNodeSafe() {
+  inline BaseNode *GetRootNodeSafe() {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
         &root)->GetValue(GetPMWCASPool()->GetEpoch());
 #ifdef PMDK

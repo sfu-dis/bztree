@@ -90,6 +90,7 @@ void InternalNode::New(InternalNode *src_node,
     alloc_size += (sizeof(uint64_t) + sizeof(RecordMetadata));
   }
 
+  assert(nr_records > 0);
   for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
     RecordMetadata meta = src_node->record_metadata[i];
     alloc_size += meta.GetTotalLength();
@@ -175,6 +176,8 @@ InternalNode::InternalNode(uint32_t node_size,
     memcpy(reinterpret_cast<char *>(this) + offset, &left_most_child_addr, sizeof(uint64_t));
     ++insert_idx;
   }
+
+  assert(nr_records > 0);
 
   for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
     RecordMetadata meta = src_node->record_metadata[i];
