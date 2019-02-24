@@ -524,6 +524,7 @@ class BzTree {
     pd->MwCAS();
   }
 
+#ifdef PMEM
   void Recovery() {
     index_epoch += 1;
     // avoid multiple increment if there are multiple bztrees
@@ -533,10 +534,9 @@ class BzTree {
     pmwcas::DescriptorPool *pool = GetPMWCASPool();
     pool->Recovery(false);
 
-#ifdef PMEM
     pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
-#endif
   }
+#endif
 
   void Dump();
 
