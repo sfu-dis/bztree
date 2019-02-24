@@ -766,14 +766,13 @@ ReturnCode LeafNode::Delete(const char *key,
 ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
                           pmwcas::DescriptorPool *pmwcas_pool) {
   auto meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, 0, (uint32_t) -1, false);
-  if (meta == nullptr) {
+  if (meta == nullptr || !meta->IsVisible()) {
     return ReturnCode::NotFound();
   }
-  auto record = Record::New(*meta, this, pmwcas_pool->GetEpoch());
-  if (record == nullptr) {
-    return ReturnCode::NotFound();
-  }
-  *payload = record->GetPayload();
+
+  char *source_addr = (reinterpret_cast<char *>(this) + meta->GetOffset());
+  *payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
+      source_addr + meta->GetPaddedKeyLength())->GetValue(pmwcas_pool->GetEpoch());
   return ReturnCode::Ok();
 }
 
