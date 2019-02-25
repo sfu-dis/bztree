@@ -41,7 +41,7 @@ void InternalNode::New(InternalNode *src_node,
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(mem), alloc_size);
   memset(*mem, 0, alloc_size);
   new(*mem) InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count,
-                        key, key_size, left_child_addr, right_child_addr);
+                         key, key_size, left_child_addr, right_child_addr);
 #ifdef PMEM
   pmwcas::NVRAM::Flush(alloc_size, *mem);
 #endif  // PMEM
@@ -106,18 +106,18 @@ void InternalNode::New(InternalNode *src_node,
 
 #ifdef PMDK
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(new_node), alloc_size);
-  memset(*mem, 0, alloc_size);
-  new(*new_node)InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
-                             key, key_size, left_child_addr, right_child_addr,
-                             left_most_child_addr);
+  memset(*new_node, 0, alloc_size);
+  new (*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+                               key, key_size, left_child_addr, right_child_addr,
+                               left_most_child_addr);
   pmwcas::NVRAM::Flush(alloc_size, new_node);
   *new_node = Allocator::Get()->GetOffset(*new_node);
 #else
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(new_node), alloc_size);
   memset(*new_node, 0, alloc_size);
-  new(*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
-                         key, key_size, left_child_addr, right_child_addr,
-                         left_most_child_addr);
+  new (*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+                               key, key_size, left_child_addr, right_child_addr,
+                               left_most_child_addr);
 #ifdef PMEM
   pmwcas::NVRAM::Flush(alloc_size, *new_node);
 #endif  // PMEM
@@ -514,7 +514,6 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(&header.status.word, expected_status.word, desired_status.word);
   pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
-  assert(desired_meta.GetTotalLength() < 100);
   if (!pd->MwCAS()) {
     goto retry;
   }
@@ -541,7 +540,6 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
       memset(ptr, 0, key_size);
       memset(ptr + padded_key_size, 0, sizeof(payload));
       offset = 0;
-//      LOG(INFO) << "concurrent duplicate insert";
     } else if (new_uniqueness == NodeFrozen) {
       return ReturnCode::NodeFrozen();
     }
@@ -564,7 +562,6 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
   if (pd->MwCAS()) {
     return ReturnCode::Ok();
   } else {
-    LOG(INFO) << "insert phase 2 pmwcas failure";
     goto retry_phase2;
   }
 }
@@ -1003,6 +1000,8 @@ void LeafNode::PrepareForSplit(Stack &stack,
     }
   }
 
+  assert(nleft > 0);
+
   // TODO(tzwang): also put the new insert here to save some cycles
   auto left_end_it = meta_vec.begin() + nleft;
 #ifdef PMDK
@@ -1017,7 +1016,6 @@ void LeafNode::PrepareForSplit(Stack &stack,
 
   // Separator exists in the new left leaf node, i.e., when traversing the tree,
   // we go left if <=, and go right if >.
-  LOG_IF(FATAL, nleft - 1 == 0);
   RecordMetadata separator_meta = meta_vec[nleft - 1];
 
   // The node is already frozen (by us), so we must be able to get a valid key
