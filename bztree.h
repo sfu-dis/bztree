@@ -281,6 +281,10 @@ class BaseNode {
     }
     return true;
   }
+
+  inline bool IsFrozen(pmwcas::EpochManager *epoch) {
+    return GetHeader()->GetStatus(epoch).IsFrozen();
+  }
 };
 
 class Stack;

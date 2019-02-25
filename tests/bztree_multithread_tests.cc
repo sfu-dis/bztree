@@ -28,7 +28,7 @@ struct MultiThreadRead : public pmwcas::PerformanceTest {
   void InsertDummy() {
     for (uint64_t i = 0; i < read_count; i += 1) {
       std::string key = std::to_string(i);
-      tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
+      tree->Insert(key.c_str(), key.length(), i);
     }
   }
 
@@ -47,6 +47,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
   bztree::BzTree *tree;
   uint32_t item_per_thread;
   uint32_t thread_count;
+  bztree::Stack stack;
   explicit MultiThreadInsertTest(uint32_t item_per_thread, uint32_t thread_count, bztree::BzTree *tree)
       : tree(tree), thread_count(thread_count), item_per_thread(item_per_thread) {}
 
@@ -55,9 +56,9 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
     for (uint32_t i = 0; i < (thread_count + 1) * item_per_thread; i++) {
       auto i_str = std::to_string(i);
       uint64_t payload;
-      auto rc = tree->Read(i_str.c_str(), static_cast<uint16_t>(i_str.length()), &payload);
+      stack.Clear();
+      auto rc = tree->Read(i_str.c_str(), i_str.length(), &payload);
       if (!rc.IsOk()) {
-        bztree::Stack stack;
         auto leaf_node = tree->TraverseToLeaf(&stack, i_str.c_str(), i_str.length());
         LOG(INFO) << "sanity check failed at i = " << i << std::endl
                   << "rc: " << std::to_string(rc.rc) << std::endl
@@ -85,8 +86,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
     for (uint32_t i = 0; i < item_per_thread * 2; i++) {
       auto value = i + item_per_thread * thread_index;
       auto str_value = std::to_string(value);
-      auto rc = tree->Insert(str_value.c_str(),
-                             static_cast<uint16_t>(str_value.length()), value);
+      auto rc = tree->Insert(str_value.c_str(), str_value.length(), value);
       ASSERT_TRUE(rc.IsOk() || rc.IsKeyExists());
     }
   }
@@ -103,7 +103,7 @@ struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
     for (uint32_t i = 0; i < (thread_count + 1) * item_per_thread * 10; i += 10) {
       auto i_str = std::to_string(i);
       uint64_t payload;
-      auto rc = tree->Read(i_str.c_str(), static_cast<uint16_t>(i_str.length()), &payload);
+      auto rc = tree->Read(i_str.c_str(), i_str.length(), &payload);
       ASSERT_TRUE(rc.IsOk());
       ASSERT_TRUE(payload == i || payload == (i + 1));
     }
@@ -127,7 +127,7 @@ struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
       auto value = 10 * (i + item_per_thread * thread_index);
       auto str_value = std::to_string(value);
       auto rc = tree->Upsert(str_value.c_str(),
-                             static_cast<uint16_t>(str_value.length()),
+                             str_value.length(),
                              i % 2 == 0 ? value : value + 1);
     }
   }
@@ -140,27 +140,28 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
       new pmwcas::DescriptorPool(descriptor_pool_size, 5, false)
   );
   bztree::BzTree::ParameterSet param;
-  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadRead t(10000, tree.get());
   t.Run(thread_count);
   pmwcas::Thread::ClearRegistry(true);
 }
 
 GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
-  uint32_t thread_count = 50;
+  // FIXME(tzwang): try larger numbers (e.g., 50)
+  uint32_t thread_count = 40;
   uint32_t item_per_thread = 100;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
   const auto kb = 1024;
   bztree::BzTree::ParameterSet param(kb * kb, 0, kb * kb);
-  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
-
+  std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
   t.SanityCheck();
   pmwcas::Thread::ClearRegistry(true);
 }
+
 GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
   uint32_t thread_count = 10;
   uint32_t item_per_thread = 300;
@@ -168,12 +169,13 @@ GTEST_TEST(BztreeTest, MultiThreadInsertSplitTest) {
       new pmwcas::DescriptorPool(50000, thread_count, false)
   );
   bztree::BzTree::ParameterSet param;
-  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
   t.SanityCheck();
   pmwcas::Thread::ClearRegistry(true);
 }
+
 GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
   uint32_t thread_count = 50;
   uint32_t item_per_thread = 10000;
@@ -181,7 +183,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
   bztree::BzTree::ParameterSet param(256, 0, 256);
-  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
   t.SanityCheck();
@@ -195,7 +197,7 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
   bztree::BzTree::ParameterSet param(256, 0, 256);
-  std::unique_ptr<bztree::BzTree> tree(bztree::BzTree::New(param, pool.get()));
+  std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadUpsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
   t.SanityCheck();
