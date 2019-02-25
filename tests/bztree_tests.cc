@@ -140,7 +140,7 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   bztree::LeafNode *right = nullptr;
   node->Freeze(pool);
   bztree::InternalNode *parent = nullptr;
-  node->PrepareForSplit(stack, 3000, pool, &left, &right, &parent);
+  node->PrepareForSplit(stack, 3000, pool, &left, &right, &parent, true);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);

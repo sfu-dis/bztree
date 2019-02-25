@@ -313,11 +313,11 @@ class InternalNode : public BaseNode {
                uint64_t left_most_child_addr = 0);
   ~InternalNode() = default;
 
-  void PrepareForSplit(Stack &stack, uint32_t split_threshold,
+  bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
                        const char *key, uint32_t key_size,
                        uint64_t left_child_addr, uint64_t right_child_addr,
                        InternalNode **new_node,
-                       pmwcas::DescriptorPool *pool);
+                       pmwcas::DescriptorPool *pool, bool backoff);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
     char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
@@ -353,6 +353,7 @@ struct Stack {
   Frame frames[kMaxFrames];
   uint32_t num_frames;
   BzTree *tree;
+  BaseNode *root;
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
@@ -366,7 +367,8 @@ struct Stack {
   inline void Clear() { root = nullptr; num_frames = 0; }
   inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
-  inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
+  inline BaseNode *GetRoot() { return root; }
+  inline void SetRoot(BaseNode *node) { root = node; }
 };
 
 struct Record;
@@ -385,10 +387,10 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold);
-  void PrepareForSplit(Stack &stack, uint32_t split_threshold,
+  bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
                        pmwcas::DescriptorPool *pmwcas_pool,
                        LeafNode **left, LeafNode **right,
-                       InternalNode **new_parent);
+                       InternalNode **new_parent, bool backoff);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
