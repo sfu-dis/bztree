@@ -75,7 +75,6 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
                 << "=================" << std::endl;
       pair.second->Dump(tree->GetPMWCASPool()->GetEpoch(), true);
     }
-    std::cout << std::endl;
     if (value_missing.size() > 0) {
       ASSERT_TRUE(false);
     }
