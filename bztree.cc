@@ -1120,7 +1120,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       }
     } else {
       bool frozen_by_me = false;
-      while (!node->IsFrozen(pmwcas_pool->GetEpoch())) {
+      while (!node->IsFrozen(GetPMWCASPool()->GetEpoch())) {
         frozen_by_me = node->Freeze(GetPMWCASPool());
       }
       if (!frozen_by_me && ++freeze_retry <= MAX_FREEZE_RETRY) {
@@ -1218,7 +1218,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
 }
 
 bool BzTree::ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root) {
-  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
+  pmwcas::Descriptor *pd = GetPMWCASPool()->AllocateDescriptor();
 
   pd->AddEntry(reinterpret_cast<uint64_t *>(&root),
                expected_root_addr,
@@ -1291,14 +1291,14 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   thread_local Stack stack;
   stack.tree = this;
   ReturnCode rc;
-  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+  pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
   do {
     stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+    LeafNode *node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
-    rc = node->Delete(key, key_size, pmwcas_pool);
+    rc = node->Delete(key, key_size, GetPMWCASPool());
     auto new_block_size = node->GetHeader()->status.GetBlockSize();
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes, not finished
