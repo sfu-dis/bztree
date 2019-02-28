@@ -87,7 +87,8 @@ void InternalNode::New(InternalNode *src_node,
   uint32_t alloc_size = sizeof(InternalNode);
   if (begin_meta_idx > 0) {
     // Will not copy from the first element (dummy key), so add it here
-    alloc_size += (sizeof(uint64_t) + sizeof(RecordMetadata));
+    alloc_size += src_node->record_metadata[0].GetTotalLength();
+    alloc_size += sizeof(RecordMetadata);
   }
 
   assert(nr_records > 0);
@@ -286,15 +287,14 @@ bool InternalNode::PrepareForSplit(Stack &stack,
   InternalNode *left = nullptr;
   InternalNode *right = nullptr;
   auto *pd = pool->AllocateDescriptor();
-  auto index_l = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
-                                        reinterpret_cast<uint64_t>(nullptr),
-                                        pmwcas::Descriptor::kRecycleOnRecovery);
-  auto ptr_l = pd->GetNewValuePtr(index_l);
-
-  auto index_r = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
-                                        reinterpret_cast<uint64_t>(nullptr),
-                                        pmwcas::Descriptor::kRecycleOnRecovery);
-  auto ptr_r = pd->GetNewValuePtr(index_r);
+  pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
+                         reinterpret_cast<uint64_t>(nullptr),
+                         pmwcas::Descriptor::kRecycleOnRecovery);
+  pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
+                         reinterpret_cast<uint64_t>(nullptr),
+                         pmwcas::Descriptor::kRecycleOnRecovery);
+  uint64_t *ptr_r = pd->GetNewValuePtr(0);
+  uint64_t *ptr_l = pd->GetNewValuePtr(1);
 
   // Figure out where the new key will go
   auto separator_meta = record_metadata[n_left];
@@ -1122,23 +1122,22 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     InternalNode *parent = nullptr;
     auto *pd = GetPMWCASPool()->AllocateDescriptor();
     // TODO(hao): should implement a cascading memory recycle callback
-    auto index_l = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
-                                          reinterpret_cast<uint64_t>(nullptr),
-                                          pmwcas::Descriptor::kRecycleOnRecovery);
-    auto ptr_l = pd->GetNewValuePtr(index_l);
-    auto index_r = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
-                                          reinterpret_cast<uint64_t>(nullptr),
-                                          pmwcas::Descriptor::kRecycleOnRecovery);
-    auto ptr_r = pd->GetNewValuePtr(index_r);
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&parent),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    uint64_t *ptr_r = pd->GetNewValuePtr(0);
+    uint64_t *ptr_l = pd->GetNewValuePtr(1);
+    uint64_t *ptr_parent = pd->GetNewValuePtr(2);
 
-    auto index_parent = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&parent),
-                                               reinterpret_cast<uint64_t>(nullptr),
-                                               pmwcas::Descriptor::kRecycleOnRecovery);
-    auto ptr_parent = pd->GetNewValuePtr(index_parent);
     // Note that when we split internal nodes (if needed), stack will get
     // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
     // So we save the root node here in case we need to change root later.
-
 
     // Now split the leaf node. PrepareForSplit will return the node that we
     // need to install to the grandparent node (will be stack top, if any). If
