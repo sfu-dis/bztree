@@ -416,7 +416,7 @@ class LeafNode : public BaseNode {
                        uint32_t size1,
                        const char *key2,
                        uint32_t size2,
-                       std::vector<std::unique_ptr<Record>> *result,
+                       std::vector<Record *> *result,
                        pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
@@ -462,41 +462,33 @@ struct Record {
   RecordMetadata meta;
   char data[0];
 
-  explicit Record(RecordMetadata meta) {
-    this->meta = meta;
-  }
-
-  static inline std::unique_ptr<Record> New(RecordMetadata meta, BaseNode *node,
-                                            pmwcas::EpochManager *epoch) {
+  explicit Record(RecordMetadata meta) : meta(meta) {}
+  static inline Record *New(RecordMetadata meta, BaseNode *node, pmwcas::EpochManager *epoch) {
     if (!meta.IsVisible()) {
       return nullptr;
     }
-    auto item_ptr = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
-    memset(item_ptr, 0, meta.GetTotalLength() + sizeof(Record));
-    auto item = std::make_unique<Record>(meta);
-    auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
+
+    Record *r = reinterpret_cast<Record *>(malloc(meta.GetTotalLength() + sizeof(meta)));
+    memset(r, 0, meta.GetTotalLength() + sizeof(Record));
+    new (r) Record(meta);
 
     // Key will never be changed and it will not be a pmwcas descriptor
     // but payload is fixed length 8-byte value, can be updated by pmwcas
-    memcpy(item->data,
-           reinterpret_cast<char *>(node) + meta.GetOffset(),
-           meta.GetPaddedKeyLength());
+    memcpy(r->data, reinterpret_cast<char *>(node) + meta.GetOffset(), meta.GetPaddedKeyLength());
+
+    auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
     auto payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        source_addr + meta.GetPaddedKeyLength())->GetValue(epoch);
-    memcpy(item->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
-    return item;
+                   source_addr + meta.GetPaddedKeyLength())->GetValue(epoch);
+    memcpy(r->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
+    return r;
   }
 
   inline const uint64_t GetPayload() {
     return *reinterpret_cast<uint64_t *>(data + meta.GetPaddedKeyLength());
   }
-  inline const char *GetKey() const {
-    return data;
-  }
-
+  inline const char *GetKey() const { return data; }
   inline bool operator<(const Record &out) {
-    auto out_key = out.GetKey();
-    auto cmp = BaseNode::KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
+    int cmp = BaseNode::KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
                                     out.GetKey(), out.meta.GetKeyLength());
     return cmp < 0;
   }
@@ -633,11 +625,17 @@ class Iterator {
     item_it = item_vec.begin();
   }
 
+  ~Iterator() {
+    for (auto &v : item_vec) {
+      free(v);  // malloc-allocated Record
+    }
+  }
+
   inline Record *GetNext() {
     auto old_it = item_it;
     if (item_it != item_vec.end()) {
       item_it += 1;
-      return (*old_it).get();
+      return *old_it;
     } else {
       auto &last_record = item_vec.back();
       node = this->tree->TraverseToLeaf(nullptr,
@@ -662,8 +660,8 @@ class Iterator {
   const char *end_key;
   uint16_t end_size;
   LeafNode *node;
-  std::vector<std::unique_ptr<Record>> item_vec;
-  std::vector<std::unique_ptr<Record>>::iterator item_it;
+  std::vector<Record *> item_vec;
+  std::vector<Record *>::iterator item_it;
 };
 
 }  // namespace bztree

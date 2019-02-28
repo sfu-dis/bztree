@@ -160,7 +160,7 @@ TEST_F(LeafNodeFixtures, Update) {
 TEST_F(LeafNodeFixtures, RangeScan) {
   pool->GetEpoch()->Protect();
   InsertDummy();
-  std::vector<std::unique_ptr<bztree::Record>> result;
+  std::vector<bztree::Record *> result;
   ASSERT_TRUE(node->RangeScan("10", 2, "40", 2, &result, pool).IsOk());
   ASSERT_EQ(result.size(), 14);
   ASSERT_EQ(result[0]->GetPayload(), 10);

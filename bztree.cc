@@ -780,7 +780,7 @@ ReturnCode LeafNode::RangeScan(const char *key1,
                                uint32_t size1,
                                const char *key2,
                                uint32_t size2,
-                               std::vector<std::unique_ptr<bztree::Record>> *result,
+                               std::vector<Record *> *result,
                                pmwcas::DescriptorPool *pmwcas_pool) {
   // entering a new epoch and copying the data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
@@ -807,7 +807,7 @@ ReturnCode LeafNode::RangeScan(const char *key1,
     i += 1;
   }
   std::sort(result->begin(), result->end(),
-            [this](std::unique_ptr<Record> &a, std::unique_ptr<Record> &b) -> bool {
+            [this](Record *a, Record *b) -> bool {
               auto cmp = BaseNode::KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
                                               b->GetKey(), b->meta.GetKeyLength());
               return cmp < 0;
@@ -1081,7 +1081,9 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
                                  bool le_child) {
   BaseNode *node = GetRootNodeSafe();
-  stack->SetRoot(node);
+  if (stack) {
+    stack->SetRoot(node);
+  }
   InternalNode *parent = nullptr;
   uint32_t meta_index = 0;
   assert(node);
