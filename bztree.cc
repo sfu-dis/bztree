@@ -1307,11 +1307,6 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   return rc;
 }
 
-std::unique_ptr<Iterator> BzTree::RangeScan(const char *key1, uint16_t size1,
-                                            const char *key2, uint16_t size2) {
-  return std::make_unique<Iterator>(this, key1, size1, key2, size2);
-}
-
 void BzTree::Dump() {
   std::cout << "-----------------------------" << std::endl;
   std::cout << "Dumping tree with root node: " << root << std::endl;

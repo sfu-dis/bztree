@@ -559,8 +559,12 @@ class BzTree {
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
-  std::unique_ptr<Iterator> RangeScan(const char *key1, uint16_t size1,
-                                      const char *key2, uint16_t size2);
+
+  inline std::unique_ptr<Iterator> RangeScan(const char *key1, uint16_t size1,
+                                      const char *key2, uint16_t size2) {
+    return std::make_unique<Iterator>(this, key1, size1, key2, size2);
+  }
+
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
