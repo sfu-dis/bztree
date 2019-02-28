@@ -54,12 +54,12 @@ struct ReturnCode {
   constexpr bool inline IsPMWCASFailure() const { return rc == RetPMWCASFail; }
   constexpr bool inline IsNotEnoughSpace() const { return rc == RetNotEnoughSpace; }
 
-  static ReturnCode NodeFrozen() { return ReturnCode(RetNodeFrozen); }
-  static ReturnCode KeyExists() { return ReturnCode(RetKeyExists); }
-  static ReturnCode PMWCASFailure() { return ReturnCode(RetPMWCASFail); }
-  static ReturnCode Ok() { return ReturnCode(RetOk); }
-  static ReturnCode NotFound() { return ReturnCode(RetNotFound); }
-  static ReturnCode NotEnoughSpace() { return ReturnCode(RetNotEnoughSpace); }
+  static inline ReturnCode NodeFrozen() { return ReturnCode(RetNodeFrozen); }
+  static inline ReturnCode KeyExists() { return ReturnCode(RetKeyExists); }
+  static inline ReturnCode PMWCASFailure() { return ReturnCode(RetPMWCASFail); }
+  static inline ReturnCode Ok() { return ReturnCode(RetOk); }
+  static inline ReturnCode NotFound() { return ReturnCode(RetNotFound); }
+  static inline ReturnCode NotEnoughSpace() { return ReturnCode(RetNotEnoughSpace); }
 };
 
 struct NodeHeader {
@@ -237,9 +237,9 @@ class BaseNode {
   }
   inline bool IsLeaf() { return is_leaf; }
   inline NodeHeader *GetHeader() { return &header; }
-//  Return a meta (not deleted) or nullptr (deleted or not exist)
-//  It's user's responsibility to check IsInserting()
-//  if check_concurrency is false, it will ignore all inserting record
+  // Return a meta (not deleted) or nullptr (deleted or not exist)
+  // It's user's responsibility to check IsInserting()
+  // if check_concurrency is false, it will ignore all inserting record
   RecordMetadata *SearchRecordMeta(pmwcas::EpochManager *epoch,
                                    const char *key, uint32_t key_size,
                                    uint32_t start_pos = 0,
@@ -265,7 +265,7 @@ class BaseNode {
     }
     auto padded_key_len = meta.GetPaddedKeyLength();
     if (key != nullptr) {
-//    zero key length dummy record
+      // zero key length dummy record
       *key = padded_key_len == 0 ? nullptr : tmp_data;
     }
 
@@ -443,7 +443,7 @@ class LeafNode : public BaseNode {
     return header.size - GetUsedSpace(status);
   }
 
-  // Make sure this node is freezed before calling this function
+  // Make sure this node is frozen before calling this function
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
                              bool visible_only,
                              pmwcas::EpochManager *epoch);
@@ -569,7 +569,7 @@ class BzTree {
                            uint16_t key_size,
                            bool le_child = true);
 
-  // typically used when a parent is freezed and we want to re-find a new one.
+  // typically used when a parent is frozen and we want to re-find a new one.
   BaseNode *TraverseToNode(Stack *stack, const char *key,
                            uint16_t key_size, BaseNode *stop_at);
 
@@ -633,7 +633,7 @@ class Iterator {
     item_it = item_vec.begin();
   }
 
-  Record *GetNext() {
+  inline Record *GetNext() {
     auto old_it = item_it;
     if (item_it != item_vec.end()) {
       item_it += 1;
