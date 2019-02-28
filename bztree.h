@@ -561,10 +561,6 @@ class BzTree {
                            uint16_t key_size,
                            bool le_child = true);
 
-  // typically used when a parent is frozen and we want to re-find a new one.
-  BaseNode *TraverseToNode(Stack *stack, const char *key,
-                           uint16_t key_size, BaseNode *stop_at);
-
   void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
 #ifdef PMDK
     this->pmwcas_pool = Allocator::Get()->GetOffset(pool);
