@@ -569,25 +569,23 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
                                            uint32_t key_size,
                                            pmwcas::EpochManager *epoch) {
-  auto record = SearchRecordMeta(epoch, key, key_size);
-  if (record == nullptr) {
+  auto metadata = SearchRecordMeta(epoch, key, key_size, nullptr);
+  if (metadata.IsVacant()) {
     return IsUnique;
   }
-  auto meta_data = RecordMetadata{
-      reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record)->GetValue(epoch)
-  };
   // we need to perform a key compare again
   // consider this case:
   // a key is inserting when we "SearchRecordMeta"
   // when get back, this meta may have finished inserting, so the following if will be false
   // however, this key may not be duplicate, so we need to compare the key again
   // even if this key is not duplicate, we need to return a "Recheck"
-  if (meta_data.IsInserting()) {
+  if (metadata.IsInserting()) {
     return ReCheck;
   }
-  char *curr_key = GetKey(meta_data);
+  assert(metadata.IsVisible());
+  char *curr_key = GetKey(metadata);
   assert(curr_key);
-  if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
+  if (KeyCompare(key, key_size, curr_key, metadata.GetKeyLength()) == 0) {
     return Duplicate;
   }
   return ReCheck;
@@ -600,20 +598,16 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   if (current_status.IsFrozen()) {
     return NodeFrozen;
   }
-  auto record = SearchRecordMeta(epoch, key, key_size, header.sorted_count, end_pos);
-  if (record == nullptr) {
+  auto metadata = SearchRecordMeta(epoch, key, key_size, nullptr, header.sorted_count, end_pos);
+  if (metadata.IsVacant()) {
     return IsUnique;
   }
-  auto meta_data = RecordMetadata{
-      reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record)->GetValue(epoch)
-  };
-  if (meta_data.IsInserting()) {
+  if (metadata.IsInserting()) {
     goto retry;
-  } else if (!meta_data.IsVisible()) {
-    return IsUnique;
   }
-  char *curr_key = GetKey(meta_data);
-  if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
+  assert(metadata.IsVisible());
+  char *curr_key = GetKey(metadata);
+  if (KeyCompare(key, key_size, curr_key, metadata.GetKeyLength()) == 0) {
     return Duplicate;
   }
   return IsUnique;
@@ -629,17 +623,17 @@ ReturnCode LeafNode::Update(const char *key,
     return ReturnCode::NodeFrozen();
   }
 
-  auto *meta_ptr = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
-  if (meta_ptr == nullptr || !meta_ptr->IsVisible()) {
+  RecordMetadata *meta_ptr = nullptr;
+  auto metadata = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, &meta_ptr);
+  if (metadata.IsVacant()) {
     return ReturnCode::NotFound();
-  } else if (meta_ptr->IsInserting()) {
+  } else if (metadata.IsInserting()) {
     goto retry;
   }
-  auto old_meta_value = meta_ptr->meta;
 
-  char *record_key;
-  uint64_t record_payload;
-  GetRawRecord(*meta_ptr, &record_key, &record_payload, pmwcas_pool->GetEpoch());
+  char *record_key = nullptr;
+  uint64_t record_payload = 0;
+  GetRawRecord(metadata, &record_key, &record_payload, pmwcas_pool->GetEpoch());
   if (payload == record_payload) {
     return ReturnCode::Ok();
   }
@@ -648,9 +642,9 @@ ReturnCode LeafNode::Update(const char *key,
 //  2. make sure meta data is not changed
 //  3. make sure status word is not changed
   auto pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(reinterpret_cast<uint64_t *>(record_key + meta_ptr->GetPaddedKeyLength()),
+  pd->AddEntry(reinterpret_cast<uint64_t *>(record_key + metadata.GetPaddedKeyLength()),
                record_payload, payload);
-  pd->AddEntry(&meta_ptr->meta, old_meta_value, meta_ptr->meta);
+  pd->AddEntry(&meta_ptr->meta, metadata.meta, metadata.meta);
   pd->AddEntry(&header.status.word, old_status.word, old_status.word);
 
   if (!pd->MwCAS()) {
@@ -659,12 +653,13 @@ ReturnCode LeafNode::Update(const char *key,
   return ReturnCode::Ok();
 }
 
-RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
-                                           const char *key,
-                                           uint32_t key_size,
-                                           uint32_t start_pos,
-                                           uint32_t end_pos,
-                                           bool check_concurrency) {
+RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
+                                          const char *key,
+                                          uint32_t key_size,
+                                          RecordMetadata **out_metadata_ptr,
+                                          uint32_t start_pos,
+                                          uint32_t end_pos,
+                                          bool check_concurrency) {
   if (start_pos < header.sorted_count) {
     // Binary search on sorted field
     int64_t first = start_pos;
@@ -673,46 +668,25 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
     while (header.sorted_count != 0 && first <= last) {
       middle = (first + last) / 2;
 
-/*
-      // Encountered a deleted record
-      // Try to adjust the middle to left ones
-      while (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible() && first < middle) {
-        middle -= 1;
-      }
+      RecordMetadata current = GetMetadata(static_cast<uint32_t>(middle), epoch);
 
-      // Every record on the left is deleted, now try right ones
-      middle = (first + last) / 2;
-      while (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible() && middle < last) {
-        middle += 1;
-      }
-
-      // Every record in the sorted field is deleted
-      if (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible()) {
-        break;
-      }
-
-*/
       // The found record isn't visible
-      // FIXME(tzwang): is the above necessary? ie is it possible to have
-      // multiple metadata representing deleted records with the same key?
-      if (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible()) {
+      if (!current.IsVisible()) {
         break;
       }
 
       char *current_key = nullptr;
-      auto current = GetMetadata(static_cast<uint32_t>(middle), epoch);
       GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
+      assert(current_key || !is_leaf);
 
       auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
       if (cmp_result < 0) {
         last = middle - 1;
       } else if (cmp_result == 0) {
-        if (current.IsVisible()) {
-          return record_metadata + middle;
-        } else {
-          // Not visible, try the unsorted space
-          break;
+        if (out_metadata_ptr) {
+          *out_metadata_ptr = record_metadata + middle;
         }
+        return current;
       } else {
         first = middle + 1;
       }
@@ -727,7 +701,10 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       if (current.IsInserting()) {
         if (check_concurrency) {
           // Encountered an in-progress insert, recheck later
-          return record_metadata + i;
+          if (out_metadata_ptr) {
+            *out_metadata_ptr = record_metadata + i;
+          }
+          return current;
         } else {
           continue;
         }
@@ -736,13 +713,17 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       if (current.IsVisible()) {
         char *current_key = nullptr;
         GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
+        assert(current_key || !is_leaf);
         if (KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
-          return record_metadata + i;
+          if (out_metadata_ptr) {
+            *out_metadata_ptr = record_metadata + i;
+          }
+          return current;
         }
       }
     }
   }
-  return nullptr;
+  return RecordMetadata{0};
 }
 
 ReturnCode LeafNode::Delete(const char *key,
@@ -754,26 +735,26 @@ ReturnCode LeafNode::Delete(const char *key,
   }
 
   retry:
-  auto record_meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
-  if (record_meta == nullptr) {
+  RecordMetadata *meta_ptr = nullptr;
+  auto metadata = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, &meta_ptr);
+  if (metadata.IsVacant()) {
     return ReturnCode::NotFound();
-  } else if (record_meta->IsInserting()) {
+  } else if (metadata.IsInserting()) {
     // FIXME(hao): not mentioned in the paper, should confirm later;
     goto retry;
   }
 
-  auto old_meta = *record_meta;
-  auto new_meta = *record_meta;
+  auto new_meta = metadata;
   new_meta.SetVisible(false);
   new_meta.SetOffset(0);
 
   auto new_status = old_status;
   auto old_delete_size = old_status.GetDeleteSize();
-  new_status.SetDeleteSize(old_delete_size + record_meta->GetTotalLength());
+  new_status.SetDeleteSize(old_delete_size + metadata.GetTotalLength());
 
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(&header.status.word, old_status.word, new_status.word);
-  pd->AddEntry(&(record_meta->meta), old_meta.meta, new_meta.meta);
+  pd->AddEntry(&meta_ptr->meta, metadata.meta, new_meta.meta);
   if (!pd->MwCAS()) {
     goto retry;
   }
@@ -781,14 +762,15 @@ ReturnCode LeafNode::Delete(const char *key,
 }
 ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
                           pmwcas::DescriptorPool *pmwcas_pool) {
-  auto meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, 0, (uint32_t) -1, false);
-  if (meta == nullptr || !meta->IsVisible()) {
+  auto meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, nullptr,
+                               0, (uint32_t) -1, false);
+  if (meta.IsVacant()) {
     return ReturnCode::NotFound();
   }
 
-  char *source_addr = (reinterpret_cast<char *>(this) + meta->GetOffset());
+  char *source_addr = (reinterpret_cast<char *>(this) + meta.GetOffset());
   *payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-      source_addr + meta->GetPaddedKeyLength())->GetValue(pmwcas_pool->GetEpoch());
+      source_addr + meta.GetPaddedKeyLength())->GetValue(pmwcas_pool->GetEpoch());
   return ReturnCode::Ok();
 }
 

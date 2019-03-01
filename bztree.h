@@ -100,6 +100,7 @@ struct NodeHeader {
     }
 
     inline void PrepareForInsert(uint32_t size) {
+      LOG_IF(FATAL, size == 0);
       // Increment [record count] by one and [block size] by payload size
       word += ((uint64_t{1} << 44) + (uint64_t{size} << 22));
     }
@@ -132,7 +133,7 @@ struct RecordMetadata {
   inline bool IsVacant() { return meta == 0; }
   inline uint16_t GetKeyLength() const { return (uint16_t) ((meta & kKeyLengthMask) >> 16); }
 
-//    Get the padded key length from accurate key length
+  // Get the padded key length from accurate key length
   inline uint16_t GetPaddedKeyLength() {
     auto key_length = GetKeyLength();
     return PadKeyLength(key_length);
@@ -185,7 +186,7 @@ struct RecordMetadata {
     // record is not visible
     // and record allocation epoch equal to global index epoch
     return !IsVisible() && OffsetIsEpoch() &&
-        ((meta & kAllocationEpochMask) >> 32 == global_epoch);
+        (((meta & kAllocationEpochMask) >> 32) == global_epoch);
   }
 };
 
@@ -244,14 +245,16 @@ class BaseNode {
   }
   inline bool IsLeaf() { return is_leaf; }
   inline NodeHeader *GetHeader() { return &header; }
+
   // Return a meta (not deleted) or nullptr (deleted or not exist)
   // It's user's responsibility to check IsInserting()
   // if check_concurrency is false, it will ignore all inserting record
-  RecordMetadata *SearchRecordMeta(pmwcas::EpochManager *epoch,
-                                   const char *key, uint32_t key_size,
-                                   uint32_t start_pos = 0,
-                                   uint32_t end_pos = (uint32_t) -1,
-                                   bool check_concurrency = true);
+  RecordMetadata SearchRecordMeta(pmwcas::EpochManager *epoch,
+                                  const char *key, uint32_t key_size,
+                                  RecordMetadata **out_metadata,
+                                  uint32_t start_pos = 0,
+                                  uint32_t end_pos = (uint32_t) -1,
+                                  bool check_concurrency = true);
 
   // Get the key and payload (8-byte), not thread-safe
   // Outputs:
