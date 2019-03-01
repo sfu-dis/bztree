@@ -673,6 +673,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
     while (header.sorted_count != 0 && first <= last) {
       middle = (first + last) / 2;
 
+/*
       // Encountered a deleted record
       // Try to adjust the middle to left ones
       while (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible() && first < middle) {
@@ -690,7 +691,14 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
         break;
       }
 
-      uint64_t payload = 0;
+*/
+      // The found record isn't visible
+      // FIXME(tzwang): is the above necessary? ie is it possible to have
+      // multiple metadata representing deleted records with the same key?
+      if (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible()) {
+        break;
+      }
+
       char *current_key = nullptr;
       auto current = GetMetadata(static_cast<uint32_t>(middle), epoch);
       GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
@@ -698,8 +706,13 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
       if (cmp_result < 0) {
         last = middle - 1;
-      } else if (cmp_result == 0 && current.IsVisible()) {
-        return record_metadata + middle;
+      } else if (cmp_result == 0) {
+        if (current.IsVisible()) {
+          return record_metadata + middle;
+        } else {
+          // Not visible, try the unsorted space
+          break;
+        }
       } else {
         first = middle + 1;
       }
