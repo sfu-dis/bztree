@@ -218,7 +218,6 @@ class BaseNode {
  public:
   static const inline int KeyCompare(const char *key1, uint32_t size1,
                                      const char *key2, uint32_t size2) {
-
     LOG_IF(FATAL, !key1 && !key2);
     if (!key1) {
       return -1;
