@@ -586,6 +586,7 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
     return ReCheck;
   }
   char *curr_key = GetKey(meta_data);
+  assert(curr_key);
   if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
     return Duplicate;
   }
@@ -692,7 +693,7 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       uint64_t payload = 0;
       char *current_key = nullptr;
       auto current = GetMetadata(static_cast<uint32_t>(middle), epoch);
-      GetRawRecord(current, nullptr, &current_key, &payload, epoch);
+      GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
 
       auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
       if (cmp_result < 0) {
@@ -708,21 +709,23 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
     // Linear search on unsorted field
     uint32_t linear_end = std::min<uint32_t>(header.GetStatus(epoch).GetRecordCount(), end_pos);
     for (uint32_t i = header.sorted_count; i < linear_end; i++) {
-      auto current = GetMetadata(i, epoch);
+      RecordMetadata current = GetMetadata(i, epoch);
 
-      // Encountered an in-progress insert, recheck later
-      if (current.IsInserting() && check_concurrency) {
-        return record_metadata + i;
-      } else if (current.IsInserting() && !check_concurrency) {
-        continue;
+      if (current.IsInserting()) {
+        if (check_concurrency) {
+          // Encountered an in-progress insert, recheck later
+          return record_metadata + i;
+        } else {
+          continue;
+        }
       }
 
-      uint64_t payload = 0;
-      char *current_key = nullptr;
-      GetRawRecord(current, nullptr, &current_key, &payload, epoch);
-      if (current.IsVisible() &&
-          KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
-        return record_metadata + i;
+      if (current.IsVisible()) {
+        char *current_key = nullptr;
+        GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
+        if (KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
+          return record_metadata + i;
+        }
       }
     }
   }
@@ -947,7 +950,7 @@ uint32_t InternalNode::GetChildIndex(const char *key,
   while (true) {
     mid = (left + right) / 2;
     auto meta = GetMetadata(static_cast<uint32_t>(mid), pool->GetEpoch());
-    char *record_key;
+    char *record_key = nullptr;
     GetRawRecord(meta, nullptr, &record_key, nullptr, pool->GetEpoch());
     auto cmp = KeyCompare(key, key_size, record_key, meta.GetKeyLength());
     if (cmp == 0) {
@@ -1159,6 +1162,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
                                                 backoff);
     pd->Abort();
     if (!should_proceed) {
+      // TODO(tzwang): free memory allocated in ptr_l, ptr_r, and ptr_parent
       continue;
     }
 
