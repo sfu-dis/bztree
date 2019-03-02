@@ -1195,8 +1195,12 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // No grand parent or already popped out by during split propagation
       // In case of PMDK, ptr_parent is already in PMDK offset format (done by
       // InternalNode::New).
+#ifdef PMDK
       ChangeRoot(reinterpret_cast<uint64_t>(Allocator::Get()->GetOffset(stack.GetRoot())),
                  *ptr_parent);
+#else
+      ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()), *ptr_parent);
+#endif
     }
   }
 }
