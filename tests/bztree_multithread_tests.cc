@@ -147,7 +147,7 @@ GTEST_TEST(BztreeTest, MultiThreadRead) {
 
 GTEST_TEST(BztreeTest, MultiThreadInsertTest) {
   // FIXME(tzwang): try larger numbers (e.g., 50)
-  uint32_t thread_count = 40;
+  uint32_t thread_count = 50;
   uint32_t item_per_thread = 100;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)

@@ -140,7 +140,7 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   bztree::LeafNode *right = nullptr;
   node->Freeze(pool);
   bztree::InternalNode *parent = nullptr;
-  node->PrepareForSplit(stack, 3000, pool, &left, &right, &parent);
+  node->PrepareForSplit(stack, 3000, pool, &left, &right, &parent, true);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);
@@ -160,7 +160,7 @@ TEST_F(LeafNodeFixtures, Update) {
 TEST_F(LeafNodeFixtures, RangeScan) {
   pool->GetEpoch()->Protect();
   InsertDummy();
-  std::vector<std::unique_ptr<bztree::Record>> result;
+  std::vector<bztree::Record *> result;
   ASSERT_TRUE(node->RangeScan("10", 2, "40", 2, &result, pool).IsOk());
   ASSERT_EQ(result.size(), 14);
   ASSERT_EQ(result[0]->GetPayload(), 10);

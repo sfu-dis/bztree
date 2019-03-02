@@ -87,7 +87,8 @@ void InternalNode::New(InternalNode *src_node,
   uint32_t alloc_size = sizeof(InternalNode);
   if (begin_meta_idx > 0) {
     // Will not copy from the first element (dummy key), so add it here
-    alloc_size += (sizeof(uint64_t) + sizeof(RecordMetadata));
+    alloc_size += src_node->record_metadata[0].GetTotalLength();
+    alloc_size += sizeof(RecordMetadata);
   }
 
   assert(nr_records > 0);
@@ -258,14 +259,15 @@ InternalNode::InternalNode(uint32_t node_size,
 }
 
 // Insert record to this internal node. The node is frozen at this time.
-void InternalNode::PrepareForSplit(Stack &stack,
+bool InternalNode::PrepareForSplit(Stack &stack,
                                    uint32_t split_threshold,
                                    const char *key,
                                    uint32_t key_size,
                                    uint64_t left_child_addr,   // [key]'s left child pointer
                                    uint64_t right_child_addr,  // [key]'s right child pointer
                                    InternalNode **new_node,
-                                   pmwcas::DescriptorPool *pool) {
+                                   pmwcas::DescriptorPool *pool,
+                                   bool backoff) {
   uint32_t data_size = header.size + key_size +
       sizeof(right_child_addr) + sizeof(RecordMetadata);
   uint32_t new_node_size = sizeof(InternalNode) + data_size;
@@ -273,7 +275,7 @@ void InternalNode::PrepareForSplit(Stack &stack,
     // good boy
     InternalNode::New(this, key, key_size, left_child_addr,
                       right_child_addr, new_node);
-    return;
+    return true;
   }
 
   // After adding a key and pointers the new node would be too large. This
@@ -285,15 +287,14 @@ void InternalNode::PrepareForSplit(Stack &stack,
   InternalNode *left = nullptr;
   InternalNode *right = nullptr;
   auto *pd = pool->AllocateDescriptor();
-  auto index_l = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
-                                        reinterpret_cast<uint64_t>(nullptr),
-                                        pmwcas::Descriptor::kRecycleOnRecovery);
-  auto ptr_l = pd->GetNewValuePtr(index_l);
-
-  auto index_r = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
-                                        reinterpret_cast<uint64_t>(nullptr),
-                                        pmwcas::Descriptor::kRecycleOnRecovery);
-  auto ptr_r = pd->GetNewValuePtr(index_r);
+  pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
+                         reinterpret_cast<uint64_t>(nullptr),
+                         pmwcas::Descriptor::kRecycleOnRecovery);
+  pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
+                         reinterpret_cast<uint64_t>(nullptr),
+                         pmwcas::Descriptor::kRecycleOnRecovery);
+  uint64_t *ptr_r = pd->GetNewValuePtr(0);
+  uint64_t *ptr_l = pd->GetNewValuePtr(1);
 
   // Figure out where the new key will go
   auto separator_meta = record_metadata[n_left];
@@ -326,6 +327,7 @@ void InternalNode::PrepareForSplit(Stack &stack,
   }
   assert(*ptr_l);
   assert(*ptr_r);
+  pd->Abort();
 
   // Pop here as if this were a leaf node so that when we get back to the
   // original caller, we get stack top as the "parent"
@@ -338,27 +340,25 @@ void InternalNode::PrepareForSplit(Stack &stack,
     // Good!
     InternalNode::New(separator_key, separator_key_size,
                       (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node);
-    pd->Finish();
-    return;
+    return true;
   }
 
-  uint64_t freeze_retry = 0;
-  while (true) {
-    if (parent->Freeze(pool) || freeze_retry > MAX_FREEZE_RETRY) {
-      parent->PrepareForSplit(stack, split_threshold,
-                              separator_key, separator_key_size,
-                              (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node, pool);
-      pd->Finish();
-      return;
-    } else {
-      stack.Clear();
-      stack.tree->TraverseToNode(&stack, separator_key, separator_key_size, this);
-      assert(stack.Top());
-      stack.Pop();
-      parent = stack.Top()->node;
-      freeze_retry += 1;
-    }
+  // Try to freeze the parent node first
+  bool frozen_by_me = false;
+  while (!parent->IsFrozen(pool->GetEpoch())) {
+    frozen_by_me = parent->Freeze(pool);
   }
+
+  // Someone else froze the parent node and we are told not to compete with
+  // others (for now)
+  if (!frozen_by_me && backoff) {
+    return false;
+  }
+
+  return parent->PrepareForSplit(stack, split_threshold,
+                                 separator_key, separator_key_size,
+                                 (uint64_t)*ptr_l, (uint64_t)*ptr_r,
+                                 new_node, pool, backoff);
 }
 
 void LeafNode::New(LeafNode **mem, uint32_t node_size) {
@@ -512,7 +512,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 
   // Now do the PMwCAS
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&header.status.word, expected_status.word, desired_status.word);
+  pd->AddEntry(&(&header.status)->word, expected_status.word, desired_status.word);
   pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
   if (!pd->MwCAS()) {
     goto retry;
@@ -557,7 +557,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
     return ReturnCode::NodeFrozen();
   }
   pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&header.status.word, s.word, s.word);
+  pd->AddEntry(&(&header.status)->word, s.word, s.word);
   pd->AddEntry(&meta_ptr->meta, desired_meta.meta, new_meta.meta);
   if (pd->MwCAS()) {
     return ReturnCode::Ok();
@@ -569,24 +569,23 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
                                            uint32_t key_size,
                                            pmwcas::EpochManager *epoch) {
-  auto record = SearchRecordMeta(epoch, key, key_size);
-  if (record == nullptr) {
+  auto metadata = SearchRecordMeta(epoch, key, key_size, nullptr);
+  if (metadata.IsVacant()) {
     return IsUnique;
   }
-  auto meta_data = RecordMetadata{
-      reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record)->GetValue(epoch)
-  };
   // we need to perform a key compare again
   // consider this case:
   // a key is inserting when we "SearchRecordMeta"
   // when get back, this meta may have finished inserting, so the following if will be false
   // however, this key may not be duplicate, so we need to compare the key again
   // even if this key is not duplicate, we need to return a "Recheck"
-  if (meta_data.IsInserting()) {
+  if (metadata.IsInserting()) {
     return ReCheck;
   }
-  char *curr_key = GetKey(meta_data);
-  if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
+  assert(metadata.IsVisible());
+  char *curr_key = GetKey(metadata);
+  assert(curr_key);
+  if (KeyCompare(key, key_size, curr_key, metadata.GetKeyLength()) == 0) {
     return Duplicate;
   }
   return ReCheck;
@@ -599,20 +598,16 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
   if (current_status.IsFrozen()) {
     return NodeFrozen;
   }
-  auto record = SearchRecordMeta(epoch, key, key_size, header.sorted_count, end_pos);
-  if (record == nullptr) {
+  auto metadata = SearchRecordMeta(epoch, key, key_size, nullptr, header.sorted_count, end_pos);
+  if (metadata.IsVacant()) {
     return IsUnique;
   }
-  auto meta_data = RecordMetadata{
-      reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(record)->GetValue(epoch)
-  };
-  if (meta_data.IsInserting()) {
+  if (metadata.IsInserting()) {
     goto retry;
-  } else if (!meta_data.IsVisible()) {
-    return IsUnique;
   }
-  char *curr_key = GetKey(meta_data);
-  if (KeyCompare(key, key_size, curr_key, meta_data.GetKeyLength()) == 0) {
+  assert(metadata.IsVisible());
+  char *curr_key = GetKey(metadata);
+  if (KeyCompare(key, key_size, curr_key, metadata.GetKeyLength()) == 0) {
     return Duplicate;
   }
   return IsUnique;
@@ -623,22 +618,22 @@ ReturnCode LeafNode::Update(const char *key,
                             uint64_t payload,
                             pmwcas::DescriptorPool *pmwcas_pool) {
   retry:
-  auto old_status = header.status;
+  auto old_status = header.GetStatus(pmwcas_pool->GetEpoch());
   if (old_status.IsFrozen()) {
     return ReturnCode::NodeFrozen();
   }
 
-  auto *meta_ptr = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
-  if (meta_ptr == nullptr || !meta_ptr->IsVisible()) {
+  RecordMetadata *meta_ptr = nullptr;
+  auto metadata = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, &meta_ptr);
+  if (metadata.IsVacant()) {
     return ReturnCode::NotFound();
-  } else if (meta_ptr->IsInserting()) {
+  } else if (metadata.IsInserting()) {
     goto retry;
   }
-  auto old_meta_value = meta_ptr->meta;
 
-  char *record_key;
-  uint64_t record_payload;
-  GetRawRecord(*meta_ptr, &record_key, &record_payload, pmwcas_pool->GetEpoch());
+  char *record_key = nullptr;
+  uint64_t record_payload = 0;
+  GetRawRecord(metadata, &record_key, &record_payload, pmwcas_pool->GetEpoch());
   if (payload == record_payload) {
     return ReturnCode::Ok();
   }
@@ -647,10 +642,10 @@ ReturnCode LeafNode::Update(const char *key,
 //  2. make sure meta data is not changed
 //  3. make sure status word is not changed
   auto pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(reinterpret_cast<uint64_t *>(record_key + meta_ptr->GetPaddedKeyLength()),
+  pd->AddEntry(reinterpret_cast<uint64_t *>(record_key + metadata.GetPaddedKeyLength()),
                record_payload, payload);
-  pd->AddEntry(&meta_ptr->meta, old_meta_value, meta_ptr->meta);
-  pd->AddEntry(&header.status.word, old_status.word, old_status.word);
+  pd->AddEntry(&meta_ptr->meta, metadata.meta, metadata.meta);
+  pd->AddEntry(&(&header.status)->word, old_status.word, old_status.word);
 
   if (!pd->MwCAS()) {
     goto retry;
@@ -658,12 +653,13 @@ ReturnCode LeafNode::Update(const char *key,
   return ReturnCode::Ok();
 }
 
-RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
-                                           const char *key,
-                                           uint32_t key_size,
-                                           uint32_t start_pos,
-                                           uint32_t end_pos,
-                                           bool check_concurrency) {
+RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
+                                          const char *key,
+                                          uint32_t key_size,
+                                          RecordMetadata **out_metadata_ptr,
+                                          uint32_t start_pos,
+                                          uint32_t end_pos,
+                                          bool check_concurrency) {
   if (start_pos < header.sorted_count) {
     // Binary search on sorted field
     int64_t first = start_pos;
@@ -672,33 +668,25 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
     while (header.sorted_count != 0 && first <= last) {
       middle = (first + last) / 2;
 
-      // Encountered a deleted record
-      // Try to adjust the middle to left ones
-      while (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible() && first < middle) {
-        middle -= 1;
-      }
+      RecordMetadata current = GetMetadata(static_cast<uint32_t>(middle), epoch);
 
-      // Every record on the left is deleted, now try right ones
-      middle = (first + last) / 2;
-      while (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible() && middle < last) {
-        middle += 1;
-      }
-
-      // Every record in the sorted field is deleted
-      if (!GetMetadata(static_cast<uint32_t>(middle), epoch).IsVisible()) {
+      // The found record isn't visible
+      if (!current.IsVisible()) {
         break;
       }
 
-      uint64_t payload = 0;
       char *current_key = nullptr;
-      auto current = GetMetadata(static_cast<uint32_t>(middle), epoch);
-      GetRawRecord(current, nullptr, &current_key, &payload, epoch);
+      GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
+      assert(current_key || !is_leaf);
 
       auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
       if (cmp_result < 0) {
         last = middle - 1;
-      } else if (cmp_result == 0 && current.IsVisible()) {
-        return record_metadata + middle;
+      } else if (cmp_result == 0) {
+        if (out_metadata_ptr) {
+          *out_metadata_ptr = record_metadata + middle;
+        }
+        return current;
       } else {
         first = middle + 1;
       }
@@ -708,56 +696,65 @@ RecordMetadata *BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
     // Linear search on unsorted field
     uint32_t linear_end = std::min<uint32_t>(header.GetStatus(epoch).GetRecordCount(), end_pos);
     for (uint32_t i = header.sorted_count; i < linear_end; i++) {
-      auto current = GetMetadata(i, epoch);
+      RecordMetadata current = GetMetadata(i, epoch);
 
-      // Encountered an in-progress insert, recheck later
-      if (current.IsInserting() && check_concurrency) {
-        return record_metadata + i;
-      } else if (current.IsInserting() && !check_concurrency) {
-        continue;
+      if (current.IsInserting()) {
+        if (check_concurrency) {
+          // Encountered an in-progress insert, recheck later
+          if (out_metadata_ptr) {
+            *out_metadata_ptr = record_metadata + i;
+          }
+          return current;
+        } else {
+          continue;
+        }
       }
 
-      uint64_t payload = 0;
-      char *current_key = nullptr;
-      GetRawRecord(current, nullptr, &current_key, &payload, epoch);
-      if (current.IsVisible() &&
-          KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
-        return record_metadata + i;
+      if (current.IsVisible()) {
+        char *current_key = nullptr;
+        GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
+        assert(current_key || !is_leaf);
+        if (KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
+          if (out_metadata_ptr) {
+            *out_metadata_ptr = record_metadata + i;
+          }
+          return current;
+        }
       }
     }
   }
-  return nullptr;
+  return RecordMetadata{0};
 }
 
 ReturnCode LeafNode::Delete(const char *key,
                             uint16_t key_size,
                             pmwcas::DescriptorPool *pmwcas_pool) {
-  NodeHeader::StatusWord old_status = header.status;
+  NodeHeader::StatusWord old_status = header.GetStatus(pmwcas_pool->GetEpoch());
   if (old_status.IsFrozen()) {
     return ReturnCode::NodeFrozen();
   }
 
   retry:
-  auto record_meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size);
-  if (record_meta == nullptr) {
+  RecordMetadata *meta_ptr = nullptr;
+  auto metadata = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, &meta_ptr);
+  if (metadata.IsVacant()) {
     return ReturnCode::NotFound();
-  } else if (record_meta->IsInserting()) {
+  } else if (metadata.IsInserting()) {
     // FIXME(hao): not mentioned in the paper, should confirm later;
     goto retry;
   }
 
-  auto old_meta = *record_meta;
-  auto new_meta = *record_meta;
+  auto new_meta = metadata;
   new_meta.SetVisible(false);
   new_meta.SetOffset(0);
 
   auto new_status = old_status;
   auto old_delete_size = old_status.GetDeleteSize();
-  new_status.SetDeleteSize(old_delete_size + record_meta->GetTotalLength());
+  new_status.SetDeleteSize(old_delete_size + metadata.GetTotalLength());
 
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&header.status.word, old_status.word, new_status.word);
-  pd->AddEntry(&(record_meta->meta), old_meta.meta, new_meta.meta);
+  pd->AddEntry(&(&header.status)->word, old_status.word, new_status.word);
+  pd->AddEntry(&meta_ptr->meta, metadata.meta, new_meta.meta);
   if (!pd->MwCAS()) {
     goto retry;
   }
@@ -765,14 +762,15 @@ ReturnCode LeafNode::Delete(const char *key,
 }
 ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
                           pmwcas::DescriptorPool *pmwcas_pool) {
-  auto meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, 0, (uint32_t) -1, false);
-  if (meta == nullptr || !meta->IsVisible()) {
+  auto meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, nullptr,
+                               0, (uint32_t) -1, false);
+  if (meta.IsVacant()) {
     return ReturnCode::NotFound();
   }
 
-  char *source_addr = (reinterpret_cast<char *>(this) + meta->GetOffset());
+  char *source_addr = (reinterpret_cast<char *>(this) + meta.GetOffset());
   *payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-      source_addr + meta->GetPaddedKeyLength())->GetValue(pmwcas_pool->GetEpoch());
+      source_addr + meta.GetPaddedKeyLength())->GetValue(pmwcas_pool->GetEpoch());
   return ReturnCode::Ok();
 }
 
@@ -780,14 +778,15 @@ ReturnCode LeafNode::RangeScan(const char *key1,
                                uint32_t size1,
                                const char *key2,
                                uint32_t size2,
-                               std::vector<std::unique_ptr<bztree::Record>> *result,
+                               std::vector<Record *> *result,
                                pmwcas::DescriptorPool *pmwcas_pool) {
   // entering a new epoch and copying the data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
   // scan the sorted fields first
   uint32_t i = 0;
-  while (i < header.status.GetRecordCount()) {
+  auto count = header.GetStatus(pmwcas_pool->GetEpoch()).GetRecordCount();
+  while (i < count) {
     auto curr_meta = GetMetadata(i, pmwcas_pool->GetEpoch());
     if (!curr_meta.IsVisible()) {
       i += 1;
@@ -807,7 +806,7 @@ ReturnCode LeafNode::RangeScan(const char *key1,
     i += 1;
   }
   std::sort(result->begin(), result->end(),
-            [this](std::unique_ptr<Record> &a, std::unique_ptr<Record> &b) -> bool {
+            [this](Record *a, Record *b) -> bool {
               auto cmp = BaseNode::KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
                                               b->GetKey(), b->meta.GetKeyLength());
               return cmp < 0;
@@ -824,7 +823,7 @@ bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
   desired.Freeze();
 
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&header.status.word, expected.word, desired.word);
+  pd->AddEntry(&(&header.status)->word, expected.word, desired.word);
   return pd->MwCAS();
 }
 
@@ -857,7 +856,8 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
   // there should not be any on-going pmwcas
   assert(header.status.IsFrozen());
   uint32_t total_size = 0;
-  for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
+  uint32_t count = header.GetStatus(epoch).GetRecordCount();
+  for (uint32_t i = 0; i < count; ++i) {
     // TODO(tzwang): handle deletes
     auto meta = record_metadata[i];
     if (meta.IsVisible()) {
@@ -927,7 +927,7 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   // Conduct a 2-word PMwCAS to swap in the new child pointer while ensuring the
   // node isn't frozen by a concurrent thread
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&header.status.word, status.word, status.word);
+  pd->AddEntry(&(&header.status)->word, status.word, status.word);
   pd->AddEntry(GetPayloadPtr(meta),
                reinterpret_cast<uint64_t>(old_child),
                reinterpret_cast<uint64_t>(new_child));
@@ -947,7 +947,7 @@ uint32_t InternalNode::GetChildIndex(const char *key,
   while (true) {
     mid = (left + right) / 2;
     auto meta = GetMetadata(static_cast<uint32_t>(mid), pool->GetEpoch());
-    char *record_key;
+    char *record_key = nullptr;
     GetRawRecord(meta, nullptr, &record_key, nullptr, pool->GetEpoch());
     auto cmp = KeyCompare(key, key_size, record_key, meta.GetKeyLength());
     if (cmp == 0) {
@@ -974,12 +974,13 @@ uint32_t InternalNode::GetChildIndex(const char *key,
   }
 }
 
-void LeafNode::PrepareForSplit(Stack &stack,
+bool LeafNode::PrepareForSplit(Stack &stack,
                                uint32_t split_threshold,
                                pmwcas::DescriptorPool *pmwcas_pool,
                                LeafNode **left, LeafNode **right,
-                               InternalNode **new_parent) {
-  LOG_IF(FATAL, header.status.GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
+                               InternalNode **new_parent,
+                               bool backoff) {
+  LOG_IF(FATAL, header.GetStatus(pmwcas_pool->GetEpoch()).GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
   LeafNode::New(left, this->header.size);
@@ -1030,63 +1031,37 @@ void LeafNode::PrepareForSplit(Stack &stack,
                       reinterpret_cast<uint64_t>(*left),
                       reinterpret_cast<uint64_t>(*right),
                       new_parent);
-    return;
+    return true;
   }
 
-  uint64_t freeze_retry = 0;
-  while (true) {
+  bool frozen_by_me = false;
+  while (!parent->IsFrozen(pmwcas_pool->GetEpoch())) {
+    frozen_by_me = parent->Freeze(pmwcas_pool);
+  }
+
+  if (!frozen_by_me && backoff) {
+    return false;
+  } else {
     // Has a parent node. PrepareForSplit will see if we need to split this
     // parent node as well, and if so, return a new (possibly upper-level) parent
     // node that needs to be installed to its parent
-    if (parent->Freeze(pmwcas_pool) || freeze_retry > MAX_FREEZE_RETRY) {
-      parent->PrepareForSplit(stack, split_threshold, key,
-                              separator_meta.GetKeyLength(),
-                              reinterpret_cast<uint64_t>(*left),
-                              reinterpret_cast<uint64_t>(*right),
-                              new_parent,
-                              pmwcas_pool);
-      return;
-    } else {
-      // for whatever reason cannot freeze the node
-      // re-traverse the tree to find the new node.
-      stack.Clear();
-      stack.tree->TraverseToNode(&stack, key, separator_meta.GetKeyLength(), this);
-
-      // must have a parent in this case
-      assert(stack.Top());
-      stack.Pop();
-      parent = stack.Top()->node;
-      freeze_retry += 1;
-    }
+    return parent->PrepareForSplit(stack, split_threshold, key,
+                                   separator_meta.GetKeyLength(),
+                                   reinterpret_cast<uint64_t>(*left),
+                                   reinterpret_cast<uint64_t>(*right),
+                                   new_parent,
+                                   pmwcas_pool,
+                                   backoff);
   }
-}
-
-BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
-                                 const char *key, uint16_t key_size, bztree::BaseNode *stop_at) {
-  BaseNode *node = GetRootNodeSafe();
-  InternalNode *parent = nullptr;
-  uint32_t meta_index = 0;
-  while (node != stop_at) {
-    assert(!node->IsLeaf());
-    parent = reinterpret_cast<InternalNode *>(node);
-    meta_index = parent->GetChildIndex(key, key_size, GetPMWCASPool());
-    node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
-    assert(node);
-    if (stack != nullptr) {
-      stack->Push(parent, parent->GetMetadata(meta_index, GetPMWCASPool()->GetEpoch()));
-    }
-  }
-  if (stack != nullptr) {
-    stack->Push(reinterpret_cast<InternalNode *>(node),
-                node->GetMetadata(meta_index, GetPMWCASPool()->GetEpoch()));
-  }
-  return node;
 }
 
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
                                  bool le_child) {
   BaseNode *node = GetRootNodeSafe();
+  if (stack) {
+    stack->SetRoot(node);
+  }
   InternalNode *parent = nullptr;
   uint32_t meta_index = 0;
   assert(node);
@@ -1105,26 +1080,35 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
 ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   stack.tree = this;
-  ReturnCode rc;
-  pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
   uint64_t freeze_retry = 0;
-  do {
+
+  while (true) {
     stack.Clear();
+    pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
     LeafNode *node = TraverseToLeaf(&stack, key, key_size);
 
     // Try to insert to the leaf node
-    rc = node->Insert(key, key_size, payload, GetPMWCASPool(), parameters.split_threshold);
-    if (!rc.IsNotEnoughSpace()) {
-      continue;
+    auto rc = node->Insert(key, key_size, payload, GetPMWCASPool(), parameters.split_threshold);
+    if (rc.IsOk() || rc.IsKeyExists()) {
+      return rc;
     }
 
-    // node may be frozen upon recovery
-    if (!node->Freeze(GetPMWCASPool())) {
-      freeze_retry += 1;
-      if (freeze_retry <= MAX_FREEZE_RETRY) {
+    assert(rc.IsNotEnoughSpace() || rc.IsNodeFrozen());
+    if (rc.IsNodeFrozen()) {
+      if (++freeze_retry <= MAX_FREEZE_RETRY) {
+        continue;
+      }
+    } else {
+      bool frozen_by_me = false;
+      while (!node->IsFrozen(GetPMWCASPool()->GetEpoch())) {
+        frozen_by_me = node->Freeze(GetPMWCASPool());
+      }
+      if (!frozen_by_me && ++freeze_retry <= MAX_FREEZE_RETRY) {
         continue;
       }
     }
+
+    bool backoff = (freeze_retry <= MAX_FREEZE_RETRY);
 
     // Should split and we have three cases to handle:
     // 1. Root node is a leaf node - install [parent] as the new root
@@ -1138,23 +1122,22 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     InternalNode *parent = nullptr;
     auto *pd = GetPMWCASPool()->AllocateDescriptor();
     // TODO(hao): should implement a cascading memory recycle callback
-    auto index_l = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
-                                          reinterpret_cast<uint64_t>(nullptr),
-                                          pmwcas::Descriptor::kRecycleOnRecovery);
-    auto ptr_l = pd->GetNewValuePtr(index_l);
-    auto index_r = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
-                                          reinterpret_cast<uint64_t>(nullptr),
-                                          pmwcas::Descriptor::kRecycleOnRecovery);
-    auto ptr_r = pd->GetNewValuePtr(index_r);
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&parent),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    uint64_t *ptr_r = pd->GetNewValuePtr(0);
+    uint64_t *ptr_l = pd->GetNewValuePtr(1);
+    uint64_t *ptr_parent = pd->GetNewValuePtr(2);
 
-    auto index_parent = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&parent),
-                                               reinterpret_cast<uint64_t>(nullptr),
-                                               pmwcas::Descriptor::kRecycleOnRecovery);
-    auto ptr_parent = pd->GetNewValuePtr(index_parent);
     // Note that when we split internal nodes (if needed), stack will get
     // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
     // So we save the root node here in case we need to change root later.
-
 
     // Now split the leaf node. PrepareForSplit will return the node that we
     // need to install to the grandparent node (will be stack top, if any). If
@@ -1167,72 +1150,55 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     // on its top the "parent" node and the "grandparent" node (if any) that
     // points to the parent node. As a result, we directly install a pointer to
     // the new parent node returned by leaf.PrepareForSplit to the grandparent.
-    node->PrepareForSplit(stack,
-                          parameters.split_threshold,
-                          GetPMWCASPool(),
-                          reinterpret_cast<LeafNode **>(ptr_l),
-                          reinterpret_cast<LeafNode **>(ptr_r),
-                          reinterpret_cast<InternalNode **>(ptr_parent));
+    bool should_proceed = node->PrepareForSplit(stack,
+                                                parameters.split_threshold,
+                                                GetPMWCASPool(),
+                                                reinterpret_cast<LeafNode **>(ptr_l),
+                                                reinterpret_cast<LeafNode **>(ptr_r),
+                                                reinterpret_cast<InternalNode **>(ptr_parent),
+                                                backoff);
+    pd->Abort();
+    if (!should_proceed) {
+      // TODO(tzwang): free memory allocated in ptr_l, ptr_r, and ptr_parent
+      continue;
+    }
 
     assert(*ptr_parent);
 
-    do {
-      auto *top = stack.Pop();
-      InternalNode *old_parent = nullptr;
-      if (top) {
-        old_parent = top->node;
-      }
+    auto *top = stack.Pop();
+    InternalNode *old_parent = nullptr;
+    if (top) {
+      old_parent = top->node;
+    }
 
-      top = stack.Pop();
-      InternalNode *grand_parent = nullptr;
-      if (top) {
-        grand_parent = top->node;
-      }
+    top = stack.Pop();
+    InternalNode *grand_parent = nullptr;
+    if (top) {
+      grand_parent = top->node;
+    }
 
-      if (grand_parent) {
-        assert(old_parent);
-        // There is a grand parent. We need to swap out the pointer to the old
-        // parent and install the pointer to the new parent.
+    if (grand_parent) {
+      assert(old_parent);
+      // There is a grand parent. We need to swap out the pointer to the old
+      // parent and install the pointer to the new parent.
 #ifdef PMDK
-        auto result = grand_parent->Update(
-            top->meta, Allocator::Get()->GetOffset(old_parent),
-            reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
+      auto result = grand_parent->Update(
+          top->meta, Allocator::Get()->GetOffset(old_parent),
+          reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
 #else
-        auto result = grand_parent->Update(top->meta, old_parent,
-            reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
+      auto result = grand_parent->Update(top->meta, old_parent,
+          reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
 #endif
-        if (result.IsOk()) {
-          pd->Finish();
-          break;
-        }
-        stack.Clear();
-        TraverseToNode(&stack, key, key_size, old_parent);
-      } else {
-        // No grand parent or already popped out by during split propagation
-        // root here is thread safe. why?
-        // whenever we want to install a root,
-        // the old root must be already freezed by our thread, before prepare for split.
-        // once it's freezed, other thread cannot install new root.
-//        assert(old_parent == nullptr || old_parent == stack.tree->root);
-        auto root_now = stack.tree->root;
-        auto result = ChangeRoot(reinterpret_cast<uint64_t>(root_now),
-                                 reinterpret_cast<InternalNode *>(*ptr_parent));
-        if (result) {
-          pd->Finish();
-          break;
-        }
-        LOG(INFO) << "Root not installed";
-        // unsuccessful install, retry
-        stack.Clear();
-        TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
-      }
-    } while (true);
-  } while (!rc.IsOk() && !rc.IsKeyExists());
-  return rc;
+    } else {
+      // No grand parent or already popped out by during split propagation
+      ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
+                 reinterpret_cast<InternalNode *>(*ptr_parent));
+    }
+  }
 }
 
 bool BzTree::ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root) {
-  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
+  pmwcas::Descriptor *pd = GetPMWCASPool()->AllocateDescriptor();
 
   pd->AddEntry(reinterpret_cast<uint64_t *>(&root),
                expected_root_addr,
@@ -1305,25 +1271,21 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   thread_local Stack stack;
   stack.tree = this;
   ReturnCode rc;
-  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+  auto *epoch = GetPMWCASPool()->GetEpoch();
+  pmwcas::EpochGuard guard(epoch);
   do {
     stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size, pmwcas_pool);
+    LeafNode *node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
-    rc = node->Delete(key, key_size, pmwcas_pool);
-    auto new_block_size = node->GetHeader()->status.GetBlockSize();
+    rc = node->Delete(key, key_size, GetPMWCASPool());
+    auto new_block_size = node->GetHeader()->GetStatus(epoch).GetBlockSize();
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes, not finished
     }
   } while (rc.IsNodeFrozen());
   return rc;
-}
-
-std::unique_ptr<Iterator> BzTree::RangeScan(const char *key1, uint16_t size1,
-                                            const char *key2, uint16_t size2) {
-  return std::make_unique<Iterator>(this, key1, size1, key2, size2);
 }
 
 void BzTree::Dump() {

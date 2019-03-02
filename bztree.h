@@ -54,12 +54,12 @@ struct ReturnCode {
   constexpr bool inline IsPMWCASFailure() const { return rc == RetPMWCASFail; }
   constexpr bool inline IsNotEnoughSpace() const { return rc == RetNotEnoughSpace; }
 
-  static ReturnCode NodeFrozen() { return ReturnCode(RetNodeFrozen); }
-  static ReturnCode KeyExists() { return ReturnCode(RetKeyExists); }
-  static ReturnCode PMWCASFailure() { return ReturnCode(RetPMWCASFail); }
-  static ReturnCode Ok() { return ReturnCode(RetOk); }
-  static ReturnCode NotFound() { return ReturnCode(RetNotFound); }
-  static ReturnCode NotEnoughSpace() { return ReturnCode(RetNotEnoughSpace); }
+  static inline ReturnCode NodeFrozen() { return ReturnCode(RetNodeFrozen); }
+  static inline ReturnCode KeyExists() { return ReturnCode(RetKeyExists); }
+  static inline ReturnCode PMWCASFailure() { return ReturnCode(RetPMWCASFail); }
+  static inline ReturnCode Ok() { return ReturnCode(RetOk); }
+  static inline ReturnCode NotFound() { return ReturnCode(RetNotFound); }
+  static inline ReturnCode NotEnoughSpace() { return ReturnCode(RetNotEnoughSpace); }
 };
 
 struct NodeHeader {
@@ -100,6 +100,7 @@ struct NodeHeader {
     }
 
     inline void PrepareForInsert(uint32_t size) {
+      LOG_IF(FATAL, size == 0);
       // Increment [record count] by one and [block size] by payload size
       word += ((uint64_t{1} << 44) + (uint64_t{size} << 22));
     }
@@ -132,7 +133,7 @@ struct RecordMetadata {
   inline bool IsVacant() { return meta == 0; }
   inline uint16_t GetKeyLength() const { return (uint16_t) ((meta & kKeyLengthMask) >> 16); }
 
-//    Get the padded key length from accurate key length
+  // Get the padded key length from accurate key length
   inline uint16_t GetPaddedKeyLength() {
     auto key_length = GetKeyLength();
     return PadKeyLength(key_length);
@@ -185,7 +186,7 @@ struct RecordMetadata {
     // record is not visible
     // and record allocation epoch equal to global index epoch
     return !IsVisible() && OffsetIsEpoch() &&
-        ((meta & kAllocationEpochMask) >> 32 == global_epoch);
+        (((meta & kAllocationEpochMask) >> 32) == global_epoch);
   }
 };
 
@@ -218,6 +219,13 @@ class BaseNode {
  public:
   static const inline int KeyCompare(const char *key1, uint32_t size1,
                                      const char *key2, uint32_t size2) {
+    LOG_IF(FATAL, !key1 && !key2);
+    if (!key1) {
+      return -1;
+    } else if (!key2) {
+      return 1;
+    }
+
     auto cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
     if (cmp == 0) {
       return size1 - size2;
@@ -237,14 +245,16 @@ class BaseNode {
   }
   inline bool IsLeaf() { return is_leaf; }
   inline NodeHeader *GetHeader() { return &header; }
-//  Return a meta (not deleted) or nullptr (deleted or not exist)
-//  It's user's responsibility to check IsInserting()
-//  if check_concurrency is false, it will ignore all inserting record
-  RecordMetadata *SearchRecordMeta(pmwcas::EpochManager *epoch,
-                                   const char *key, uint32_t key_size,
-                                   uint32_t start_pos = 0,
-                                   uint32_t end_pos = (uint32_t) -1,
-                                   bool check_concurrency = true);
+
+  // Return a meta (not deleted) or nullptr (deleted or not exist)
+  // It's user's responsibility to check IsInserting()
+  // if check_concurrency is false, it will ignore all inserting record
+  RecordMetadata SearchRecordMeta(pmwcas::EpochManager *epoch,
+                                  const char *key, uint32_t key_size,
+                                  RecordMetadata **out_metadata,
+                                  uint32_t start_pos = 0,
+                                  uint32_t end_pos = (uint32_t) -1,
+                                  bool check_concurrency = true);
 
   // Get the key and payload (8-byte), not thread-safe
   // Outputs:
@@ -265,7 +275,7 @@ class BaseNode {
     }
     auto padded_key_len = meta.GetPaddedKeyLength();
     if (key != nullptr) {
-//    zero key length dummy record
+      // zero key length dummy record
       *key = padded_key_len == 0 ? nullptr : tmp_data;
     }
 
@@ -313,11 +323,11 @@ class InternalNode : public BaseNode {
                uint64_t left_most_child_addr = 0);
   ~InternalNode() = default;
 
-  void PrepareForSplit(Stack &stack, uint32_t split_threshold,
+  bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
                        const char *key, uint32_t key_size,
                        uint64_t left_child_addr, uint64_t right_child_addr,
                        InternalNode **new_node,
-                       pmwcas::DescriptorPool *pool);
+                       pmwcas::DescriptorPool *pool, bool backoff);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
     char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
@@ -353,6 +363,7 @@ struct Stack {
   Frame frames[kMaxFrames];
   uint32_t num_frames;
   BzTree *tree;
+  BaseNode *root;
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
@@ -366,7 +377,8 @@ struct Stack {
   inline void Clear() { root = nullptr; num_frames = 0; }
   inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
-  inline InternalNode *GetRoot() { return num_frames > 0 ? frames[0].node : nullptr; }
+  inline BaseNode *GetRoot() { return root; }
+  inline void SetRoot(BaseNode *node) { root = node; }
 };
 
 struct Record;
@@ -385,10 +397,10 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold);
-  void PrepareForSplit(Stack &stack, uint32_t split_threshold,
+  bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
                        pmwcas::DescriptorPool *pmwcas_pool,
                        LeafNode **left, LeafNode **right,
-                       InternalNode **new_parent);
+                       InternalNode **new_parent, bool backoff);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
@@ -414,7 +426,7 @@ class LeafNode : public BaseNode {
                        uint32_t size1,
                        const char *key2,
                        uint32_t size2,
-                       std::vector<std::unique_ptr<Record>> *result,
+                       std::vector<Record *> *result,
                        pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
@@ -441,7 +453,7 @@ class LeafNode : public BaseNode {
     return header.size - GetUsedSpace(status);
   }
 
-  // Make sure this node is freezed before calling this function
+  // Make sure this node is frozen before calling this function
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
                              bool visible_only,
                              pmwcas::EpochManager *epoch);
@@ -460,41 +472,33 @@ struct Record {
   RecordMetadata meta;
   char data[0];
 
-  explicit Record(RecordMetadata meta) {
-    this->meta = meta;
-  }
-
-  static inline std::unique_ptr<Record> New(RecordMetadata meta, BaseNode *node,
-                                            pmwcas::EpochManager *epoch) {
+  explicit Record(RecordMetadata meta) : meta(meta) {}
+  static inline Record *New(RecordMetadata meta, BaseNode *node, pmwcas::EpochManager *epoch) {
     if (!meta.IsVisible()) {
       return nullptr;
     }
-    auto item_ptr = reinterpret_cast<Record *> (malloc(meta.GetTotalLength() + sizeof(meta)));
-    memset(item_ptr, 0, meta.GetTotalLength() + sizeof(Record));
-    auto item = std::make_unique<Record>(meta);
-    auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
+
+    Record *r = reinterpret_cast<Record *>(malloc(meta.GetTotalLength() + sizeof(meta)));
+    memset(r, 0, meta.GetTotalLength() + sizeof(Record));
+    new (r) Record(meta);
 
     // Key will never be changed and it will not be a pmwcas descriptor
     // but payload is fixed length 8-byte value, can be updated by pmwcas
-    memcpy(item->data,
-           reinterpret_cast<char *>(node) + meta.GetOffset(),
-           meta.GetPaddedKeyLength());
+    memcpy(r->data, reinterpret_cast<char *>(node) + meta.GetOffset(), meta.GetPaddedKeyLength());
+
+    auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
     auto payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        source_addr + meta.GetPaddedKeyLength())->GetValue(epoch);
-    memcpy(item->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
-    return item;
+                   source_addr + meta.GetPaddedKeyLength())->GetValue(epoch);
+    memcpy(r->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
+    return r;
   }
 
   inline const uint64_t GetPayload() {
     return *reinterpret_cast<uint64_t *>(data + meta.GetPaddedKeyLength());
   }
-  inline const char *GetKey() const {
-    return data;
-  }
-
+  inline const char *GetKey() const { return data; }
   inline bool operator<(const Record &out) {
-    auto out_key = out.GetKey();
-    auto cmp = BaseNode::KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
+    int cmp = BaseNode::KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
                                     out.GetKey(), out.meta.GetKeyLength());
     return cmp < 0;
   }
@@ -557,15 +561,15 @@ class BzTree {
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
-  std::unique_ptr<Iterator> RangeScan(const char *key1, uint16_t size1,
-                                      const char *key2, uint16_t size2);
+
+  inline std::unique_ptr<Iterator> RangeScan(const char *key1, uint16_t size1,
+                                      const char *key2, uint16_t size2) {
+    return std::make_unique<Iterator>(this, key1, size1, key2, size2);
+  }
+
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
-
-  // typically used when a parent is freezed and we want to re-find a new one.
-  BaseNode *TraverseToNode(Stack *stack, const char *key,
-                           uint16_t key_size, BaseNode *stop_at);
 
   void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
 #ifdef PMDK
@@ -627,11 +631,17 @@ class Iterator {
     item_it = item_vec.begin();
   }
 
-  Record *GetNext() {
+  ~Iterator() {
+    for (auto &v : item_vec) {
+      free(v);  // malloc-allocated Record
+    }
+  }
+
+  inline Record *GetNext() {
     auto old_it = item_it;
     if (item_it != item_vec.end()) {
       item_it += 1;
-      return (*old_it).get();
+      return *old_it;
     } else {
       auto &last_record = item_vec.back();
       node = this->tree->TraverseToLeaf(nullptr,
@@ -656,8 +666,8 @@ class Iterator {
   const char *end_key;
   uint16_t end_size;
   LeafNode *node;
-  std::vector<std::unique_ptr<Record>> item_vec;
-  std::vector<std::unique_ptr<Record>>::iterator item_it;
+  std::vector<Record *> item_vec;
+  std::vector<Record *>::iterator item_it;
 };
 
 }  // namespace bztree

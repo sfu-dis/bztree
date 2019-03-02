@@ -78,9 +78,7 @@ if(${PMEM_BACKEND} STREQUAL "PMDK")
 endif()
 link_libraries(${LINK_FLAGS})
 
-if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-  set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
-endif()
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Profile")
   add_compile_definitions("PROFILE")
