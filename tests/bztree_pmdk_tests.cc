@@ -27,7 +27,7 @@ class BzTreePMEMTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    pmwcas::Thread::ClearRegistry();
+    pmwcas::Thread::ClearRegistry(true);
   }
 };
 
@@ -136,8 +136,8 @@ GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
 
   MultiThreadUpsertTest t(item_per_thread, thread_count, bztree);
   t.Run(thread_count);
-  pmwcas::Thread::ClearRegistry();
   t.SanityCheck();
+  pmwcas::Thread::ClearRegistry(true);
 }
 
 GTEST_TEST(BztreePMEMTest, MultiThreadReadback) {
@@ -153,6 +153,7 @@ GTEST_TEST(BztreePMEMTest, MultiThreadReadback) {
 
   MultiThreadUpsertTest t(item_per_thread, thread_count, tree);
   t.SanityCheck();
+  pmwcas::Thread::ClearRegistry(true);
 }
 
 GTEST_TEST(BztreePMEMTest, TreeSanityCheck) {
@@ -166,6 +167,7 @@ GTEST_TEST(BztreePMEMTest, TreeSanityCheck) {
   auto tree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
   tree->Recovery();
   tree->Dump();
+  pmwcas::Thread::ClearRegistry(true);
 }
 
 int main(int argc, char **argv) {
