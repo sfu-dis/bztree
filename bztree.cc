@@ -1,8 +1,9 @@
-// Copyright (c) Simon Fraser University
+// Copyright (c) Simon Fraser University. All rights reserved.
+// Licensed under the MIT license.
 //
 // Authors:
-// Tianzheng Wang <tzwang@sfu.ca>
 // Xiangpeng Hao <xiangpeng_hao@sfu.ca>
+// Tianzheng Wang <tzwang@sfu.ca>
 
 #include <algorithm>
 #include <iostream>
@@ -980,7 +981,8 @@ bool LeafNode::PrepareForSplit(Stack &stack,
                                LeafNode **left, LeafNode **right,
                                InternalNode **new_parent,
                                bool backoff) {
-  LOG_IF(FATAL, header.GetStatus(pmwcas_pool->GetEpoch()).GetRecordCount() <= 2) << "Fewer than 2 records, can't split";
+  LOG_IF(FATAL, header.GetStatus(pmwcas_pool->GetEpoch()).GetRecordCount() <= 2)
+    << "Fewer than 2 records, can't split";
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
   LeafNode::New(left, this->header.size);

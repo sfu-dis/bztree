@@ -1,8 +1,9 @@
-// Copyright (c) Simon Fraser University
+// Copyright (c) Simon Fraser University. All rights reserved.
+// Licensed under the MIT license.
 //
 // Authors:
-// Tianzheng Wang <tzwang@sfu.ca>
 // Xiangpeng Hao <xiangpeng_hao@sfu.ca>
+// Tianzheng Wang <tzwang@sfu.ca>
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
