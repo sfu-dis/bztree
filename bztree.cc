@@ -1193,19 +1193,22 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
 #endif
     } else {
       // No grand parent or already popped out by during split propagation
-      ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
-                 reinterpret_cast<InternalNode *>(*ptr_parent));
+      // In case of PMDK, ptr_parent is already in PMDK offset format (done by
+      // InternalNode::New).
+      ChangeRoot(reinterpret_cast<uint64_t>(Allocator::Get()->GetOffset(stack.GetRoot())),
+                 *ptr_parent);
     }
   }
 }
 
-bool BzTree::ChangeRoot(uint64_t expected_root_addr, InternalNode *new_root) {
+bool BzTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr) {
   pmwcas::Descriptor *pd = GetPMWCASPool()->AllocateDescriptor();
 
-  pd->AddEntry(reinterpret_cast<uint64_t *>(&root),
-               expected_root_addr,
-               reinterpret_cast<uint64_t>(new_root),
-               pmwcas::Descriptor::kRecycleOnRecovery);
+  // Memory policy here is "Never" because the memory was allocated in
+  // PrepareForInsert/BzTree::Insert which uses a descriptor that specifies
+  // policy RecycleOnRecovery
+  pd->AddEntry(reinterpret_cast<uint64_t *>(&root), expected_root_addr, new_root_addr,
+               pmwcas::Descriptor::kRecycleNever);
   return pd->MwCAS();
 }
 
