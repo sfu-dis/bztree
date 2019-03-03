@@ -322,6 +322,10 @@ class InternalNode : public BaseNode {
                const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr,
                uint64_t left_most_child_addr = 0);
+  explicit InternalNode(uint32_t node_size) : BaseNode(false, node_size) {}
+  void InitSubNode(InternalNode **target_node, uint32_t start_pos, uint32_t record_size);
+
+  void CopyFrom(InternalNode *src_node, uint32_t start_pos, uint32_t end_pos);
   ~InternalNode() = default;
 
   bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
@@ -335,7 +339,7 @@ class InternalNode : public BaseNode {
     return reinterpret_cast<uint64_t *>(ptr);
   }
 
-  ReturnCode Split(Stack &stack, pmwcas::DescriptorPool *pool);
+  void Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backoff);
 
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
@@ -602,8 +606,13 @@ class BzTree {
     return index_epoch;
   }
 
- private:
   bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr);
+
+  inline ParameterSet GetParameters() {
+    return parameters;
+  }
+
+ private:
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;

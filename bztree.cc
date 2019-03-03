@@ -19,6 +19,70 @@ pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
 
 uint64_t global_epoch = 0;
 
+void InternalNode::InitSubNode(InternalNode **target_node,
+                               uint32_t start_pos, uint32_t record_size) {
+  uint32_t alloc_size = sizeof(InternalNode) +
+      record_size * (sizeof(RecordMetadata) + sizeof(uint64_t));
+#ifdef PMDK
+  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(target_node), alloc_size);
+  memset(*target_node, 0, alloc_size);
+  new(*target_node)InternalNode(alloc_size);
+  (*target_node)->CopyFrom(this, start_pos, start_pos + record_size);
+  pmwcas::NVRAM::Flush(alloc_size, *target_node);
+  *target_node = Allocator::Get()->GetOffset(*target_node);
+#else
+  pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(target_node), alloc_size);
+  memset(*target_node, 0, alloc_size);
+  new(*target_node) InternalNode(alloc_size);
+  (*target_node)->CopyFrom(this, start_pos, start_pos + record_size);
+#ifdef PMEM
+  pmwcas::NVRAM::Flush(alloc_size, *target_node);
+#endif  // PMEM
+#endif
+}
+
+void InternalNode::CopyFrom(InternalNode *src_node, uint32_t start_pos, uint32_t end_pos) {
+  uint32_t offset = this->header.size;
+  uint32_t insert_idx = 0;
+
+  // Internal node has a dummy left child
+  // we need to copy this if we start from 0
+  // otherwise we need to make a new one
+  if (start_pos == 0) {
+    offset -= sizeof(uint64_t);
+    record_metadata[insert_idx].FinalizeForInsert(offset, 0, sizeof(uint64_t));
+    memcpy(reinterpret_cast<char *>(this) + offset,
+           reinterpret_cast<char *>(src_node) + src_node->header.size - sizeof(uint64_t),
+           sizeof(uint64_t));
+    insert_idx += 1;
+  } else {
+    offset -= sizeof(uint64_t);
+    record_metadata[insert_idx].FinalizeForInsert(offset, 0, sizeof(uint64_t));
+    RecordMetadata split_meta = src_node->record_metadata[start_pos - 1];
+    memcpy(reinterpret_cast<char *>(this) + offset,
+           reinterpret_cast<char *>(src_node) + split_meta.GetOffset() +
+               split_meta.GetPaddedKeyLength(),
+           sizeof(uint64_t));
+  }
+  for (uint32_t i = start_pos; i < end_pos; i++) {
+    RecordMetadata meta = src_node->record_metadata[i];
+    if (!meta.IsVisible()) {
+      continue;
+    }
+    uint64_t m_payload = 0;
+    char *m_key = nullptr;
+    char *m_data = nullptr;
+    src_node->GetRawRecord(meta, &m_data, &m_key, &m_payload);
+    auto m_key_size = meta.GetKeyLength();
+
+    assert(meta.GetTotalLength() >= sizeof(uint64_t));
+    offset -= meta.GetTotalLength();
+    record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
+    memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
+  }
+  header.sorted_count = insert_idx;
+}
+
 // Create an internal node with a new key and associated child pointers inserted
 // based on an existing internal node
 void InternalNode::New(InternalNode *src_node,
@@ -259,12 +323,13 @@ InternalNode::InternalNode(uint32_t node_size,
   header.sorted_count = insert_idx;
 }
 
-ReturnCode InternalNode::Split(Stack &stack, pmwcas::DescriptorPool *pool) {
+void InternalNode::Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backoff) {
   LOG_IF(FATAL, header.sorted_count < 2);
   uint32_t n_left = header.sorted_count >> 1;
 
   InternalNode *left = nullptr;
   InternalNode *right = nullptr;
+  InternalNode *parent = nullptr;
   auto *pd = pool->AllocateDescriptor();
   pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
                          reinterpret_cast<uint64_t>(nullptr),
@@ -272,54 +337,65 @@ ReturnCode InternalNode::Split(Stack &stack, pmwcas::DescriptorPool *pool) {
   pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&right),
                          reinterpret_cast<uint64_t>(nullptr),
                          pmwcas::Descriptor::kRecycleOnRecovery);
-  uint64_t *ptr_r = pd->GetNewValuePtr(0);
-  uint64_t *ptr_l = pd->GetNewValuePtr(1);
+  pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&parent),
+                         reinterpret_cast<uint64_t>(nullptr),
+                         pmwcas::Descriptor::kRecycleOnRecovery);
+  auto **ptr_l = reinterpret_cast<InternalNode **> (pd->GetNewValuePtr(0));
+  auto **ptr_r = reinterpret_cast<InternalNode **> (pd->GetNewValuePtr(1));
+  auto **ptr_parent = reinterpret_cast<InternalNode **> (pd->GetNewValuePtr(2));
 
   // Figure out where the new key will go
-  auto separator_meta = record_metadata[n_left];
+  RecordMetadata separator_meta = record_metadata[n_left];
   char *separator_key = nullptr;
-  uint16_t separator_key_size = separator_meta.GetKeyLength();
   uint64_t separator_payload = 0;
   bool success = GetRawRecord(separator_meta, nullptr, &separator_key,
                               &separator_payload);
   LOG_IF(FATAL, !success);
-//  InternalNode::New(this, 0, n_left, reinterpret_cast<InternalNode **>(ptr_l));
-//  InternalNode::New(this, 0, n_left, reinterpret_cast<InternalNode **>(ptr_l));
-//
-//  assert(*ptr_l);
-//  assert(*ptr_r);
-//  pd->Abort();
-//
-//  // Pop here as if this were a leaf node so that when we get back to the
-//  // original caller, we get stack top as the "parent"
-//  stack.Pop();
-//
-//  // Now get this internal node's real parent
-//  InternalNode *parent = stack.Top() ?
-//                         stack.Top()->node : nullptr;
-//  if (parent == nullptr) {
-//    // Good!
-//    InternalNode::New(separator_key, separator_key_size,
-//                      (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node);
-//    return true;
-//  }
-//
-//  // Try to freeze the parent node first
-//  bool frozen_by_me = false;
-//  while (!parent->IsFrozen(pool->GetEpoch())) {
-//    frozen_by_me = parent->Freeze(pool);
-//  }
-//
-//  // Someone else froze the parent node and we are told not to compete with
-//  // others (for now)
-//  if (!frozen_by_me && backoff) {
-//    return false;
-//  }
-//
-//  return parent->PrepareForSplit(stack, split_threshold,
-//                                 separator_key, separator_key_size,
-//                                 (uint64_t) *ptr_l, (uint64_t) *ptr_r,
-//                                 new_node, pool, backoff);
+  this->InitSubNode(ptr_l, 0, n_left);
+  this->InitSubNode(ptr_r, n_left, header.sorted_count - n_left);
+
+  InternalNode *parent_node = stack.Top() ?
+                              stack.Pop()->node : nullptr;
+  if (parent_node == nullptr) {
+    InternalNode::New(separator_key, separator_meta.GetKeyLength(),
+                      reinterpret_cast<uint64_t>(*ptr_l),
+                      reinterpret_cast<uint64_t>(*ptr_r),
+                      ptr_parent);
+  } else {
+    // FIXME(hao): parent might be frozen.
+    // insert key, ptr to parent node
+    InternalNode::New(parent_node, separator_key, separator_meta.GetKeyLength(),
+                      reinterpret_cast<uint64_t>(*ptr_l),
+                      reinterpret_cast<uint64_t>(*ptr_r),
+                      ptr_parent);
+  }
+
+/*
+ *  Installation phrase
+ * */
+  auto *top_stack = stack.Top();
+  InternalNode *grand_parent = top_stack ? top_stack->node : nullptr;
+  if (grand_parent) {
+    assert(parent_node);
+#ifdef PMDK
+    grand_parent->Update(top_stack->meta, Allocator::Get()->GetOffset(parent_node),
+                         *ptr_parent, pool);
+#else
+    grand_parent->Update(top_stack->meta, parent_node, *ptr_parent, pool);
+#endif
+  } else {
+#ifdef PMDK
+    stack.tree->ChangeRoot(reinterpret_cast<uint64_t>(Allocator::Get()->GetOffset(stack.GetRoot())),
+                           reinterpret_cast<uint64_t>(*ptr_parent));
+#else
+    stack.tree->ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
+                           reinterpret_cast<uint64_t>(*ptr_parent));
+#endif
+  }
+
+  if ((*ptr_parent)->GetHeader()->size > stack.tree->GetParameters().split_threshold) {
+    (*ptr_parent)->Split(stack, pool, backoff);
+  }
 }
 
 // Insert record to this internal node. The node is frozen at this time.
@@ -1246,9 +1322,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     }
 
     if (reinterpret_cast<InternalNode *>(*ptr_parent)->GetHeader()->size > parameters.split_threshold) {
-//      return reinterpret_cast<InternalNode *>(*ptr_parent)->Split();
-    } else {
-      return ReturnCode::Ok();
+      reinterpret_cast<InternalNode *>(*ptr_parent)->Split(stack, GetPMWCASPool(), backoff);
     }
   }
 }
