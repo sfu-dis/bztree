@@ -21,8 +21,18 @@ uint64_t global_epoch = 0;
 
 void InternalNode::InitSubNode(InternalNode **target_node,
                                uint32_t start_pos, uint32_t record_size) {
-  uint32_t alloc_size = sizeof(InternalNode) +
-      record_size * (sizeof(RecordMetadata) + sizeof(uint64_t));
+  uint32_t alloc_size = sizeof(InternalNode);
+  if (start_pos > 0) {
+    alloc_size += record_metadata[0].GetTotalLength();
+    alloc_size += sizeof(RecordMetadata);
+  }
+  assert(record_size > 0);
+  for (uint32_t i = start_pos; i < start_pos + record_size; i++) {
+    RecordMetadata meta = record_metadata[i];
+    alloc_size += meta.GetTotalLength();
+    alloc_size += sizeof(RecordMetadata);
+  }
+
 #ifdef PMDK
   Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(target_node), alloc_size);
   memset(*target_node, 0, alloc_size);
@@ -46,16 +56,8 @@ void InternalNode::CopyFrom(InternalNode *src_node, uint32_t start_pos, uint32_t
   uint32_t insert_idx = 0;
 
   // Internal node has a dummy left child
-  // we need to copy this if we start from 0
-  // otherwise we need to make a new one
-  if (start_pos == 0) {
-    offset -= sizeof(uint64_t);
-    record_metadata[insert_idx].FinalizeForInsert(offset, 0, sizeof(uint64_t));
-    memcpy(reinterpret_cast<char *>(this) + offset,
-           reinterpret_cast<char *>(src_node) + src_node->header.size - sizeof(uint64_t),
-           sizeof(uint64_t));
-    insert_idx += 1;
-  } else {
+  // we need to make a new one for the right child
+  if (start_pos != 0) {
     offset -= sizeof(uint64_t);
     record_metadata[insert_idx].FinalizeForInsert(offset, 0, sizeof(uint64_t));
     RecordMetadata split_meta = src_node->record_metadata[start_pos - 1];
@@ -79,6 +81,7 @@ void InternalNode::CopyFrom(InternalNode *src_node, uint32_t start_pos, uint32_t
     offset -= meta.GetTotalLength();
     record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
     memcpy(reinterpret_cast<char *>(this) + offset, m_data, meta.GetTotalLength());
+    insert_idx += 1;
   }
   header.sorted_count = insert_idx;
 }
@@ -323,7 +326,8 @@ InternalNode::InternalNode(uint32_t node_size,
   header.sorted_count = insert_idx;
 }
 
-void InternalNode::Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backoff) {
+void InternalNode::Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backoff,
+                         const char *key, uint32_t key_size) {
   LOG_IF(FATAL, header.sorted_count < 2);
   uint32_t n_left = header.sorted_count >> 1;
 
@@ -394,7 +398,11 @@ void InternalNode::Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backof
   }
 
   if ((*ptr_parent)->GetHeader()->size > stack.tree->GetParameters().split_threshold) {
-    (*ptr_parent)->Split(stack, pool, backoff);
+    stack.Clear();
+    stack.tree->TraverseToNode(&stack, key, key_size, *ptr_parent);
+    assert(stack.Top());
+    stack.Pop();
+    (*ptr_parent)->Split(stack, pool, backoff, key, key_size);
   }
 }
 
@@ -533,7 +541,8 @@ void BaseNode::Dump(pmwcas::EpochManager *epoch) {
             << ", block size = " << header.status.GetBlockSize()
             << ", delete size = " << header.status.GetDeleteSize()
             << ", record count = " << header.status.GetRecordCount() << ")\n"
-            << " - sorted_count: " << header.sorted_count
+            << " - sorted_count: " << header.sorted_count << "\n"
+            << " - size: " << header.size
             << std::endl;
 
   std::cout << " Record Metadata Array:" << std::endl;
@@ -1213,6 +1222,31 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
   return reinterpret_cast<LeafNode *>(node);
 }
 
+BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
+                                 const char *key, uint16_t key_size, bztree::BaseNode *stop_at) {
+  BaseNode *node = GetRootNodeSafe();
+  if (stack) {
+    stack->SetRoot(node);
+  }
+  InternalNode *parent = nullptr;
+  uint32_t meta_index = 0;
+  while (node != stop_at) {
+    assert(!node->IsLeaf());
+    parent = reinterpret_cast<InternalNode *>(node);
+    meta_index = parent->GetChildIndex(key, key_size, GetPMWCASPool());
+    node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
+    assert(node);
+    if (stack != nullptr) {
+      stack->Push(parent, parent->GetMetadata(meta_index, GetPMWCASPool()->GetEpoch()));
+    }
+  }
+  if (stack != nullptr) {
+    stack->Push(reinterpret_cast<InternalNode *>(node),
+                node->GetMetadata(meta_index, GetPMWCASPool()->GetEpoch()));
+  }
+  return node;
+}
+
 ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) {
   thread_local Stack stack;
   stack.tree = this;
@@ -1267,16 +1301,12 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&parent),
                            reinterpret_cast<uint64_t>(nullptr),
                            pmwcas::Descriptor::kRecycleOnRecovery);
-    uint64_t *ptr_r = pd->GetNewValuePtr(0);
-    uint64_t *ptr_l = pd->GetNewValuePtr(1);
-    uint64_t *ptr_parent = pd->GetNewValuePtr(2);
+    auto **ptr_r = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(0));
+    auto **ptr_l = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
+    auto **ptr_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(2));
 
-    bool should_proceed = node->PrepareForSplit(stack,
-                                                GetPMWCASPool(),
-                                                reinterpret_cast<LeafNode **>(ptr_l),
-                                                reinterpret_cast<LeafNode **>(ptr_r),
-                                                reinterpret_cast<InternalNode **>(ptr_parent),
-                                                backoff);
+    bool should_proceed = node->PrepareForSplit(stack, GetPMWCASPool(),
+                                                ptr_l, ptr_r, ptr_parent, backoff);
     pd->Abort();
     if (!should_proceed) {
       // TODO(tzwang): free memory allocated in ptr_l, ptr_r, and ptr_parent
@@ -1304,10 +1334,10 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
 #ifdef PMDK
       grand_parent->Update(
           top->meta, Allocator::Get()->GetOffset(old_parent),
-          reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
+          *ptr_parent, GetPMWCASPool());
 #else
       grand_parent->Update(top->meta, old_parent,
-          reinterpret_cast<InternalNode *>(*ptr_parent), GetPMWCASPool());
+          *ptr_parent, GetPMWCASPool());
 #endif
     } else {
       // No grand parent or already popped out by during split propagation
@@ -1315,14 +1345,19 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // InternalNode::New).
 #ifdef PMDK
       ChangeRoot(reinterpret_cast<uint64_t>(Allocator::Get()->GetOffset(stack.GetRoot())),
-                 *ptr_parent);
+                 reinterpret_cast<uint64_t>(*ptr_parent));
 #else
-      ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()), *ptr_parent);
+      ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
+                 reinterpret_cast<uint64_t>(*ptr_parent));
 #endif
     }
 
-    if (reinterpret_cast<InternalNode *>(*ptr_parent)->GetHeader()->size > parameters.split_threshold) {
-      reinterpret_cast<InternalNode *>(*ptr_parent)->Split(stack, GetPMWCASPool(), backoff);
+    if ((*ptr_parent)->GetHeader()->size > parameters.split_threshold) {
+      stack.Clear();
+      stack.tree->TraverseToNode(&stack, key, key_size, *ptr_parent);
+      assert(stack.Top());
+      stack.Pop();
+      (*ptr_parent)->Split(stack, GetPMWCASPool(), backoff, key, key_size);
     }
   }
 }

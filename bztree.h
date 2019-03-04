@@ -339,7 +339,7 @@ class InternalNode : public BaseNode {
     return reinterpret_cast<uint64_t *>(ptr);
   }
 
-  void Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backoff);
+  void Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backoff, const char *key, uint32_t key_size);
 
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::DescriptorPool *pmwcas_pool);
@@ -581,6 +581,8 @@ class BzTree {
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
+  BaseNode *TraverseToNode(bztree::Stack *stack,
+                           const char *key, uint16_t key_size, bztree::BaseNode *stop_at);
 
   void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
 #ifdef PMDK
