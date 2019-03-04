@@ -22,15 +22,15 @@ uint64_t global_epoch = 0;
 void InternalNode::InitSubNode(InternalNode **target_node,
                                uint32_t start_pos, uint32_t record_size) {
   uint32_t alloc_size = sizeof(InternalNode);
-  if (start_pos > 0) {
-    alloc_size += record_metadata[0].GetTotalLength();
-    alloc_size += sizeof(RecordMetadata);
-  }
+
   assert(record_size > 0);
   for (uint32_t i = start_pos; i < start_pos + record_size; i++) {
     RecordMetadata meta = record_metadata[i];
     alloc_size += meta.GetTotalLength();
     alloc_size += sizeof(RecordMetadata);
+  }
+  if (start_pos > 0) {
+    alloc_size -= record_metadata[start_pos].GetPaddedKeyLength();
   }
 
 #ifdef PMDK
@@ -57,14 +57,16 @@ void InternalNode::CopyFrom(InternalNode *src_node, uint32_t start_pos, uint32_t
 
   // Internal node has a dummy left child
   // we need to make a new one for the right child
-  if (start_pos != 0) {
+  if (start_pos > 0) {
     offset -= sizeof(uint64_t);
     record_metadata[insert_idx].FinalizeForInsert(offset, 0, sizeof(uint64_t));
-    RecordMetadata split_meta = src_node->record_metadata[start_pos - 1];
+    RecordMetadata split_meta = src_node->record_metadata[start_pos];
     memcpy(reinterpret_cast<char *>(this) + offset,
-           reinterpret_cast<char *>(src_node) + split_meta.GetOffset() +
-               split_meta.GetPaddedKeyLength(),
+           reinterpret_cast<char *>(src_node) +
+               split_meta.GetOffset() + split_meta.GetPaddedKeyLength(),
            sizeof(uint64_t));
+    start_pos += 1;
+    insert_idx += 1;
   }
   for (uint32_t i = start_pos; i < end_pos; i++) {
     RecordMetadata meta = src_node->record_metadata[i];

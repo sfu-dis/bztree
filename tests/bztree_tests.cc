@@ -207,7 +207,7 @@ class BzTreeTest : public ::testing::Test {
 };
 
 TEST_F(BzTreeTest, Insert) {
-  static const uint32_t kMaxKey = 1000;
+  static const uint32_t kMaxKey = 5000;
   for (uint32_t i = 0; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);
