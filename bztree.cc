@@ -16,7 +16,7 @@ namespace bztree {
 #ifdef PMDK
 pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
 #endif
-
+static const uint32_t kStatusFinished = 1U;
 uint64_t global_epoch = 0;
 
 void InternalNode::InitSubNode(InternalNode **target_node,
@@ -385,17 +385,17 @@ void InternalNode::Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backof
     assert(parent_node);
 #ifdef PMDK
     grand_parent->Update(top_stack->meta, Allocator::Get()->GetOffset(parent_node),
-                         *ptr_parent, pool);
+                         *ptr_parent, pd, pool);
 #else
-    grand_parent->Update(top_stack->meta, parent_node, *ptr_parent, pool);
+    grand_parent->Update(top_stack->meta, parent_node, *ptr_parent,pd, pool);
 #endif
   } else {
 #ifdef PMDK
     stack.tree->ChangeRoot(reinterpret_cast<uint64_t>(Allocator::Get()->GetOffset(stack.GetRoot())),
-                           reinterpret_cast<uint64_t>(*ptr_parent));
+                           reinterpret_cast<uint64_t>(*ptr_parent), pd);
 #else
     stack.tree->ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
-                           reinterpret_cast<uint64_t>(*ptr_parent));
+                           reinterpret_cast<uint64_t>(*ptr_parent), pd);
 #endif
   }
 
@@ -1069,6 +1069,7 @@ void LeafNode::CopyFrom(LeafNode *node,
 ReturnCode InternalNode::Update(RecordMetadata meta,
                                 InternalNode *old_child,
                                 InternalNode *new_child,
+                                pmwcas::Descriptor *allocation_desc,
                                 pmwcas::DescriptorPool *pmwcas_pool) {
   auto status = header.GetStatus(pmwcas_pool->GetEpoch());
   if (status.IsFrozen()) {
@@ -1082,6 +1083,7 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   pd->AddEntry(GetPayloadPtr(meta),
                reinterpret_cast<uint64_t>(old_child),
                reinterpret_cast<uint64_t>(new_child));
+  pd->AddEntry(reinterpret_cast<uint64_t *>(&allocation_desc->status_), allocation_desc->status_, kStatusFinished);
   if (pd->MwCAS()) {
     return ReturnCode::Ok();
   } else {
@@ -1293,7 +1295,6 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     LeafNode *right = nullptr;
     InternalNode *parent = nullptr;
     auto *pd = GetPMWCASPool()->AllocateDescriptor();
-    // TODO(hao): should implement a cascading memory recycle callback
     pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&left),
                            reinterpret_cast<uint64_t>(nullptr),
                            pmwcas::Descriptor::kRecycleOnRecovery);
@@ -1309,7 +1310,6 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
 
     bool should_proceed = node->PrepareForSplit(stack, GetPMWCASPool(),
                                                 ptr_l, ptr_r, ptr_parent, backoff);
-    pd->Abort();
     if (!should_proceed) {
       // TODO(tzwang): free memory allocated in ptr_l, ptr_r, and ptr_parent
       continue;
@@ -1335,11 +1335,9 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // parent and install the pointer to the new parent.
 #ifdef PMDK
       grand_parent->Update(
-          top->meta, Allocator::Get()->GetOffset(old_parent),
-          *ptr_parent, GetPMWCASPool());
+          top->meta, Allocator::Get()->GetOffset(old_parent), *ptr_parent, pd, GetPMWCASPool());
 #else
-      grand_parent->Update(top->meta, old_parent,
-          *ptr_parent, GetPMWCASPool());
+      grand_parent->Update(top->meta, old_parent, *ptr_parent, pd, GetPMWCASPool());
 #endif
     } else {
       // No grand parent or already popped out by during split propagation
@@ -1347,10 +1345,10 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // InternalNode::New).
 #ifdef PMDK
       ChangeRoot(reinterpret_cast<uint64_t>(Allocator::Get()->GetOffset(stack.GetRoot())),
-                 reinterpret_cast<uint64_t>(*ptr_parent));
+                 reinterpret_cast<uint64_t>(*ptr_parent), pd);
 #else
       ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
-                 reinterpret_cast<uint64_t>(*ptr_parent));
+                 reinterpret_cast<uint64_t>(*ptr_parent), pd);
 #endif
     }
 
@@ -1364,7 +1362,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
   }
 }
 
-bool BzTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr) {
+bool BzTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *allocation_desc) {
   pmwcas::Descriptor *pd = GetPMWCASPool()->AllocateDescriptor();
 
   // Memory policy here is "Never" because the memory was allocated in
@@ -1372,6 +1370,7 @@ bool BzTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr) {
   // policy RecycleOnRecovery
   pd->AddEntry(reinterpret_cast<uint64_t *>(&root), expected_root_addr, new_root_addr,
                pmwcas::Descriptor::kRecycleNever);
+  pd->AddEntry(reinterpret_cast<uint64_t *>(&allocation_desc->status_), allocation_desc->status_, kStatusFinished);
   return pd->MwCAS();
 }
 

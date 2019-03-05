@@ -342,7 +342,7 @@ class InternalNode : public BaseNode {
   void Split(Stack &stack, pmwcas::DescriptorPool *pool, bool backoff, const char *key, uint32_t key_size);
 
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
-                    pmwcas::DescriptorPool *pmwcas_pool);
+                    pmwcas::Descriptor *allocation_desc, pmwcas::DescriptorPool *pmwcas_pool);
   uint32_t GetChildIndex(const char *key, uint16_t key_size,
                          pmwcas::DescriptorPool *pool, bool get_le = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
@@ -608,7 +608,7 @@ class BzTree {
     return index_epoch;
   }
 
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr);
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *allocation_desc);
 
   inline ParameterSet GetParameters() {
     return parameters;
