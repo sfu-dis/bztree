@@ -327,7 +327,7 @@ class InternalNode : public BaseNode {
   bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
                        const char *key, uint32_t key_size,
                        uint64_t left_child_addr, uint64_t right_child_addr,
-                       InternalNode **new_node,
+                       InternalNode **new_node, pmwcas::Descriptor *pd,
                        pmwcas::DescriptorPool *pool, bool backoff);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
@@ -335,7 +335,7 @@ class InternalNode : public BaseNode {
     return reinterpret_cast<uint64_t *>(ptr);
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
-                    pmwcas::DescriptorPool *pmwcas_pool);
+                    pmwcas::Descriptor *pd, pmwcas::DescriptorPool *pmwcas_pool);
   uint32_t GetChildIndex(const char *key, uint16_t key_size,
                          pmwcas::DescriptorPool *pool, bool get_le = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
@@ -375,7 +375,10 @@ struct Stack {
     frame.meta = meta;
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
-  inline void Clear() { root = nullptr; num_frames = 0; }
+  inline void Clear() {
+    root = nullptr;
+    num_frames = 0;
+  }
   inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
   inline BaseNode *GetRoot() { return root; }
@@ -399,6 +402,7 @@ class LeafNode : public BaseNode {
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold);
   bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
+                       pmwcas::Descriptor *pd,
                        pmwcas::DescriptorPool *pmwcas_pool,
                        LeafNode **left, LeafNode **right,
                        InternalNode **new_parent, bool backoff);
@@ -481,7 +485,7 @@ struct Record {
 
     Record *r = reinterpret_cast<Record *>(malloc(meta.GetTotalLength() + sizeof(meta)));
     memset(r, 0, meta.GetTotalLength() + sizeof(Record));
-    new (r) Record(meta);
+    new(r) Record(meta);
 
     // Key will never be changed and it will not be a pmwcas descriptor
     // but payload is fixed length 8-byte value, can be updated by pmwcas
@@ -489,7 +493,7 @@ struct Record {
 
     auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
     auto payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-                   source_addr + meta.GetPaddedKeyLength())->GetValue(epoch);
+        source_addr + meta.GetPaddedKeyLength())->GetValue(epoch);
     memcpy(r->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
     return r;
   }
@@ -500,7 +504,7 @@ struct Record {
   inline const char *GetKey() const { return data; }
   inline bool operator<(const Record &out) {
     int cmp = BaseNode::KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
-                                    out.GetKey(), out.meta.GetKeyLength());
+                                   out.GetKey(), out.meta.GetKeyLength());
     return cmp < 0;
   }
 };
@@ -564,7 +568,7 @@ class BzTree {
   ReturnCode Delete(const char *key, uint16_t key_size);
 
   inline std::unique_ptr<Iterator> RangeScan(const char *key1, uint16_t size1,
-                                      const char *key2, uint16_t size2) {
+                                             const char *key2, uint16_t size2) {
     return std::make_unique<Iterator>(this, key1, size1, key2, size2);
   }
 
@@ -597,7 +601,7 @@ class BzTree {
   }
 
  private:
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr);
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr,pmwcas::Descriptor *pd);
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
