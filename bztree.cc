@@ -286,10 +286,10 @@ bool InternalNode::PrepareForSplit(Stack &stack,
   LOG_IF(FATAL, header.sorted_count < 2);
   uint32_t n_left = header.sorted_count >> 1;
 
-  auto i_left = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(0),
+  auto i_left = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                                        reinterpret_cast<uint64_t>(nullptr),
                                        pmwcas::Descriptor::kRecycleOnRecovery);
-  auto i_right = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(0),
+  auto i_right = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                                         reinterpret_cast<uint64_t>(nullptr),
                                         pmwcas::Descriptor::kRecycleOnRecovery);
   uint64_t *ptr_l = pd->GetNewValuePtr(i_left);
@@ -1119,13 +1119,13 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
 
     auto *pd = GetPMWCASPool()->AllocateDescriptor();
     // TODO(hao): should implement a cascading memory recycle callback
-    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(0),
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
                            pmwcas::Descriptor::kRecycleOnRecovery);
-    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(0),
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
                            pmwcas::Descriptor::kRecycleOnRecovery);
-    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(0),
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
                            pmwcas::Descriptor::kRecycleOnRecovery);
     uint64_t *ptr_r = pd->GetNewValuePtr(0);
