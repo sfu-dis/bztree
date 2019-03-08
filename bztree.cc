@@ -286,12 +286,14 @@ bool InternalNode::PrepareForSplit(Stack &stack,
   LOG_IF(FATAL, header.sorted_count < 2);
   uint32_t n_left = header.sorted_count >> 1;
 
-  auto i_left = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
-                                       reinterpret_cast<uint64_t>(nullptr),
-                                       pmwcas::Descriptor::kRecycleOnRecovery);
-  auto i_right = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
-                                        reinterpret_cast<uint64_t>(nullptr),
-                                        pmwcas::Descriptor::kRecycleOnRecovery);
+  auto i_left = pd->ReserveAndAddEntry(
+      reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+      reinterpret_cast<uint64_t>(nullptr),
+      pmwcas::Descriptor::kRecycleOnRecovery);
+  auto i_right = pd->ReserveAndAddEntry(
+      reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+      reinterpret_cast<uint64_t>(nullptr),
+      pmwcas::Descriptor::kRecycleOnRecovery);
   uint64_t *ptr_l = pd->GetNewValuePtr(i_left);
   uint64_t *ptr_r = pd->GetNewValuePtr(i_right);
 
@@ -1071,7 +1073,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
     node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
     assert(node);
     if (stack != nullptr) {
-      stack->Push(parent, parent->GetMetadata(meta_index, GetPMWCASPool()->GetEpoch()));
+      stack->Push(parent, meta_index);
     }
   }
   return reinterpret_cast<LeafNode *>(node);
@@ -1179,11 +1181,13 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // parent and install the pointer to the new parent.
 #ifdef PMDK
       auto result = grand_parent->Update(
-          top->meta, Allocator::Get()->GetOffset(old_parent),
+          top->node->GetMetadata(top->meta_index, GetPMWCASPool()->GetEpoch()),
+          Allocator::Get()->GetOffset(old_parent),
           reinterpret_cast<InternalNode *>(*ptr_parent), pd, GetPMWCASPool());
 #else
-      auto result = grand_parent->Update(top->meta, old_parent,
-          reinterpret_cast<InternalNode *>(*ptr_parent), pd, GetPMWCASPool());
+      auto result = grand_parent->Update(
+          top->node->GetMetadata(top->meta_index, GetPMWCASPool()->GetEpoch()),
+          old_parent, reinterpret_cast<InternalNode *>(*ptr_parent), pd, GetPMWCASPool());
 #endif
     } else {
       // No grand parent or already popped out by during split propagation
@@ -1285,6 +1289,31 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     auto new_block_size = node->GetHeader()->GetStatus(epoch).GetBlockSize();
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes, not finished
+      auto parent_frame = stack.Top();
+      if (!parent_frame) {
+        // We're good if this is root node.
+        return rc;
+      }
+      InternalNode *parent = parent_frame->node;
+      // has a left sibling
+      if (parent_frame->meta_index > 0) {
+        auto left_sibling = parent->GetChildByMetaIndex(parent_frame->meta_index - 1, epoch);
+        auto block_size = left_sibling->GetHeader()->GetStatus(epoch).GetBlockSize();
+        if (block_size <= parameters.merge_threshold) {
+          // Do merge
+        }
+      }
+      // has a right sibling
+      if (parent_frame->meta_index < parent->GetHeader()->sorted_count - 1) {
+        auto right_sibling = parent->GetChildByMetaIndex(parent_frame->meta_index + 1, epoch);
+        auto block_size = right_sibling->GetHeader()->GetStatus(epoch).GetBlockSize();
+        if (block_size <= parameters.merge_threshold) {
+          // Do merge
+        }
+      }
+
+    } else {
+      return rc;
     }
   } while (rc.IsNodeFrozen());
   return rc;

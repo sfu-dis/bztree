@@ -301,6 +301,11 @@ class BaseNode {
 class Stack;
 
 // Internal node: immutable once created, no free space, keys are always sorted
+// operations that might mutate the InternalNode:
+//    a. create a new node, this will set the freeze bit in status
+//    b. update a pointer, this will check the status field and swap in a new pointer
+// in both cases, the record metadata should not be touched,
+// thus we can safely dereference them without a wrapper.
 class InternalNode : public BaseNode {
  public:
   static void New(InternalNode *src_node, const char *key, uint32_t key_size,
@@ -340,7 +345,7 @@ class InternalNode : public BaseNode {
                          pmwcas::DescriptorPool *pool, bool get_le = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
-    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
+    GetRawRecord(record_metadata[index], nullptr, nullptr, &child_addr, epoch);
 
 #ifdef PMDK
     return Allocator::Get()->GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
@@ -355,10 +360,10 @@ class LeafNode;
 class BzTree;
 struct Stack {
   struct Frame {
-    Frame() : node(nullptr), meta() {}
+    Frame() : node(nullptr), meta_index() {}
     ~Frame() {}
     InternalNode *node;
-    RecordMetadata meta;
+    uint32_t meta_index;
   };
   static const uint32_t kMaxFrames = 32;
   Frame frames[kMaxFrames];
@@ -368,11 +373,11 @@ struct Stack {
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
-  inline void Push(InternalNode *node, RecordMetadata meta) {
+  inline void Push(InternalNode *node, uint32_t meta_index) {
     LOG_IF(FATAL, num_frames >= kMaxFrames) << "Not enough space in stack.";
     auto &frame = frames[num_frames++];
     frame.node = node;
-    frame.meta = meta;
+    frame.meta_index = meta_index;
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() {
@@ -601,7 +606,7 @@ class BzTree {
   }
 
  private:
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr,pmwcas::Descriptor *pd);
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
