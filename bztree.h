@@ -85,7 +85,9 @@ struct NodeHeader {
     static const uint64_t kBlockSizeMask = uint64_t{0x3FFFFF} << 22;    // Bits 44-23
     static const uint64_t kDeleteSizeMask = uint64_t{0x3FFFFF} << 0;    // Bits 22-1
 
-    inline void Freeze() { word |= kFrozenMask; }
+    inline StatusWord Freeze() {
+      return StatusWord{word | kFrozenMask};
+    }
     inline bool IsFrozen() { return (word & kFrozenMask) > 0; }
     inline uint16_t GetRecordCount() { return (uint16_t) ((word & kRecordCountMask) >> 44); }
     inline void SetRecordCount(uint16_t count) {
@@ -411,6 +413,9 @@ class LeafNode : public BaseNode {
                        pmwcas::DescriptorPool *pmwcas_pool,
                        LeafNode **left, LeafNode **right,
                        InternalNode **new_parent, bool backoff);
+
+  static bool PrepareForMerge(LeafNode *left_node, LeafNode *right_node,
+                              LeafNode **new_node, InternalNode **parent_node);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split

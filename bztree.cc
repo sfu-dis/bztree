@@ -819,11 +819,9 @@ bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
   if (expected.IsFrozen()) {
     return false;
   }
-  NodeHeader::StatusWord desired = expected;
-  desired.Freeze();
 
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&(&header.status)->word, expected.word, desired.word);
+  pd->AddEntry(&(&header.status)->word, expected.word, expected.Freeze().word);
   return pd->MwCAS();
 }
 
@@ -1297,10 +1295,31 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       InternalNode *parent = parent_frame->node;
       // has a left sibling
       if (parent_frame->meta_index > 0) {
-        auto left_sibling = parent->GetChildByMetaIndex(parent_frame->meta_index - 1, epoch);
-        auto block_size = left_sibling->GetHeader()->GetStatus(epoch).GetBlockSize();
+        auto sibling = reinterpret_cast<LeafNode *>(parent->GetChildByMetaIndex(parent_frame->meta_index - 1, epoch));
+        auto block_size = sibling->GetHeader()->GetStatus(epoch).GetBlockSize();
         if (block_size <= parameters.merge_threshold) {
           // Do merge
+          auto node_status = node->GetHeader()->GetStatus(epoch);
+          auto sibling_status = sibling->GetHeader()->GetStatus(epoch);
+
+          auto *pd = GetPMWCASPool()->AllocateDescriptor();
+          pd->AddEntry(&(&node->GetHeader()->status)->word, node_status.word, node_status.Freeze().word);
+          pd->AddEntry(&(&sibling->GetHeader()->status)->word, sibling_status.word, sibling_status.Freeze().word);
+          if (!pd->MwCAS()) {
+            continue;
+          }
+
+          pd = GetPMWCASPool()->AllocateDescriptor();
+          pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+                                 reinterpret_cast<uint64_t>(nullptr),
+                                 pmwcas::Descriptor::kRecycleOnRecovery);
+          pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+                                 reinterpret_cast<uint64_t>(nullptr),
+                                 pmwcas::Descriptor::kRecycleOnRecovery);
+          auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
+          auto *new_node = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
+
+          LeafNode::PrepareForMerge(node, sibling, new_node, new_parent);
         }
       }
       // has a right sibling
