@@ -295,6 +295,14 @@ class BaseNode {
     return true;
   }
 
+  inline char *GetKey(RecordMetadata meta) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+    uint64_t offset = meta.GetOffset();
+    return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
+  }
+
   inline bool IsFrozen(pmwcas::EpochManager *epoch) {
     return GetHeader()->GetStatus(epoch).IsFrozen();
   }
@@ -414,7 +422,7 @@ class LeafNode : public BaseNode {
                        LeafNode **left, LeafNode **right,
                        InternalNode **new_parent, bool backoff);
 
-  static bool PrepareForMerge(LeafNode *left_node, LeafNode *right_node,
+  static bool PrepareForMerge(LeafNode *left_node, LeafNode *right_node, InternalNode *old_parent,
                               LeafNode **new_node, InternalNode **parent_node);
 
   // Initialize new, empty node with a list of records; no concurrency control;
@@ -447,17 +455,9 @@ class LeafNode : public BaseNode {
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
-  inline char *GetKey(RecordMetadata meta) {
-    if (!meta.IsVisible()) {
-      return nullptr;
-    }
-    uint64_t offset = meta.GetOffset();
-    return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-  }
-
   // Specialized GetRawRecord for leaf node only (key can't be nullptr)
   inline bool GetRawRecord(RecordMetadata meta, char **key,
-                           uint64_t *payload, pmwcas::EpochManager *epoch) {
+                           uint64_t *payload, pmwcas::EpochManager *epoch = nullptr) {
     char *unused = nullptr;
     return BaseNode::GetRawRecord(meta, &unused, key, payload, epoch);
   }
