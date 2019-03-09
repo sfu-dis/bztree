@@ -182,7 +182,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
-  bztree::BzTree::ParameterSet param(256, 0, 256);
+  bztree::BzTree::ParameterSet param(1024, 0, 1024);
   std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadInsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
@@ -196,7 +196,7 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
-  bztree::BzTree::ParameterSet param(256, 0, 256);
+  bztree::BzTree::ParameterSet param(1024, 0, 1024);
   std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadUpsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);

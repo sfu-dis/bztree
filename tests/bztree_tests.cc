@@ -141,7 +141,7 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   bztree::LeafNode *right = nullptr;
   node->Freeze(pool);
   bztree::InternalNode *parent = nullptr;
-  node->PrepareForSplit(stack, 3000, pool, &left, &right, &parent, true);
+  node->PrepareForSplit(stack, 3000, pool->AllocateDescriptor(), pool, &left, &right, &parent, true);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);
@@ -208,24 +208,25 @@ class BzTreeTest : public ::testing::Test {
 
 TEST_F(BzTreeTest, Insert) {
   static const uint32_t kMaxKey = 5000;
-  for (uint32_t i = 100; i < kMaxKey; ++i) {
+  for (uint32_t i = 0; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
-    auto rc = tree->Insert(key.c_str(), key.length(), i + 2000);
+    auto rc = tree->Insert(key.c_str(), key.length(), i);
     ASSERT_TRUE(rc.IsOk());
 
     uint64_t payload = 0;
     rc = tree->Read(key.c_str(), key.length(), &payload);
     ASSERT_TRUE(rc.IsOk());
-    ASSERT_TRUE(payload == i + 2000);
+    ASSERT_TRUE(payload == i);
   }
 
+  tree->Dump();
   // Read everything back
-  for (uint32_t i = 100; i < kMaxKey; ++i) {
+  for (uint32_t i = 0; i < kMaxKey; ++i) {
     std::string key = std::to_string(i);
     uint64_t payload = 0;
     auto rc = tree->Read(key.c_str(), key.length(), &payload);
     ASSERT_TRUE(rc.IsOk());
-    ASSERT_TRUE(payload == i + 2000);
+    ASSERT_TRUE(payload == i);
   }
 }
 
