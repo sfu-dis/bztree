@@ -1287,7 +1287,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     auto new_block_size = node->GetHeader()->GetStatus(epoch).GetBlockSize();
     if (new_block_size <= parameters.merge_threshold) {
       // FIXME(hao): merge the nodes, not finished
-      auto parent_frame = stack.Top();
+      auto parent_frame = stack.Pop();
       if (!parent_frame) {
         // We're good if this is root node.
         return rc;
@@ -1320,6 +1320,16 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
           auto *new_node = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
 
           LeafNode::PrepareForMerge(node, sibling, new_node, new_parent);
+
+          auto grandpa_frame = stack.Top();
+          if (!grandpa_frame) {
+            ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
+                       reinterpret_cast<uint64_t>(new_parent), pd);
+          } else {
+            auto grandparent = grandpa_frame->node;
+            grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index, epoch),
+                                parent, *new_parent, pd, GetPMWCASPool());
+          }
         }
       }
       // has a right sibling
