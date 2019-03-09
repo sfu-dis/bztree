@@ -971,11 +971,7 @@ uint32_t InternalNode::GetChildIndex(const char *key,
   }
 }
 
-bool LeafNode::PrepareForMerge(bztree::LeafNode *left_node,
-                               bztree::LeafNode *right_node,
-                               bztree::InternalNode *old_parent,
-                               bztree::LeafNode **new_node,
-                               bztree::InternalNode **parent_node) {
+bool LeafNode::MergeNodes(LeafNode *left_node, LeafNode *right_node, LeafNode **new_node) {
   LeafNode::New(new_node, left_node->header.size);
   thread_local std::vector<RecordMetadata> meta_vec;
   auto copy_metadata = [](std::vector<RecordMetadata> *meta_vec, LeafNode *node, bool from_left) {
@@ -1379,7 +1375,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
           auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
           auto *new_node = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
 
-          LeafNode::PrepareForMerge(node, sibling, parent, new_node, new_parent);
+          LeafNode::MergeNodes(node, sibling, new_node);
 
           auto grandpa_frame = stack.Top();
           if (!grandpa_frame) {

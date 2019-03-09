@@ -422,8 +422,9 @@ class LeafNode : public BaseNode {
                        LeafNode **left, LeafNode **right,
                        InternalNode **new_parent, bool backoff);
 
-  static bool PrepareForMerge(LeafNode *left_node, LeafNode *right_node, InternalNode *old_parent,
-                              LeafNode **new_node, InternalNode **parent_node);
+  // merge two nodes into a new one
+  // copy the meta/data to the new node
+  static bool MergeNodes(LeafNode *left_node, LeafNode *right_node, LeafNode **new_node);
 
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
