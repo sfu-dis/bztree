@@ -329,6 +329,7 @@ class InternalNode : public BaseNode {
                   uint64_t left_child_addr, uint64_t right_child_addr,
                   InternalNode **mem,
                   uint64_t left_most_child_addr);
+  static void New(InternalNode **mem, uint32_t node_size);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
@@ -364,6 +365,15 @@ class InternalNode : public BaseNode {
 #endif
   }
   void Dump(pmwcas::EpochManager *epoch, bool dump_children = false);
+
+  // delete a child from internal node
+  // | key0, val0 | key1, val1 | key2, val2 | key3, val3 |
+  // ==>
+  // | key0, val0 | key1, val1' | key3, val3 |
+  void DeleteChild(uint32_t meta_to_update,
+                   uint32_t meta_to_delete,
+                   uint64_t new_child_ptr,
+                   InternalNode **new_node);
 };
 
 class LeafNode;

@@ -19,6 +19,18 @@ pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
 
 uint64_t global_epoch = 0;
 
+void InternalNode::New(bztree::InternalNode **mem, uint32_t alloc_size) {
+#ifdef  PMDK
+  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
+  memset(*mem, 0, alloc_size);
+  (*mem)->header.size = alloc_size;
+  *mem = Allocator::Get()->GetOffset(*mem);
+#else
+  pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(mem), alloc_size);
+  memset(*mem, 0, alloc_size);
+#endif  // PMDK
+}
+
 // Create an internal node with a new key and associated child pointers inserted
 // based on an existing internal node
 void InternalNode::New(InternalNode *src_node,
@@ -183,9 +195,7 @@ InternalNode::InternalNode(uint32_t node_size,
 
   for (uint32_t i = begin_meta_idx; i < begin_meta_idx + nr_records; ++i) {
     RecordMetadata meta = src_node->record_metadata[i];
-    if (!meta.IsVisible()) {
-      continue;
-    }
+    assert(meta.IsVisible());
     uint64_t m_payload = 0;
     char *m_key = nullptr;
     char *m_data = nullptr;
@@ -912,6 +922,43 @@ void LeafNode::CopyFrom(LeafNode *node,
 #endif
 }
 
+void InternalNode::DeleteChild(uint32_t meta_to_update,
+                               uint32_t meta_to_delete,
+                               uint64_t new_child_ptr,
+                               bztree::InternalNode **new_node) {
+  uint32_t offset = this->header.size - this->record_metadata[meta_to_delete].GetTotalLength();
+  InternalNode::New(new_node, offset);
+  assert(meta_to_delete != 0);
+
+  uint32_t insert_idx = 0;
+  for (uint32_t i = 0; i < this->header.sorted_count; i += 1) {
+    if (i == meta_to_delete) {
+      continue;
+    }
+    RecordMetadata meta = record_metadata[i];
+    uint64_t m_payload = 0;
+    char *m_key = nullptr;
+    char *m_data = nullptr;
+    GetRawRecord(meta, &m_data, &m_key, &m_payload);
+    auto m_key_size = meta.GetKeyLength();
+
+    offset -= meta.GetTotalLength();
+    (*new_node)->record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
+    auto ptr = reinterpret_cast<char *>(*new_node) + offset;
+    if (i == meta_to_update) {
+      memcpy(ptr, m_data, meta.GetKeyLength());
+      memcpy(ptr + meta.GetKeyLength(), &new_child_ptr, sizeof(uint64_t));
+    } else {
+      memcpy(ptr, m_data, meta.GetTotalLength());
+    }
+    insert_idx += 1;
+  }
+  (*new_node)->header.sorted_count = insert_idx;
+#ifdef PMEM
+  pmwcas::NVRAM::Flush((*new_node)->header.size, *new_node);
+#endif
+}
+
 ReturnCode InternalNode::Update(RecordMetadata meta,
                                 InternalNode *old_child,
                                 InternalNode *new_child,
@@ -1376,6 +1423,10 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
           auto *new_node = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
 
           LeafNode::MergeNodes(node, sibling, new_node);
+          parent->DeleteChild(parent_frame->meta_index,
+                              parent_frame->meta_index - 1,
+                              reinterpret_cast<uint64_t>(*new_node),
+                              new_parent);
 
           auto grandpa_frame = stack.Top();
           if (!grandpa_frame) {
