@@ -597,6 +597,8 @@ class BzTree {
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
+  BaseNode *TraverseToNode(bztree::Stack *stack,
+                           const char *key, uint16_t key_size, bztree::BaseNode *stop_at);
 
   void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
 #ifdef PMDK

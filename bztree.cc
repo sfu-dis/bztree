@@ -1177,6 +1177,29 @@ bool LeafNode::PrepareForSplit(Stack &stack,
   }
 }
 
+BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
+                                 const char *key, uint16_t key_size, bztree::BaseNode *stop_at) {
+  BaseNode *node = GetRootNodeSafe();
+  if (stack) {
+    stack->SetRoot(node);
+  }
+  InternalNode *parent = nullptr;
+  uint32_t meta_index = 0;
+  while (node != stop_at) {
+    assert(!node->IsLeaf());
+    parent = reinterpret_cast<InternalNode *>(node);
+    meta_index = parent->GetChildIndex(key, key_size, GetPMWCASPool());
+    node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
+    assert(node);
+    if (stack != nullptr) {
+      stack->Push(parent, meta_index);
+    }
+  }
+  if (stack != nullptr) {
+    stack->Push(reinterpret_cast<InternalNode *>(node), meta_index);
+  }
+  return node;
+}
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
                                  bool le_child) {
