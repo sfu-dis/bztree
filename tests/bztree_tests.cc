@@ -273,7 +273,7 @@ TEST_F(BzTreeTest, Delete) {
     std::string key = std::to_string(i);
     tree->Insert(key.c_str(), key.length(), i);
   }
-  int items[] = {0, 1, 10, 2, 3, 4};
+  int items[] = {13, 2, 3, 4, 14};
   for (auto item:items) {
     std::string key = std::to_string(item);
     bztree::ReturnCode rc = tree->Delete(key.c_str(), key.length());

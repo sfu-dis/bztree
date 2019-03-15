@@ -738,12 +738,12 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
 ReturnCode LeafNode::Delete(const char *key,
                             uint16_t key_size,
                             pmwcas::DescriptorPool *pmwcas_pool) {
+  retry:
   NodeHeader::StatusWord old_status = header.GetStatus(pmwcas_pool->GetEpoch());
   if (old_status.IsFrozen()) {
     return ReturnCode::NodeFrozen();
   }
 
-  retry:
   RecordMetadata *meta_ptr = nullptr;
   auto metadata = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, &meta_ptr);
   if (metadata.IsVacant()) {
@@ -967,6 +967,11 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
 #ifdef PMEM
   pmwcas::NVRAM::Flush((*new_node)->header.size, *new_node);
 #endif
+}
+
+void InternalNode::Merge(bztree::Stack *stack) {
+  stack->Clear();
+
 }
 
 ReturnCode InternalNode::Update(RecordMetadata meta,
@@ -1403,87 +1408,91 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     rc = node->Delete(key, key_size, GetPMWCASPool());
     auto old_status = node->GetHeader()->GetStatus(epoch);
     auto new_valid_size = LeafNode::GetUsedSpace(old_status) - old_status.GetDeletedSize();
-    if (new_valid_size <= parameters.merge_threshold) {
-      auto parent_frame = stack.Pop();
-      if (!parent_frame) {
-        // We're good if this is root node.
-        return rc;
+    if (new_valid_size > parameters.merge_threshold) {
+      // we're large enough
+      continue;
+    }
+
+    auto parent_frame = stack.Pop();
+    if (!parent_frame) {
+      // We're good if this is root node.
+      continue;
+    }
+    InternalNode *parent = parent_frame->node;
+    uint32_t sibling_index = 0;
+
+    auto can_merge = [&](uint32_t meta_index) -> bool {
+      if (meta_index < 0 || meta_index > parent->GetHeader()->sorted_count) {
+        return false;
       }
-      InternalNode *parent = parent_frame->node;
-      uint32_t sibling_index = 0;
-
-      auto can_merge = [parent, epoch, this](uint32_t meta_index) -> bool {
-        if (meta_index < 0 || meta_index > parent->GetHeader()->sorted_count) {
-          return false;
-        }
-        auto sibling = reinterpret_cast<LeafNode *>(parent->GetChildByMetaIndex(meta_index, epoch));
-        auto status = sibling->GetHeader()->GetStatus(epoch);
-        uint32_t new_size = LeafNode::GetUsedSpace(status) - status.GetDeletedSize();
-        return new_size <= parameters.merge_threshold;
-      };
-      if (can_merge(parent_frame->meta_index - 1)) {
-        sibling_index = parent_frame->meta_index - 1;
-      } else if (can_merge(parent_frame->meta_index + 1)) {
-        sibling_index = parent_frame->meta_index + 1;
-      } else {
-        // Both left child and right child are good
-        return rc;
-      }
-
-      auto sibling = reinterpret_cast<LeafNode *>(parent->GetChildByMetaIndex(sibling_index, epoch));
-      // Do merge
-      auto node_status = node->GetHeader()->GetStatus(epoch);
-      auto sibling_status = sibling->GetHeader()->GetStatus(epoch);
-
-      auto *pd = GetPMWCASPool()->AllocateDescriptor();
-      pd->AddEntry(&(&node->GetHeader()->status)->word, node_status.word, node_status.Freeze().word);
-      pd->AddEntry(&(&sibling->GetHeader()->status)->word, sibling_status.word, sibling_status.Freeze().word);
-      if (!pd->MwCAS()) {
-        continue;
-      }
-
-      pd = GetPMWCASPool()->AllocateDescriptor();
-      pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
-                             reinterpret_cast<uint64_t>(nullptr),
-                             pmwcas::Descriptor::kRecycleOnRecovery);
-      pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
-                             reinterpret_cast<uint64_t>(nullptr),
-                             pmwcas::Descriptor::kRecycleOnRecovery);
-      auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
-      auto *new_node = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
-
-      auto merge_nodes = [&](uint32_t left_index, LeafNode *left_node, LeafNode *right_node) {
-        LeafNode::MergeNodes(left_node, right_node, new_node);
-        char *new_key = nullptr;
-        RecordMetadata first_meta = (*new_node)->GetMetadata(0, epoch);
-        (*new_node)->GetRawRecord(first_meta, &new_key, nullptr);
-
-        parent->DeleteChild(left_index,
-                            new_key, first_meta.GetKeyLength(),
-                            reinterpret_cast<uint64_t>(*new_node),
-                            new_parent);
-      };
-
-      if (sibling_index < parent_frame->meta_index) {
-        // left sibling
-        merge_nodes(sibling_index, sibling, node);
-      } else {
-        // right sibling
-        merge_nodes(parent_frame->meta_index, node, sibling);
-      }
-
-      auto grandpa_frame = stack.Top();
-      if (!grandpa_frame) {
-        ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
-                   reinterpret_cast<uint64_t>(*new_parent), pd);
-      } else {
-        InternalNode *grandparent = grandpa_frame->node;
-        grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index, epoch),
-                            parent, *new_parent, pd, GetPMWCASPool());
-      }
-
+      auto sibling = reinterpret_cast<LeafNode *>(parent->GetChildByMetaIndex(meta_index, epoch));
+      auto status = sibling->GetHeader()->GetStatus(epoch);
+      uint32_t new_size = LeafNode::GetUsedSpace(status) - status.GetDeletedSize();
+      return new_size <= parameters.merge_threshold;
+    };
+    if (can_merge(parent_frame->meta_index - 1)) {
+      sibling_index = parent_frame->meta_index - 1;
+    } else if (can_merge(parent_frame->meta_index + 1)) {
+      sibling_index = parent_frame->meta_index + 1;
     } else {
-      return rc;
+      // Both left child and right child are good
+      continue;
+    }
+
+    auto sibling = reinterpret_cast<LeafNode *>(parent->GetChildByMetaIndex(sibling_index, epoch));
+    // Do merge
+    auto node_status = node->GetHeader()->GetStatus(epoch);
+    auto sibling_status = sibling->GetHeader()->GetStatus(epoch);
+
+    auto *pd = GetPMWCASPool()->AllocateDescriptor();
+    pd->AddEntry(&(&node->GetHeader()->status)->word, node_status.word, node_status.Freeze().word);
+    pd->AddEntry(&(&sibling->GetHeader()->status)->word, sibling_status.word, sibling_status.Freeze().word);
+    if (!pd->MwCAS()) {
+      continue;
+    }
+
+    pd = GetPMWCASPool()->AllocateDescriptor();
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
+    auto *new_node = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
+
+    auto merge_nodes = [&](uint32_t left_index, LeafNode *left_node, LeafNode *right_node) {
+      LeafNode::MergeNodes(left_node, right_node, new_node);
+      char *new_key = nullptr;
+      RecordMetadata first_meta = (*new_node)->GetMetadata(0, epoch);
+      (*new_node)->GetRawRecord(first_meta, &new_key, nullptr);
+
+      parent->DeleteChild(left_index,
+                          new_key, first_meta.GetKeyLength(),
+                          reinterpret_cast<uint64_t>(*new_node),
+                          new_parent);
+    };
+
+    if (sibling_index < parent_frame->meta_index) {
+      // left sibling
+      merge_nodes(sibling_index, sibling, node);
+    } else {
+      // right sibling
+      merge_nodes(parent_frame->meta_index, node, sibling);
+    }
+
+    auto grandpa_frame = stack.Top();
+    if (!grandpa_frame) {
+      rc = ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
+                      reinterpret_cast<uint64_t>(*new_parent), pd) ?
+           ReturnCode::Ok() : ReturnCode::NodeFrozen();
+    } else {
+      InternalNode *grandparent = grandpa_frame->node;
+      rc = grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index, epoch),
+                               parent, *new_parent, pd, GetPMWCASPool());
+      if (rc.IsOk()) {
+        (*new_parent)->Merge(&stack);
+      }
     }
   } while (rc.IsNodeFrozen());
   return rc;

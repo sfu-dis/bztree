@@ -372,6 +372,9 @@ class InternalNode : public BaseNode {
                    uint32_t key_size,
                    uint64_t new_child_ptr,
                    InternalNode **new_node);
+
+  // check if this node can be merged into its siblings
+  void Merge(Stack *stack);
 };
 
 class LeafNode;
