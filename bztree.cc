@@ -401,7 +401,7 @@ void BaseNode::Dump(pmwcas::EpochManager *epoch) {
             << std::dec
             << ", frozen = " << header.status.IsFrozen()
             << ", block size = " << header.status.GetBlockSize()
-            << ", delete size = " << header.status.GetDeleteSize()
+            << ", delete size = " << header.status.GetDeletedSize()
             << ", record count = " << header.status.GetRecordCount() << ")\n"
             << " - sorted_count: " << header.sorted_count
             << std::endl;
@@ -680,11 +680,6 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
 
       RecordMetadata current = GetMetadata(static_cast<uint32_t>(middle), epoch);
 
-      // The found record isn't visible
-      if (!current.IsVisible()) {
-        break;
-      }
-
       char *current_key = nullptr;
       GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
       assert(current_key || !is_leaf);
@@ -693,6 +688,10 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       if (cmp_result < 0) {
         last = middle - 1;
       } else if (cmp_result == 0) {
+        // The found record isn't visible
+        if (!current.IsVisible()) {
+          return RecordMetadata{0};
+        }
         if (out_metadata_ptr) {
           *out_metadata_ptr = record_metadata + middle;
         }
@@ -756,10 +755,9 @@ ReturnCode LeafNode::Delete(const char *key,
 
   auto new_meta = metadata;
   new_meta.SetVisible(false);
-  new_meta.SetOffset(0);
 
   auto new_status = old_status;
-  auto old_delete_size = old_status.GetDeleteSize();
+  auto old_delete_size = old_status.GetDeletedSize();
   new_status.SetDeleteSize(old_delete_size + metadata.GetTotalLength());
 
   pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
@@ -1021,50 +1019,53 @@ uint32_t InternalNode::GetChildIndex(const char *key,
 bool LeafNode::MergeNodes(LeafNode *left_node, LeafNode *right_node, LeafNode **new_node) {
   LeafNode::New(new_node, left_node->header.size);
   thread_local std::vector<RecordMetadata> meta_vec;
-  auto copy_metadata = [](std::vector<RecordMetadata> *meta_vec, LeafNode *node, bool from_left) {
+  meta_vec.clear();
+  auto copy_metadata = [](std::vector<RecordMetadata> *meta_vec, LeafNode *node) -> uint32_t {
     uint32_t count = node->header.status.GetRecordCount();
+    uint32_t valid_count = 0;
     for (uint32_t i = 0; i < count; i++) {
       RecordMetadata meta = node->record_metadata[i];
       if (meta.IsVisible()) {
-        // here's the hack: use visible bit to tell which node this meta comes from
-        // if meta is visible, then meta comes from left node
-        // else the meta comes from right node
-        meta.SetVisible(from_left);
         meta_vec->emplace_back(meta);
+        valid_count += 1;
       }
     }
+    return valid_count;
   };
-  copy_metadata(&meta_vec, left_node, true);
-  copy_metadata(&meta_vec, right_node, false);
+  uint32_t left_count = copy_metadata(&meta_vec, left_node);
+  uint32_t right_count = copy_metadata(&meta_vec, right_node);
 
-  auto key_cmp = [left_node, right_node](RecordMetadata &m1, RecordMetadata &m2) {
-    char *k1 = m1.IsVisible() ? left_node->GetKey(m1) : right_node->GetKey(m1);
-    char *k2 = m2.IsVisible() ? left_node->GetKey(m2) : right_node->GetKey(m2);
-    return KeyCompare(k1, m1.GetKeyLength(),
-                      k2, m2.GetKeyLength()) < 0;
+  auto key_cmp = [](LeafNode *node) {
+    return [node](RecordMetadata &m1, RecordMetadata &m2) {
+      return KeyCompare(node->GetKey(m1), m1.GetKeyLength(),
+                        node->GetKey(m2), m2.GetKeyLength()) < 0;
+    };
   };
-  std::sort(meta_vec.begin(), meta_vec.end(), key_cmp);
+  // note: left half is always smaller than the right half
+  // todo(hao): make sure these lambdas are zero-overhead
+  std::sort(meta_vec.begin(), meta_vec.begin() + left_count, key_cmp(left_node));
+  std::sort(meta_vec.begin() + left_count,
+            meta_vec.begin() + left_count + right_count, key_cmp(right_node));
 
   LeafNode *node = *new_node;
   uint32_t offset = node->header.size;
   uint32_t cur_record = 0;
-  for (auto meta:meta_vec) {
+  for (auto meta_iter = meta_vec.begin(); meta_iter < meta_vec.end(); meta_iter++) {
     uint64_t payload;
     char *key;
-    if (meta.IsVisible()) {
-      left_node->GetRawRecord(meta, &key, &payload);
+    if (meta_iter < meta_vec.begin() + left_count) {
+      left_node->GetRawRecord(*meta_iter, &key, &payload);
     } else {
-      meta.SetVisible(true);
-      right_node->GetRawRecord(meta, &key, &payload);
+      right_node->GetRawRecord(*meta_iter, &key, &payload);
     }
 
-    assert(meta.GetTotalLength() >= sizeof(uint64_t));
-    uint64_t total_len = meta.GetTotalLength();
+    assert(meta_iter->GetTotalLength() >= sizeof(uint64_t));
+    uint64_t total_len = meta_iter->GetTotalLength();
     offset -= total_len;
     char *ptr = reinterpret_cast<char *>(node) + offset;
     memcpy(ptr, key, total_len);
 
-    node->record_metadata[cur_record].FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
+    node->record_metadata[cur_record].FinalizeForInsert(offset, meta_iter->GetKeyLength(), total_len);
     cur_record += 1;
   }
   node->header.status.SetBlockSize(node->header.size - offset);
@@ -1073,6 +1074,7 @@ bool LeafNode::MergeNodes(LeafNode *left_node, LeafNode *right_node, LeafNode **
 #ifdef PMDK
   Allocator::Get()->PersistPtr(node, node->header.size);
 #endif
+  return true;
 }
 
 bool LeafNode::PrepareForSplit(Stack &stack,
@@ -1387,8 +1389,9 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       return ReturnCode::NotFound();
     }
     rc = node->Delete(key, key_size, GetPMWCASPool());
-    auto new_block_size = node->GetHeader()->GetStatus(epoch).GetBlockSize();
-    if (new_block_size <= parameters.merge_threshold) {
+    auto old_status = node->GetHeader()->GetStatus(epoch);
+    auto new_valid_size = LeafNode::GetUsedSpace(old_status) - old_status.GetDeletedSize();
+    if (new_valid_size <= parameters.merge_threshold) {
       auto parent_frame = stack.Pop();
       if (!parent_frame) {
         // We're good if this is root node.
@@ -1402,8 +1405,9 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
           return false;
         }
         auto sibling = reinterpret_cast<LeafNode *>(parent->GetChildByMetaIndex(meta_index, epoch));
-        auto block_size = sibling->GetHeader()->GetStatus(epoch).GetBlockSize();
-        return block_size <= parameters.merge_threshold;
+        auto status = sibling->GetHeader()->GetStatus(epoch);
+        uint32_t new_size = LeafNode::GetUsedSpace(status) - status.GetDeletedSize();
+        return new_size <= parameters.merge_threshold;
       };
       if (can_merge(parent_frame->meta_index - 1)) {
         sibling_index = parent_frame->meta_index - 1;
@@ -1436,11 +1440,21 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
       auto *new_node = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
 
-      LeafNode::MergeNodes(node, sibling, new_node);
-      parent->DeleteChild(parent_frame->meta_index,
-                          parent_frame->meta_index - 1,
-                          reinterpret_cast<uint64_t>(*new_node),
-                          new_parent);
+      if (sibling_index < parent_frame->meta_index) {
+        // left sibling
+        LeafNode::MergeNodes(sibling, node, new_node);
+        parent->DeleteChild(sibling_index,
+                            parent_frame->meta_index,
+                            reinterpret_cast<uint64_t>(*new_node),
+                            new_parent);
+      } else {
+        // right sibling
+        LeafNode::MergeNodes(node, sibling, new_node);
+        parent->DeleteChild(parent_frame->meta_index,
+                            sibling_index,
+                            reinterpret_cast<uint64_t>(*new_node),
+                            new_parent);
+      }
 
       auto grandpa_frame = stack.Top();
       if (!grandpa_frame) {

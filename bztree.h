@@ -97,7 +97,7 @@ struct NodeHeader {
     inline void SetBlockSize(uint32_t size) {
       word = (word & (~kBlockSizeMask)) | (uint64_t{size} << 22);
     }
-    inline uint32_t GetDeleteSize() { return (uint32_t) (word & kDeleteSizeMask); }
+    inline uint32_t GetDeletedSize() { return (uint32_t) (word & kDeleteSizeMask); }
     inline void SetDeleteSize(uint32_t size) {
       word = (word & (~kDeleteSizeMask)) | uint64_t{size};
     }
@@ -268,9 +268,6 @@ class BaseNode {
   // 3. [payload] - 8-byte payload
   inline bool GetRawRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload,
                            pmwcas::EpochManager *epoch = nullptr) {
-    if (!meta.IsVisible()) {
-      return false;
-    }
     assert(meta.GetTotalLength());
     char *tmp_data = reinterpret_cast<char *>(this) + meta.GetOffset();
     if (data != nullptr) {

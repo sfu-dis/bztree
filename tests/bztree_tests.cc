@@ -269,11 +269,17 @@ TEST_F(BzTreeTest, Upsert) {
 }
 
 TEST_F(BzTreeTest, Delete) {
-  InsertDummy();
-  uint64_t payload;
-  ASSERT_TRUE(tree->Delete("11", 2).IsNotFound());
-  ASSERT_TRUE(tree->Delete("10", 2).IsOk());
-  ASSERT_TRUE(tree->Read("10", 2, &payload).IsNotFound());
+  for (uint64_t i = 0; i < 15; i++) {
+    std::string key = std::to_string(i);
+    tree->Insert(key.c_str(), key.length(), i);
+  }
+  int items[] = {2, 3, 4, 7, 8, 9};
+  for (auto item:items) {
+    std::string key = std::to_string(item);
+    bztree::ReturnCode rc = tree->Delete(key.c_str(), key.length());
+    ASSERT_TRUE(rc.IsOk());
+  }
+  tree->Dump();
 }
 
 TEST_F(BzTreeTest, RangeScan) {
