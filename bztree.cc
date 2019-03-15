@@ -928,7 +928,6 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
   uint32_t meta_to_delete = meta_to_update + 1;
   uint32_t offset = this->header.size - this->record_metadata[meta_to_delete].GetTotalLength();
   InternalNode::New(new_node, offset);
-  assert(meta_to_delete != 0);
 
   uint32_t insert_idx = 0;
   for (uint32_t i = 0; i < this->header.sorted_count; i += 1) {
@@ -940,14 +939,15 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
       if (meta_to_update == 0) {
         offset -= sizeof(uint64_t);
         memcpy(reinterpret_cast<char *>(*new_node) + offset, &new_child_ptr, sizeof(uint64_t));
+        (*new_node)->record_metadata[insert_idx].FinalizeForInsert(offset, 0, sizeof(uint64_t));
       } else {
         offset -= (padded_key_size + sizeof(uint64_t));
         auto ptr = reinterpret_cast<char *>(*new_node) + offset;
         memcpy(ptr, new_key, key_size);
         memcpy(ptr + padded_key_size, &new_child_ptr, sizeof(uint64_t));
+        (*new_node)->record_metadata[insert_idx].FinalizeForInsert(
+            offset, key_size, padded_key_size + sizeof(uint64_t));
       }
-      (*new_node)->record_metadata[insert_idx].FinalizeForInsert(
-          offset, key_size, padded_key_size + sizeof(uint64_t));
     } else {
       RecordMetadata meta = record_metadata[i];
       uint64_t m_payload = 0;

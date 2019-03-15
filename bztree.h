@@ -366,7 +366,7 @@ class InternalNode : public BaseNode {
   // delete a child from internal node
   // | key0, val0 | key1, val1 | key2, val2 | key3, val3 |
   // ==>
-  // | key0, val0 | key1, val1' | key3, val3 |
+  // | key0, val0 | key1', val1' | key3, val3 |
   void DeleteChild(uint32_t meta_to_update,
                    const char *new_key,
                    uint32_t key_size,
