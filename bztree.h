@@ -368,7 +368,8 @@ class InternalNode : public BaseNode {
   // ==>
   // | key0, val0 | key1, val1' | key3, val3 |
   void DeleteChild(uint32_t meta_to_update,
-                   uint32_t meta_to_delete,
+                   const char *new_key,
+                   uint32_t key_size,
                    uint64_t new_child_ptr,
                    InternalNode **new_node);
 };

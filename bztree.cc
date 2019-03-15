@@ -921,9 +921,11 @@ void LeafNode::CopyFrom(LeafNode *node,
 }
 
 void InternalNode::DeleteChild(uint32_t meta_to_update,
-                               uint32_t meta_to_delete,
+                               const char *new_key,
+                               uint32_t key_size,
                                uint64_t new_child_ptr,
                                bztree::InternalNode **new_node) {
+  uint32_t meta_to_delete = meta_to_update + 1;
   uint32_t offset = this->header.size - this->record_metadata[meta_to_delete].GetTotalLength();
   InternalNode::New(new_node, offset);
   assert(meta_to_delete != 0);
@@ -933,20 +935,30 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
     if (i == meta_to_delete) {
       continue;
     }
-    RecordMetadata meta = record_metadata[i];
-    uint64_t m_payload = 0;
-    char *m_key = nullptr;
-    char *m_data = nullptr;
-    GetRawRecord(meta, &m_data, &m_key, &m_payload);
-    auto m_key_size = meta.GetKeyLength();
-
-    offset -= meta.GetTotalLength();
-    (*new_node)->record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
-    auto ptr = reinterpret_cast<char *>(*new_node) + offset;
     if (i == meta_to_update) {
-      memcpy(ptr, m_data, meta.GetKeyLength());
-      memcpy(ptr + meta.GetKeyLength(), &new_child_ptr, sizeof(uint64_t));
+      uint32_t padded_key_size = RecordMetadata::PadKeyLength(key_size);
+      if (meta_to_update == 0) {
+        offset -= sizeof(uint64_t);
+        memcpy(reinterpret_cast<char *>(*new_node) + offset, &new_child_ptr, sizeof(uint64_t));
+      } else {
+        offset -= (padded_key_size + sizeof(uint64_t));
+        auto ptr = reinterpret_cast<char *>(*new_node) + offset;
+        memcpy(ptr, new_key, key_size);
+        memcpy(ptr + padded_key_size, &new_child_ptr, sizeof(uint64_t));
+      }
+      (*new_node)->record_metadata[insert_idx].FinalizeForInsert(
+          offset, key_size, padded_key_size + sizeof(uint64_t));
     } else {
+      RecordMetadata meta = record_metadata[i];
+      uint64_t m_payload = 0;
+      char *m_key = nullptr;
+      char *m_data = nullptr;
+      GetRawRecord(meta, &m_data, &m_key, &m_payload);
+      auto m_key_size = meta.GetKeyLength();
+
+      offset -= meta.GetTotalLength();
+      (*new_node)->record_metadata[insert_idx].FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
+      auto ptr = reinterpret_cast<char *>(*new_node) + offset;
       memcpy(ptr, m_data, meta.GetTotalLength());
     }
     insert_idx += 1;
@@ -1440,26 +1452,30 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
       auto *new_node = reinterpret_cast<LeafNode **>(pd->GetNewValuePtr(1));
 
+      auto merge_nodes = [&](uint32_t left_index, LeafNode *left_node, LeafNode *right_node) {
+        LeafNode::MergeNodes(left_node, right_node, new_node);
+        char *new_key = nullptr;
+        RecordMetadata first_meta = (*new_node)->GetMetadata(0, epoch);
+        (*new_node)->GetRawRecord(first_meta, &new_key, nullptr);
+
+        parent->DeleteChild(left_index,
+                            new_key, first_meta.GetKeyLength(),
+                            reinterpret_cast<uint64_t>(*new_node),
+                            new_parent);
+      };
+
       if (sibling_index < parent_frame->meta_index) {
         // left sibling
-        LeafNode::MergeNodes(sibling, node, new_node);
-        parent->DeleteChild(sibling_index,
-                            parent_frame->meta_index,
-                            reinterpret_cast<uint64_t>(*new_node),
-                            new_parent);
+        merge_nodes(sibling_index, sibling, node);
       } else {
         // right sibling
-        LeafNode::MergeNodes(node, sibling, new_node);
-        parent->DeleteChild(parent_frame->meta_index,
-                            sibling_index,
-                            reinterpret_cast<uint64_t>(*new_node),
-                            new_parent);
+        merge_nodes(parent_frame->meta_index, node, sibling);
       }
 
       auto grandpa_frame = stack.Top();
       if (!grandpa_frame) {
         ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()),
-                   reinterpret_cast<uint64_t>(new_parent), pd);
+                   reinterpret_cast<uint64_t>(*new_parent), pd);
       } else {
         InternalNode *grandparent = grandpa_frame->node;
         grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index, epoch),
