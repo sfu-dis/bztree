@@ -1001,6 +1001,7 @@ void InternalNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t ke
     // our siblings are good
     return;
   }
+  ReturnCode rc = ReturnCode::Ok();
 
   do {
     auto sibling = reinterpret_cast<InternalNode *>(parent->GetChildByMetaIndex(sibling_index, epoch));
@@ -1044,8 +1045,20 @@ void InternalNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t ke
       merge_nodes(parent_frame->meta_index, this, sibling);
     }
 
-    return;
-  } while (1);
+    auto grandpa_frame = stack->Top();
+    if (!grandpa_frame) {
+      rc = stack->tree->ChangeRoot(reinterpret_cast<uint64_t>(stack->GetRoot()),
+                                   reinterpret_cast<uint64_t>(*new_parent), pd) ?
+           ReturnCode::Ok() : ReturnCode::NodeFrozen();
+    } else {
+      InternalNode *grandparent = grandpa_frame->node;
+      rc = grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index, epoch),
+                               parent, *new_parent, pd, pmwcas_pool);
+      if (rc.IsOk()) {
+        (*new_parent)->CheckMerge(stack, key, key_size);
+      }
+    }
+  } while (rc.IsNodeFrozen());
 }
 
 ReturnCode InternalNode::Update(RecordMetadata meta,
@@ -1117,6 +1130,8 @@ bool InternalNode::MergeNodes(InternalNode *left_node,
   meta_vec.clear();
   uint32_t cur_record = 0;
 
+  InternalNode *node = *new_node;
+
   for (uint32_t i = 0; i < left_node->header.sorted_count; i += 1) {
     RecordMetadata meta = left_node->record_metadata[i];
     uint64_t payload;
@@ -1125,14 +1140,41 @@ bool InternalNode::MergeNodes(InternalNode *left_node,
     assert(meta.GetTotalLength() >= sizeof(uint64_t));
     uint64_t total_len = meta.GetTotalLength();
     offset -= total_len;
-    memcpy(reinterpret_cast<char *>(*new_node) + offset,
+    memcpy(reinterpret_cast<char *>(node) + offset,
            cur_key, total_len);
 
-    (*new_node)->record_metadata[cur_record].FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
+    node->record_metadata[cur_record].FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
     cur_record += 1;
   }
-  memcpy(reinterpret_cast<char *>(*new_node)->Get )
-
+  for (uint32_t i = 0; i < right_node->header.sorted_count; i += 1) {
+    RecordMetadata meta = right_node->record_metadata[i];
+    uint64_t payload;
+    char *cur_key;
+    right_node->GetRawRecord(meta, nullptr, &cur_key, &payload);
+    if (i == 0) {
+      uint32_t padded_key_size = RecordMetadata::PadKeyLength(key_size);
+      offset -= (padded_key_size + sizeof(uint64_t));
+      memcpy(reinterpret_cast<char *>(node) + offset,
+             key, key_size);
+      memcpy(reinterpret_cast<char *>(node) + offset + padded_key_size,
+             &payload, sizeof(uint64_t));
+      node->record_metadata[cur_record].FinalizeForInsert(offset, key_size, key_size + sizeof(uint64_t));
+    } else {
+      assert(meta.GetTotalLength() >= sizeof(uint64_t));
+      uint64_t total_len = meta.GetTotalLength();
+      offset -= total_len;
+      memcpy(reinterpret_cast<char *>(node) + offset,
+             cur_key, total_len);
+      node->record_metadata[cur_record].FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
+    }
+    cur_record += 1;
+  }
+  node->header.status.SetRecordCount(cur_record);
+  node->header.sorted_count = cur_record;
+#ifdef PMDK
+  Allocator::Get()->PersistPtr(node, node->header.size);
+#endif
+  return true;
 }
 
 bool LeafNode::MergeNodes(LeafNode *left_node, LeafNode *right_node, LeafNode **new_node) {

@@ -628,9 +628,9 @@ class BzTree {
   }
 
   ParameterSet parameters;
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
 
  private:
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
   uint64_t pmdk_addr;
