@@ -1026,9 +1026,12 @@ void InternalNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t ke
     auto *new_node = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(1));
 
     auto merge_nodes = [&](uint32_t left_index, InternalNode *left_node, InternalNode *right_node) {
-      InternalNode::MergeNodes(left_node, right_node, new_node);
+      RecordMetadata right_meta = right_node->record_metadata[left_index + 1];
       char *new_key = nullptr;
-      RecordMetadata first_meta = (*new_node)->GetMetadata(0, epoch);
+      right_node->GetRawRecord(right_meta, nullptr, &new_key, nullptr);
+      InternalNode::MergeNodes(left_node, right_node, new_key, right_meta.GetKeyLength(), new_node);
+
+      RecordMetadata first_meta = (*new_node)->record_metadata[0];
       (*new_node)->GetRawRecord(first_meta, nullptr, &new_key, nullptr);
       parent->DeleteChild(left_index, new_key, first_meta.GetKeyLength(),
                           reinterpret_cast<uint64_t>(*new_node),
@@ -1104,13 +1107,31 @@ uint32_t InternalNode::GetChildIndex(const char *key,
   }
 }
 
-bool InternalNode::MergeNodes(bztree::InternalNode *left_node,
-                              bztree::InternalNode *right_node,
-                              bztree::InternalNode **new_node) {
-  InternalNode::New(new_node, left_node->header.size + right_node->header.size);
+bool InternalNode::MergeNodes(InternalNode *left_node,
+                              InternalNode *right_node,
+                              const char *key, uint32_t key_size,
+                              InternalNode **new_node) {
+  uint32_t offset = left_node->header.size + right_node->header.size;
+  InternalNode::New(new_node, offset);
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
-  
+  uint32_t cur_record = 0;
+
+  for (uint32_t i = 0; i < left_node->header.sorted_count; i += 1) {
+    RecordMetadata meta = left_node->record_metadata[i];
+    uint64_t payload;
+    char *cur_key;
+    left_node->GetRawRecord(meta, nullptr, &cur_key, &payload);
+    assert(meta.GetTotalLength() >= sizeof(uint64_t));
+    uint64_t total_len = meta.GetTotalLength();
+    offset -= total_len;
+    memcpy(reinterpret_cast<char *>(*new_node) + offset,
+           cur_key, total_len);
+
+    (*new_node)->record_metadata[cur_record].FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
+    cur_record += 1;
+  }
+  memcpy(reinterpret_cast<char *>(*new_node)->Get )
 
 }
 

@@ -376,7 +376,8 @@ class InternalNode : public BaseNode {
   // check if this node can be merged into its siblings
   void CheckMerge(Stack *stack, const char *key, uint32_t key_size);
 
-  bool MergeNodes(InternalNode *left_node, InternalNode *right_node, InternalNode **new_node);
+  bool MergeNodes(InternalNode *left_node, InternalNode *right_node,
+                  const char *key, uint32_t key_size, InternalNode **new_node);
 };
 
 class LeafNode;
