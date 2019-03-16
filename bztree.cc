@@ -977,10 +977,11 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t 
   uint32_t merge_threshold = stack->tree->parameters.merge_threshold;
   auto epoch = stack->tree->GetPMWCASPool()->GetEpoch();
   auto pmwcas_pool = stack->tree->GetPMWCASPool();
-  if (IsLeaf() && GetHeader()->size > merge_threshold) {
-    // large enough, we are good
+  if (!IsLeaf() && GetHeader()->size > merge_threshold) {
+    // internal node, large enough, we are good
     return ReturnCode::Ok();
   } else {
+    // leaf node
     auto old_status = GetHeader()->GetStatus(epoch);
     auto valid_size = LeafNode::GetUsedSpace(old_status) - old_status.GetDeletedSize();
     if (valid_size > merge_threshold) {
@@ -988,6 +989,8 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t 
     }
   }
 
+  stack->Clear();
+  stack->tree->TraverseToNode(stack, key, key_size, this);
   // too small, trying to merge siblings
   // start by checking parent node
   auto parent_frame = stack->Pop();
@@ -1028,7 +1031,7 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t 
 
   // Phase 1: freeze both nodes, and their parent
   auto node_status = this->GetHeader()->GetStatus(epoch);
-  auto sibling_status = this->GetHeader()->GetStatus(epoch);
+  auto sibling_status = sibling->GetHeader()->GetStatus(epoch);
   auto parent_status = parent->GetHeader()->GetStatus(epoch);
   auto *pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(&(&this->GetHeader()->status)->word, node_status.word, node_status.Freeze().word);
