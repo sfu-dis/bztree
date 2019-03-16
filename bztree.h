@@ -374,7 +374,9 @@ class InternalNode : public BaseNode {
                    InternalNode **new_node);
 
   // check if this node can be merged into its siblings
-  void Merge(Stack *stack);
+  void CheckMerge(Stack *stack, const char *key, uint32_t key_size);
+
+  bool MergeNodes(InternalNode *left_node, InternalNode *right_node, InternalNode **new_node);
 };
 
 class LeafNode;
@@ -624,9 +626,10 @@ class BzTree {
     return index_epoch;
   }
 
+  ParameterSet parameters;
+
  private:
   bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
-  ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
   uint64_t pmdk_addr;

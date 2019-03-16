@@ -969,9 +969,80 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
 #endif
 }
 
-void InternalNode::Merge(bztree::Stack *stack) {
+void InternalNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t key_size) {
+  uint32_t merge_threshold = stack->tree->parameters.merge_threshold;
+  auto epoch = stack->tree->GetPMWCASPool()->GetEpoch();
+  auto pmwcas_pool = stack->tree->GetPMWCASPool();
+  if (GetHeader()->size > merge_threshold) {
+    // large enough, we are good
+    return;
+  }
   stack->Clear();
+  stack->tree->TraverseToNode(stack, key, key_size, this);
 
+  auto parent_frame = stack->Pop();
+  assert(parent_frame);
+
+  InternalNode *parent = parent_frame->node;
+  uint32_t sibling_index = 0;
+
+  auto can_merge = [&](uint32_t meta_index) -> bool {
+    if (meta_index < 0 || meta_index > parent->GetHeader()->sorted_count) {
+      return false;
+    }
+    auto sibling = reinterpret_cast<InternalNode *>(parent->GetChildByMetaIndex(meta_index, epoch));
+    return sibling->GetHeader()->size < merge_threshold;
+  };
+  if (can_merge(parent_frame->meta_index - 1)) {
+    sibling_index = parent_frame->meta_index - 1;
+  } else if (can_merge(parent_frame->meta_index + 1)) {
+    sibling_index = parent_frame->meta_index + 1;
+  } else {
+    // our siblings are good
+    return;
+  }
+
+  do {
+    auto sibling = reinterpret_cast<InternalNode *>(parent->GetChildByMetaIndex(sibling_index, epoch));
+
+    auto node_status = this->GetHeader()->GetStatus(epoch);
+    auto sibling_status = this->GetHeader()->GetStatus(epoch);
+
+    auto *pd = pmwcas_pool->AllocateDescriptor();
+    pd->AddEntry(&(&this->GetHeader()->status)->word, node_status.word, node_status.Freeze().word);
+    pd->AddEntry(&(&sibling->GetHeader()->status)->word, sibling_status.word, sibling_status.Freeze().word);
+    if (!pd->MwCAS()) {
+      continue;
+    }
+
+    pd = pmwcas_pool->AllocateDescriptor();
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+                           reinterpret_cast<uint64_t>(nullptr),
+                           pmwcas::Descriptor::kRecycleOnRecovery);
+    auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
+    auto *new_node = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(1));
+
+    auto merge_nodes = [&](uint32_t left_index, InternalNode *left_node, InternalNode *right_node) {
+      InternalNode::MergeNodes(left_node, right_node, new_node);
+      char *new_key = nullptr;
+      RecordMetadata first_meta = (*new_node)->GetMetadata(0, epoch);
+      (*new_node)->GetRawRecord(first_meta, nullptr, &new_key, nullptr);
+      parent->DeleteChild(left_index, new_key, first_meta.GetKeyLength(),
+                          reinterpret_cast<uint64_t>(*new_node),
+                          new_parent);
+    };
+
+    if (sibling_index < parent_frame->meta_index) {
+      merge_nodes(sibling_index, sibling, this);
+    } else {
+      merge_nodes(parent_frame->meta_index, this, sibling);
+    }
+
+    return;
+  } while (1);
 }
 
 ReturnCode InternalNode::Update(RecordMetadata meta,
@@ -1031,6 +1102,16 @@ uint32_t InternalNode::GetChildIndex(const char *key,
       }
     }
   }
+}
+
+bool InternalNode::MergeNodes(bztree::InternalNode *left_node,
+                              bztree::InternalNode *right_node,
+                              bztree::InternalNode **new_node) {
+  InternalNode::New(new_node, left_node->header.size + right_node->header.size);
+  thread_local std::vector<RecordMetadata> meta_vec;
+  meta_vec.clear();
+  
+
 }
 
 bool LeafNode::MergeNodes(LeafNode *left_node, LeafNode *right_node, LeafNode **new_node) {
@@ -1200,6 +1281,7 @@ BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
   }
   return node;
 }
+
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
                                  bool le_child) {
@@ -1514,7 +1596,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       rc = grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index, epoch),
                                parent, *new_parent, pd, GetPMWCASPool());
       if (rc.IsOk()) {
-        (*new_parent)->Merge(&stack);
+        (*new_parent)->CheckMerge(&stack, key, key_size);
       }
     }
   } while (rc.IsNodeFrozen());
