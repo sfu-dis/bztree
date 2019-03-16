@@ -193,6 +193,7 @@ struct RecordMetadata {
   }
 };
 
+class Stack;
 class BaseNode {
  protected:
   bool is_leaf;
@@ -303,9 +304,9 @@ class BaseNode {
   inline bool IsFrozen(pmwcas::EpochManager *epoch) {
     return GetHeader()->GetStatus(epoch).IsFrozen();
   }
-};
 
-class Stack;
+  ReturnCode CheckMerge(Stack *stack, const char *key, uint32_t key_size);
+};
 
 // Internal node: immutable once created, no free space, keys are always sorted
 // operations that might mutate the InternalNode:
@@ -351,6 +352,9 @@ class InternalNode : public BaseNode {
                     pmwcas::Descriptor *pd, pmwcas::DescriptorPool *pmwcas_pool);
   uint32_t GetChildIndex(const char *key, uint16_t key_size,
                          pmwcas::DescriptorPool *pool, bool get_le = true);
+
+  // epoch here is required: record ptr might be a desc due to UPDATE operation
+  // but record_metadata don't need a epoch
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
     GetRawRecord(record_metadata[index], nullptr, nullptr, &child_addr, epoch);
@@ -373,11 +377,8 @@ class InternalNode : public BaseNode {
                    uint64_t new_child_ptr,
                    InternalNode **new_node);
 
-  // check if this node can be merged into its siblings
-  void CheckMerge(Stack *stack, const char *key, uint32_t key_size);
-
-  bool MergeNodes(InternalNode *left_node, InternalNode *right_node,
-                  const char *key, uint32_t key_size, InternalNode **new_node);
+  static bool MergeNodes(InternalNode *left_node, InternalNode *right_node,
+                         const char *key, uint32_t key_size, InternalNode **new_node);
 };
 
 class LeafNode;
@@ -601,7 +602,9 @@ class BzTree {
                            uint16_t key_size,
                            bool le_child = true);
   BaseNode *TraverseToNode(bztree::Stack *stack,
-                           const char *key, uint16_t key_size, bztree::BaseNode *stop_at);
+                           const char *key, uint16_t key_size,
+                           bztree::BaseNode *stop_at = nullptr,
+                           bool le_child = true);
 
   void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
 #ifdef PMDK
