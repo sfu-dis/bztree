@@ -28,6 +28,7 @@ void InternalNode::New(bztree::InternalNode **mem, uint32_t alloc_size) {
 #else
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(mem), alloc_size);
   memset(*mem, 0, alloc_size);
+  (*mem)->header.size = alloc_size;
 #endif  // PMDK
 }
 
@@ -146,6 +147,7 @@ InternalNode::InternalNode(uint32_t node_size,
     : BaseNode(false, node_size) {
   // Initialize a new internal node with one key only
   header.sorted_count = 2;  // Includes the null dummy key
+  header.size = node_size;
 
   // Fill in left child address, with an empty key
   uint64_t offset = node_size - sizeof(left_child_addr);
@@ -266,6 +268,7 @@ InternalNode::InternalNode(uint32_t node_size,
     ++insert_idx;
   }
 
+  header.size = node_size;
   header.sorted_count = insert_idx;
 }
 
@@ -406,6 +409,8 @@ void BaseNode::Dump(pmwcas::EpochManager *epoch) {
             << " - sorted_count: " << header.sorted_count
             << std::endl;
 
+  std::cout << " - size: " << header.size << std::endl;
+
   std::cout << " Record Metadata Array:" << std::endl;
   uint32_t n_meta = std::max<uint32_t>(header.status.GetRecordCount(), header.sorted_count);
   for (uint32_t i = 0; i < n_meta; ++i) {
@@ -450,11 +455,10 @@ void InternalNode::Dump(pmwcas::EpochManager *epoch, bool dump_children) {
     assert((i == 0 && meta.GetKeyLength() == 0) || (i > 0 && meta.GetKeyLength() > 0));
     uint64_t right_child_addr = 0;
     char *key = nullptr;
-    char *unused = nullptr;
-    GetRawRecord(meta, &unused, &key, &right_child_addr);
+    GetRawRecord(meta, nullptr, &key, &right_child_addr);
     if (key) {
       std::string keystr(key, key + meta.GetKeyLength());
-      std::cout << " | " << keystr << " | ";
+      std::cout << " || " << keystr << " | ";
     }
     std::cout << std::hex << "0x" << right_child_addr << std::dec;
   }
@@ -987,7 +991,7 @@ void InternalNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t ke
   uint32_t sibling_index = 0;
 
   auto can_merge = [&](uint32_t meta_index) -> bool {
-    if (meta_index < 0 || meta_index > parent->GetHeader()->sorted_count) {
+    if (meta_index < 0 || meta_index >= parent->GetHeader()->sorted_count) {
       return false;
     }
     auto sibling = reinterpret_cast<InternalNode *>(parent->GetChildByMetaIndex(meta_index, epoch));
@@ -1026,15 +1030,16 @@ void InternalNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t ke
     auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
     auto *new_node = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(1));
 
-    auto merge_nodes = [&](uint32_t left_index, InternalNode *left_node, InternalNode *right_node) {
-      RecordMetadata right_meta = right_node->record_metadata[left_index + 1];
+    auto merge_nodes = [&](uint32_t left_node_index, InternalNode *left_node, InternalNode *right_node) {
+      // get the key for right node
+      RecordMetadata right_meta = parent->record_metadata[left_node_index + 1];
       char *new_key = nullptr;
-      right_node->GetRawRecord(right_meta, nullptr, &new_key, nullptr);
+      parent->GetRawRecord(right_meta, nullptr, &new_key, nullptr);
       InternalNode::MergeNodes(left_node, right_node, new_key, right_meta.GetKeyLength(), new_node);
 
-      RecordMetadata first_meta = (*new_node)->record_metadata[0];
-      (*new_node)->GetRawRecord(first_meta, nullptr, &new_key, nullptr);
-      parent->DeleteChild(left_index, new_key, first_meta.GetKeyLength(),
+      RecordMetadata last_meta = (*new_node)->record_metadata[0];
+      (*new_node)->GetRawRecord(last_meta, nullptr, &new_key, nullptr);
+      parent->DeleteChild(left_node_index, new_key, last_meta.GetKeyLength(),
                           reinterpret_cast<uint64_t>(*new_node),
                           new_parent);
     };
@@ -1590,7 +1595,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     uint32_t sibling_index = 0;
 
     auto can_merge = [&](uint32_t meta_index) -> bool {
-      if (meta_index < 0 || meta_index > parent->GetHeader()->sorted_count) {
+      if (meta_index < 0 || meta_index >= parent->GetHeader()->sorted_count) {
         return false;
       }
       auto sibling = reinterpret_cast<LeafNode *>(parent->GetChildByMetaIndex(meta_index, epoch));
