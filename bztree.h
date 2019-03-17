@@ -235,6 +235,10 @@ class BaseNode {
   }
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
+
+  // Add an entry to the provided PMwCAS descriptor for freezing the node
+  bool PrepareFreeze(pmwcas::DescriptorPool *pmwcas_pool, pmwcas::Descriptor* pd);
+
   inline RecordMetadata GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
     // ensure the metadata is installed
     auto meta = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(

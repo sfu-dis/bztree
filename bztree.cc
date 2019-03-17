@@ -274,10 +274,18 @@ bool InternalNode::PrepareForSplit(Stack &stack,
       sizeof(right_child_addr) + sizeof(RecordMetadata);
   uint32_t new_node_size = sizeof(InternalNode) + data_size;
   if (new_node_size < split_threshold) {
+    if (!PrepareFreeze(pool, pd) && backoff) {
+      return false;
+    }
+
     // good boy
     InternalNode::New(this, key, key_size, left_child_addr,
                       right_child_addr, new_node);
     return true;
+  }
+
+  if (!Freeze(pool) && backoff) {
+    return false;
   }
 
   // After adding a key and pointers the new node would be too large. This
@@ -339,18 +347,6 @@ bool InternalNode::PrepareForSplit(Stack &stack,
     InternalNode::New(separator_key, separator_key_size,
                       (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node);
     return true;
-  }
-
-  // Try to freeze the parent node first
-  bool frozen_by_me = false;
-  while (!parent->IsFrozen(pool->GetEpoch())) {
-    frozen_by_me = parent->Freeze(pool);
-  }
-
-  // Someone else froze the parent node and we are told not to compete with
-  // others (for now)
-  if (!frozen_by_me && backoff) {
-    return false;
   }
 
   return parent->PrepareForSplit(stack, split_threshold,
@@ -825,6 +821,18 @@ bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
   return pd->MwCAS();
 }
 
+bool BaseNode::PrepareFreeze(pmwcas::DescriptorPool *pmwcas_pool, pmwcas::Descriptor *pd) {
+  NodeHeader::StatusWord expected = header.GetStatus(pmwcas_pool->GetEpoch());
+  if (expected.IsFrozen()) {
+    return false;
+  }
+  NodeHeader::StatusWord desired = expected;
+  desired.Freeze();
+
+  pd->AddEntry(&(&header.status)->word, expected.word, desired.word);
+  return true;
+}
+
 LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
   // Freeze the node to prevent new modifications first
   if (!Freeze(pmwcas_pool)) {
@@ -920,6 +928,7 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
                                 pmwcas::DescriptorPool *pmwcas_pool) {
   auto status = header.GetStatus(pmwcas_pool->GetEpoch());
   if (status.IsFrozen()) {
+    pd->Abort();
     return ReturnCode::NodeFrozen();
   }
 
@@ -1034,25 +1043,16 @@ bool LeafNode::PrepareForSplit(Stack &stack,
     return true;
   }
 
-  bool frozen_by_me = false;
-  while (!parent->IsFrozen(pmwcas_pool->GetEpoch())) {
-    frozen_by_me = parent->Freeze(pmwcas_pool);
-  }
-
-  if (!frozen_by_me && backoff) {
-    return false;
-  } else {
-    // Has a parent node. PrepareForSplit will see if we need to split this
-    // parent node as well, and if so, return a new (possibly upper-level) parent
-    // node that needs to be installed to its parent
-    return parent->PrepareForSplit(stack, split_threshold, key,
-                                   separator_meta.GetKeyLength(),
-                                   reinterpret_cast<uint64_t>(*left),
-                                   reinterpret_cast<uint64_t>(*right),
-                                   new_parent,
-                                   pd, pmwcas_pool,
-                                   backoff);
-  }
+  // Has a parent node. PrepareForSplit will see if we need to split this
+  // parent node as well, and if so, return a new (possibly upper-level) parent
+  // node that needs to be installed to its parent
+  return parent->PrepareForSplit(stack, split_threshold, key,
+                                 separator_meta.GetKeyLength(),
+                                 reinterpret_cast<uint64_t>(*left),
+                                 reinterpret_cast<uint64_t>(*right),
+                                 new_parent,
+                                 pd, pmwcas_pool,
+                                 backoff);
 }
 
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
@@ -1156,6 +1156,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
                                                 backoff);
     if (!should_proceed) {
       // TODO(tzwang): free memory allocated in ptr_l, ptr_r, and ptr_parent
+      pd->Abort();
       continue;
     }
 
