@@ -203,7 +203,77 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
   t.SanityCheck();
   pmwcas::Thread::ClearRegistry(true);
 }
+struct MultiThreadDeleteTest : public pmwcas::PerformanceTest {
+  bztree::BzTree *tree;
+  uint32_t item_per_thread;
+  uint32_t thread_count;
+  uint32_t total_records;
+  MultiThreadDeleteTest(uint32_t item_per_thread, uint32_t thread_count,
+                        uint32_t total_records, bztree::BzTree *tree)
+      : tree(tree), thread_count(thread_count),
+        item_per_thread(item_per_thread), total_records(total_records) {}
 
+  void SanityCheck() {
+    for (uint32_t i = 0; i < total_records; i += 1) {
+      auto i_str = std::to_string(i);
+      uint64_t payload;
+      auto rc = tree->Read(i_str.c_str(), i_str.length(), &payload);
+      if (i < thread_count * item_per_thread) {
+        ASSERT_TRUE(rc.IsNotFound());
+      } else {
+        ASSERT_TRUE(rc.IsOk());
+        ASSERT_TRUE(payload == i);
+      }
+    }
+    tree->Dump();
+  }
+
+  void Entry(size_t thread_index) override {
+    if (thread_index == 0) {
+      // prepare the records to delete
+      for (uint32_t i = 0; i < total_records; i += 1) {
+        auto i_str = std::to_string(i);
+        auto rc = tree->Insert(i_str.c_str(), i_str.length(), i);
+      }
+    }
+
+    WaitForStart();
+    for (uint32_t i = 0; i < item_per_thread; i += 1) {
+      auto value = i + item_per_thread * thread_index;
+      auto str_value = std::to_string(value);
+      auto rc = tree->Delete(str_value.c_str(),
+                             str_value.length());
+    }
+  }
+};
+GTEST_TEST(MultiThreadDeleteTest, SingleNodeDeleteTest) {
+  uint32_t thread_count = 5;
+  uint32_t item_per_thread = 20;
+  uint32_t total_record = 200;
+  std::unique_ptr<pmwcas::DescriptorPool> pool(
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
+  );
+  bztree::BzTree::ParameterSet param;
+  std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
+  MultiThreadDeleteTest t(item_per_thread, thread_count, total_record, tree.get());
+  t.Run(thread_count);
+  t.SanityCheck();
+  pmwcas::Thread::ClearRegistry(true);
+}
+GTEST_TEST(MultiThreadDeleteTest, MultiLevelDeleteTest) {
+  uint32_t thread_count = 15;
+  uint32_t item_per_thread = 100;
+  uint32_t total_record = 2000;
+  std::unique_ptr<pmwcas::DescriptorPool> pool(
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
+  );
+  bztree::BzTree::ParameterSet param(256, 0, 256);
+  std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
+  MultiThreadDeleteTest t(item_per_thread, thread_count, total_record, tree.get());
+  t.Run(thread_count);
+  t.SanityCheck();
+  pmwcas::Thread::ClearRegistry(true);
+}
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
