@@ -1220,13 +1220,14 @@ bool InternalNode::MergeNodes(InternalNode *left_node,
   for (uint32_t i = 0; i < left_node->header.sorted_count; i += 1) {
     RecordMetadata meta = left_node->record_metadata[i];
     uint64_t payload;
-    char *cur_key;
-    left_node->GetRawRecord(meta, nullptr, &cur_key, &payload);
+    char *data;
+    char *record_key;
+    left_node->GetRawRecord(meta, &data, &record_key, &payload);
     assert(meta.GetTotalLength() >= sizeof(uint64_t));
     uint64_t total_len = meta.GetTotalLength();
     offset -= total_len;
     memcpy(reinterpret_cast<char *>(node) + offset,
-           cur_key, total_len);
+           data, total_len);
 
     node->record_metadata[cur_record].FinalizeForInsert(offset, meta.GetKeyLength(), total_len);
     cur_record += 1;
@@ -1244,7 +1245,7 @@ bool InternalNode::MergeNodes(InternalNode *left_node,
       memcpy(reinterpret_cast<char *>(node) + offset + padded_key_size,
              &payload, sizeof(uint64_t));
       node->record_metadata[cur_record].
-          FinalizeForInsert(offset, key_size, key_size + sizeof(uint64_t));
+          FinalizeForInsert(offset, key_size, padded_key_size + sizeof(uint64_t));
     } else {
       assert(meta.GetTotalLength() >= sizeof(uint64_t));
       uint64_t total_len = meta.GetTotalLength();
@@ -1255,7 +1256,6 @@ bool InternalNode::MergeNodes(InternalNode *left_node,
     }
     cur_record += 1;
   }
-  node->header.status.SetRecordCount(cur_record);
   node->header.sorted_count = cur_record;
 #ifdef PMDK
   Allocator::Get()->PersistPtr(node, node->header.size);
