@@ -974,15 +974,15 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
 #endif
 }
 
-ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t key_size) {
+ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t key_size, bool backoff) {
   uint32_t merge_threshold = stack->tree->parameters.merge_threshold;
-  auto epoch = stack->tree->GetPMWCASPool()->GetEpoch();
   auto pmwcas_pool = stack->tree->GetPMWCASPool();
+  auto epoch = pmwcas_pool->GetEpoch();
   if (!IsLeaf() && GetHeader()->size > merge_threshold) {
-    // internal node, large enough, we are good
+    // we're internal node, large enough, we are good
     return ReturnCode::Ok();
   } else {
-    // leaf node
+    // we're leaf node, large enough
     auto old_status = GetHeader()->GetStatus(epoch);
     auto valid_size = LeafNode::GetUsedSpace(old_status) - old_status.GetDeletedSize();
     if (valid_size > merge_threshold) {
@@ -990,8 +990,6 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t 
     }
   }
 
-  stack->Clear();
-  stack->tree->TraverseToNode(stack, key, key_size, this);
   // too small, trying to merge siblings
   // start by checking parent node
   auto parent_frame = stack->Pop();
@@ -1033,6 +1031,11 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t 
   // Phase 1: freeze both nodes, and their parent
   auto node_status = this->GetHeader()->GetStatus(epoch);
   auto sibling_status = sibling->GetHeader()->GetStatus(epoch);
+
+  if (!backoff || node_status.IsFrozen() || sibling_status.IsFrozen()) {
+    return ReturnCode::NodeFrozen();
+  }
+
   auto *pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(&(&this->GetHeader()->status)->word,
                node_status.word, node_status.Freeze().word);
@@ -1116,9 +1119,29 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t 
     InternalNode *grandparent = grandpa_frame->node;
     rc = grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index, epoch),
                              parent, *new_parent, pd, pmwcas_pool);
-    if (rc.IsOk()) {
-      (*new_parent)->CheckMerge(stack, key, key_size);
+    if (!rc.IsOk()) {
+      return rc;
     }
+
+    uint32_t freeze_retry = 0;
+    do {
+      // if previous merge succeeded, we move on to check new_parent
+      rc = (*new_parent)->CheckMerge(stack, key, key_size,
+                                     freeze_retry < MAX_FREEZE_RETRY);
+      if (rc.IsOk()) {
+        return rc;
+      }
+      freeze_retry += 1;
+      stack->Clear();
+      BaseNode *landed_on = stack->tree->TraverseToNode(stack, key, key_size, *new_parent);
+      if (landed_on != *new_parent) {
+        // we landed on a leaf node
+        // means the *new_parent has been swapped out
+        // either splitted or merged
+        assert(landed_on->IsLeaf());
+        return ReturnCode::Ok();
+      }
+    } while (rc.IsNodeFrozen());
   }
   return rc;
 }
@@ -1265,8 +1288,8 @@ bool LeafNode::MergeNodes(LeafNode *left_node, LeafNode *right_node, LeafNode **
                         node->GetKey(m2), m2.GetKeyLength()) < 0;
     };
   };
-  // note: left half is always smaller than the right half
   // todo(hao): make sure these lambdas are zero-overhead
+  // note: left half is always smaller than the right half
   std::sort(meta_vec.begin(), meta_vec.begin() + left_count, key_cmp(left_node));
   std::sort(meta_vec.begin() + left_count,
             meta_vec.begin() + left_count + right_count, key_cmp(right_node));
@@ -1646,8 +1669,15 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   }
 
   // finished record delete, now check if we can merge siblings
+  uint32_t freeze_retry = 0;
   do {
-    rc = node->CheckMerge(&stack, key, key_size);
+    rc = node->CheckMerge(&stack, key, key_size, freeze_retry < MAX_FREEZE_RETRY);
+    if (rc.IsOk()) {
+      return rc;
+    }
+    stack.Clear();
+    node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
+    freeze_retry += 1;
   } while (rc.IsNodeFrozen());
 
   return rc;

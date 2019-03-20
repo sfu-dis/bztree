@@ -305,7 +305,7 @@ class BaseNode {
     return GetHeader()->GetStatus(epoch).IsFrozen();
   }
 
-  ReturnCode CheckMerge(Stack *stack, const char *key, uint32_t key_size);
+  ReturnCode CheckMerge(Stack *stack, const char *key, uint32_t key_size, bool backoff);
 };
 
 // Internal node: immutable once created, no free space, keys are always sorted
