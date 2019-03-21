@@ -370,12 +370,10 @@ class InternalNode : public BaseNode {
   // delete a child from internal node
   // | key0, val0 | key1, val1 | key2, val2 | key3, val3 |
   // ==>
-  // | key0, val0 | key1', val1' | key3, val3 |
-  void DeleteChild(uint32_t meta_to_update,
-                   const char *new_key,
-                   uint32_t key_size,
-                   uint64_t new_child_ptr,
-                   InternalNode **new_node);
+  // | key0, val0 | key1, val1' | key3, val3 |
+  void DeleteRecord(uint32_t meta_to_update,
+                    uint64_t new_child_ptr,
+                    InternalNode **new_node);
 
   static bool MergeNodes(InternalNode *left_node, InternalNode *right_node,
                          const char *key, uint32_t key_size, InternalNode **new_node);

@@ -924,11 +924,9 @@ void LeafNode::CopyFrom(LeafNode *node,
 #endif
 }
 
-void InternalNode::DeleteChild(uint32_t meta_to_update,
-                               const char *new_key,
-                               uint32_t key_size,
-                               uint64_t new_child_ptr,
-                               bztree::InternalNode **new_node) {
+void InternalNode::DeleteRecord(uint32_t meta_to_update,
+                                uint64_t new_child_ptr,
+                                bztree::InternalNode **new_node) {
   uint32_t meta_to_delete = meta_to_update + 1;
   uint32_t offset = this->header.size -
       this->record_metadata[meta_to_delete].GetTotalLength() - sizeof(RecordMetadata);
@@ -939,32 +937,20 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
     if (i == meta_to_delete) {
       continue;
     }
+    RecordMetadata meta = record_metadata[i];
+    uint64_t m_payload = 0;
+    char *m_key = nullptr;
+    char *m_data = nullptr;
+    GetRawRecord(meta, &m_data, &m_key, &m_payload);
+    auto m_key_size = meta.GetKeyLength();
+    offset -= meta.GetTotalLength();
+    (*new_node)->record_metadata[insert_idx].
+        FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
+    auto ptr = reinterpret_cast<char *>(*new_node) + offset;
     if (i == meta_to_update) {
-      uint32_t padded_key_size = RecordMetadata::PadKeyLength(key_size);
-      if (meta_to_update == 0) {
-        offset -= sizeof(uint64_t);
-        memcpy(reinterpret_cast<char *>(*new_node) + offset, &new_child_ptr, sizeof(uint64_t));
-        (*new_node)->record_metadata[insert_idx].FinalizeForInsert(offset, 0, sizeof(uint64_t));
-      } else {
-        offset -= (padded_key_size + sizeof(uint64_t));
-        auto ptr = reinterpret_cast<char *>(*new_node) + offset;
-        memcpy(ptr, new_key, key_size);
-        memcpy(ptr + padded_key_size, &new_child_ptr, sizeof(uint64_t));
-        (*new_node)->record_metadata[insert_idx].FinalizeForInsert(
-            offset, key_size, padded_key_size + sizeof(uint64_t));
-      }
+      memcpy(ptr, m_data, meta.GetKeyLength());
+      memcpy(ptr + meta.GetPaddedKeyLength(), &new_child_ptr, sizeof(uint64_t));
     } else {
-      RecordMetadata meta = record_metadata[i];
-      uint64_t m_payload = 0;
-      char *m_key = nullptr;
-      char *m_data = nullptr;
-      GetRawRecord(meta, &m_data, &m_key, &m_payload);
-      auto m_key_size = meta.GetKeyLength();
-
-      offset -= meta.GetTotalLength();
-      (*new_node)->record_metadata[insert_idx].
-          FinalizeForInsert(offset, m_key_size, meta.GetTotalLength());
-      auto ptr = reinterpret_cast<char *>(*new_node) + offset;
       memcpy(ptr, m_data, meta.GetTotalLength());
     }
     insert_idx += 1;
@@ -1065,14 +1051,9 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   auto merge_leaf_nodes = [&](uint32_t left_index, LeafNode *left_node, LeafNode *right_node) {
     LeafNode::MergeNodes(left_node, right_node,
                          reinterpret_cast<LeafNode **>(new_node));
-    char *new_key = nullptr;
-    RecordMetadata first_meta = (*new_node)->GetMetadata(0, epoch);
-    (*new_node)->GetRawRecord(first_meta, nullptr, &new_key, nullptr);
-
-    parent->DeleteChild(left_index,
-                        new_key, first_meta.GetKeyLength(),
-                        reinterpret_cast<uint64_t>(*new_node),
-                        new_parent);
+    parent->DeleteRecord(left_index,
+                         reinterpret_cast<uint64_t>(*new_node),
+                         new_parent);
   };
   // lambda wrapper for merge internal nodes
   auto merge_internal_nodes = [&](uint32_t left_node_index,
@@ -1081,14 +1062,12 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     RecordMetadata right_meta = parent->record_metadata[left_node_index + 1];
     char *new_key = nullptr;
     parent->GetRawRecord(right_meta, nullptr, &new_key, nullptr);
+    assert(right_meta.GetKeyLength() != 0);
     InternalNode::MergeNodes(left_node, right_node, new_key, right_meta.GetKeyLength(),
                              reinterpret_cast<InternalNode **> (new_node));
-
-    RecordMetadata last_meta = (*new_node)->record_metadata[0];
-    (*new_node)->GetRawRecord(last_meta, nullptr, &new_key, nullptr);
-    parent->DeleteChild(left_node_index, new_key, last_meta.GetKeyLength(),
-                        reinterpret_cast<uint64_t>(*new_node),
-                        new_parent);
+    parent->DeleteRecord(left_node_index,
+                         reinterpret_cast<uint64_t>(*new_node),
+                         new_parent);
   };
 
   // Phase 3: merge and init nodes
