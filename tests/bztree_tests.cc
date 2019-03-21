@@ -269,12 +269,12 @@ TEST_F(BzTreeTest, Upsert) {
 }
 
 TEST_F(BzTreeTest, Delete) {
-  for (uint64_t i = 0; i < 2000; i++) {
+  for (uint64_t i = 0; i < 50; i++) {
     std::string key = std::to_string(i);
     tree->Insert(key.c_str(), key.length(), i);
   }
 
-  for (uint64_t i = 0; i < 1500; i++) {
+  for (uint64_t i = 0; i < 40; i++) {
     std::string key = std::to_string(i);
     bztree::ReturnCode rc = tree->Delete(key.c_str(), key.length());
     ASSERT_TRUE(rc.IsOk());

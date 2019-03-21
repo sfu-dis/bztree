@@ -1645,7 +1645,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     rc = node->Delete(key, key_size, GetPMWCASPool());
   } while (rc.IsNodeFrozen());
 
-  if (!rc.IsOk()) {
+  if (!rc.IsOk() || ENABLE_MERGE == 0) {
     // delete failed
     return rc;
   }
@@ -1657,6 +1657,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     if (rc.IsOk()) {
       return rc;
     }
+    LOG_IF(ERROR, !rc.IsNodeFrozen()) << "invalid return code: " << rc.rc << std::endl;
     stack.Clear();
     node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
     freeze_retry += 1;

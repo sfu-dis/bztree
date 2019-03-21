@@ -261,13 +261,13 @@ GTEST_TEST(MultiThreadDeleteTest, SingleNodeDeleteTest) {
   pmwcas::Thread::ClearRegistry(true);
 }
 GTEST_TEST(MultiThreadDeleteTest, MultiLevelDeleteTest) {
-  uint32_t thread_count = 15;
-  uint32_t item_per_thread = 100;
-  uint32_t total_record = 2000;
+  uint32_t thread_count = 5;
+  uint32_t item_per_thread = 18;
+  uint32_t total_record = 100;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
-  bztree::BzTree::ParameterSet param(256, 0, 256);
+  bztree::BzTree::ParameterSet param(256, 128, 256);
   std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadDeleteTest t(item_per_thread, thread_count, total_record, tree.get());
   t.Run(thread_count);
