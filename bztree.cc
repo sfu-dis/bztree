@@ -930,7 +930,8 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
                                uint64_t new_child_ptr,
                                bztree::InternalNode **new_node) {
   uint32_t meta_to_delete = meta_to_update + 1;
-  uint32_t offset = this->header.size - this->record_metadata[meta_to_delete].GetTotalLength();
+  uint32_t offset = this->header.size -
+      this->record_metadata[meta_to_delete].GetTotalLength() - sizeof(RecordMetadata);
   InternalNode::New(new_node, offset);
 
   uint32_t insert_idx = 0;
@@ -974,7 +975,8 @@ void InternalNode::DeleteChild(uint32_t meta_to_update,
 #endif
 }
 
-ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key, uint32_t key_size, bool backoff) {
+ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
+                                uint32_t key_size, bool backoff) {
   uint32_t merge_threshold = stack->tree->parameters.merge_threshold;
   auto pmwcas_pool = stack->tree->GetPMWCASPool();
   auto epoch = pmwcas_pool->GetEpoch();
@@ -1209,7 +1211,9 @@ bool InternalNode::MergeNodes(InternalNode *left_node,
                               InternalNode *right_node,
                               const char *key, uint32_t key_size,
                               InternalNode **new_node) {
-  uint32_t offset = left_node->header.size + right_node->header.size;
+  uint32_t padded_keysize = RecordMetadata::PadKeyLength(key_size);
+  uint32_t offset = left_node->header.size + right_node->header.size +
+      padded_keysize - sizeof(InternalNode);
   InternalNode::New(new_node, offset);
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
@@ -1238,14 +1242,13 @@ bool InternalNode::MergeNodes(InternalNode *left_node,
     char *cur_key;
     right_node->GetRawRecord(meta, nullptr, &cur_key, &payload);
     if (i == 0) {
-      uint32_t padded_key_size = RecordMetadata::PadKeyLength(key_size);
-      offset -= (padded_key_size + sizeof(uint64_t));
+      offset -= (padded_keysize + sizeof(uint64_t));
       memcpy(reinterpret_cast<char *>(node) + offset,
              key, key_size);
-      memcpy(reinterpret_cast<char *>(node) + offset + padded_key_size,
+      memcpy(reinterpret_cast<char *>(node) + offset + padded_keysize,
              &payload, sizeof(uint64_t));
       node->record_metadata[cur_record].
-          FinalizeForInsert(offset, key_size, padded_key_size + sizeof(uint64_t));
+          FinalizeForInsert(offset, key_size, padded_keysize + sizeof(uint64_t));
     } else {
       assert(meta.GetTotalLength() >= sizeof(uint64_t));
       uint64_t total_len = meta.GetTotalLength();

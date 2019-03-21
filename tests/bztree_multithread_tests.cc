@@ -261,9 +261,9 @@ GTEST_TEST(MultiThreadDeleteTest, SingleNodeDeleteTest) {
   pmwcas::Thread::ClearRegistry(true);
 }
 GTEST_TEST(MultiThreadDeleteTest, MultiLevelDeleteTest) {
-  uint32_t thread_count = 1;
+  uint32_t thread_count = 15;
   uint32_t item_per_thread = 100;
-  uint32_t total_record = 200;
+  uint32_t total_record = 2000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
