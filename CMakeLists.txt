@@ -118,7 +118,7 @@ set(MAX_FREEZE_RETRY 1 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
 
 
-set(ENABLE_MERGE 0 CACHE STRING "MAX retry on frozen node")
+set(ENABLE_MERGE 1 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE ENABLE_MERGE=${ENABLE_MERGE})
 
 add_dependencies(bztree cpplint)

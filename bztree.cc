@@ -1009,6 +1009,7 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     sibling_index = parent_frame->meta_index + 1;
   } else {
     // Both left sibling and right sibling are good, we stay unchanged
+    LOG_IF(INFO, !backoff) << "return with backoff false";
     return ReturnCode::Ok();
   }
 
@@ -1020,7 +1021,7 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   auto node_status = this->GetHeader()->GetStatus(epoch);
   auto sibling_status = sibling->GetHeader()->GetStatus(epoch);
 
-  if (!backoff || node_status.IsFrozen() || sibling_status.IsFrozen()) {
+  if (backoff && (node_status.IsFrozen() || sibling_status.IsFrozen())) {
     return ReturnCode::NodeFrozen();
   }
 
@@ -1657,13 +1658,11 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     if (rc.IsOk()) {
       return rc;
     }
-    LOG_IF(ERROR, !rc.IsNodeFrozen()) << "invalid return code: " << rc.rc << std::endl;
     stack.Clear();
     node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
     freeze_retry += 1;
-  } while (rc.IsNodeFrozen());
-
-  return rc;
+  } while (rc.IsNodeFrozen() || rc.IsPMWCASFailure());
+  assert(false);
 }
 
 void BzTree::Dump() {
