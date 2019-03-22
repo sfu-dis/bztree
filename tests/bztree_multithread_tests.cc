@@ -225,7 +225,7 @@ struct MultiThreadDeleteTest : public pmwcas::PerformanceTest {
         ASSERT_TRUE(payload == i);
       }
     }
-    tree->Dump();
+//    tree->Dump();
   }
 
   void Entry(size_t thread_index) override {
@@ -261,13 +261,13 @@ GTEST_TEST(MultiThreadDeleteTest, SingleNodeDeleteTest) {
   pmwcas::Thread::ClearRegistry(true);
 }
 GTEST_TEST(MultiThreadDeleteTest, MultiLevelDeleteTest) {
-  uint32_t thread_count = 50;
-  uint32_t item_per_thread = 50;
-  uint32_t total_record = 3000;
+  uint32_t thread_count = 30;
+  uint32_t item_per_thread = 100;
+  uint32_t total_record = 3200;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
-  bztree::BzTree::ParameterSet param(4096, 1024, 4096);
+  bztree::BzTree::ParameterSet param(256, 128, 256);
   std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
   MultiThreadDeleteTest t(item_per_thread, thread_count, total_record, tree.get());
   t.Run(thread_count);

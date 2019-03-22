@@ -1009,7 +1009,9 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     sibling_index = parent_frame->meta_index + 1;
   } else {
     // Both left sibling and right sibling are good, we stay unchanged
-    LOG_IF(INFO, !backoff) << "return with backoff false";
+    LOG_IF(INFO, !backoff) << "return with backoff false, meta_index:" << parent_frame->meta_index;
+    if (!backoff) {
+    }
     return ReturnCode::Ok();
   }
 
@@ -1020,8 +1022,10 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   // Phase 1: freeze both nodes, and their parent
   auto node_status = this->GetHeader()->GetStatus(epoch);
   auto sibling_status = sibling->GetHeader()->GetStatus(epoch);
+  auto parent_status = parent->GetHeader()->GetStatus(epoch);
 
-  if (backoff && (node_status.IsFrozen() || sibling_status.IsFrozen())) {
+  if (backoff && (node_status.IsFrozen() ||
+      sibling_status.IsFrozen() || parent_status.IsFrozen())) {
     return ReturnCode::NodeFrozen();
   }
 
@@ -1030,12 +1034,13 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
                node_status.word, node_status.Freeze().word);
   pd->AddEntry(&(&sibling->GetHeader()->status)->word,
                sibling_status.word, sibling_status.Freeze().word);
+  pd->AddEntry(&(&parent->GetHeader()->status)->word,
+               parent_status.word, parent_status.Freeze().word);
   if (!pd->MwCAS()) {
-    return ReturnCode::NodeFrozen();
+    return ReturnCode::PMWCASFailure();
   }
 
   // Phase 2: allocate parent and new node
-  auto parent_status = parent->GetHeader()->GetStatus(epoch);
   pd = pmwcas_pool->AllocateDescriptor();
   pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                          reinterpret_cast<uint64_t>(nullptr),
@@ -1043,8 +1048,6 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                          reinterpret_cast<uint64_t>(nullptr),
                          pmwcas::Descriptor::kRecycleOnRecovery);
-  pd->AddEntry(&(&parent->GetHeader()->status)->word,
-               parent_status.word, parent_status.Freeze().word);
   auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
   auto *new_node = reinterpret_cast<BaseNode **>(pd->GetNewValuePtr(1));
 
@@ -1096,7 +1099,8 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   if (!grandpa_frame) {
     rc = stack->tree->ChangeRoot(reinterpret_cast<uint64_t>(stack->GetRoot()),
                                  reinterpret_cast<uint64_t>(*new_parent), pd) ?
-         ReturnCode::Ok() : ReturnCode::NodeFrozen();
+         ReturnCode::Ok() : ReturnCode::PMWCASFailure();
+    return rc;
   } else {
     InternalNode *grandparent = grandpa_frame->node;
     rc = grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index, epoch),
@@ -1123,9 +1127,9 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
         assert(landed_on->IsLeaf());
         return ReturnCode::Ok();
       }
-    } while (rc.IsNodeFrozen());
+    } while (rc.IsNodeFrozen() || rc.IsPMWCASFailure());
+    assert(false);
   }
-  return rc;
 }
 
 ReturnCode InternalNode::Update(RecordMetadata meta,
@@ -1660,7 +1664,9 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
     }
     stack.Clear();
     node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
-    freeze_retry += 1;
+    if (rc.IsNodeFrozen()) {
+      freeze_retry += 1;
+    }
   } while (rc.IsNodeFrozen() || rc.IsPMWCASFailure());
   assert(false);
 }
