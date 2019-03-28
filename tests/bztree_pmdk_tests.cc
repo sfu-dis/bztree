@@ -40,7 +40,7 @@ TEST_F(BzTreePMEMTest, InsertTest) {
   pmdk_allocator->Allocate((void **) &pool, sizeof(pmwcas::DescriptorPool));
 
   new(pool) pmwcas::DescriptorPool(100000, 1, false);
-  bztree::BzTree::ParameterSet param(256, 0, 256);
+  bztree::BzTree::ParameterSet param(3072, 0, 4096);
   new(bztree)bztree::BzTree(param, pool);
   pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
   pmdk_allocator->PersistPtr(pool, sizeof(pmwcas::DescriptorPool));
@@ -131,7 +131,7 @@ GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
   pmdk_allocator->Allocate((void **) &pool, sizeof(pmwcas::DescriptorPool));
   new(pool) pmwcas::DescriptorPool(pool_size, thread_count, false);
 
-  bztree::BzTree::ParameterSet param(1024, 0, 2014);
+  bztree::BzTree::ParameterSet param(3072, 0, 4096);
   new(bztree)bztree::BzTree(param, pool, reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));
 
   MultiThreadUpsertTest t(item_per_thread, thread_count, bztree);
