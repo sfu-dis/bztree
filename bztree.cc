@@ -114,7 +114,7 @@ void InternalNode::New(InternalNode *src_node,
 
   // Add the new key, if provided
   if (key) {
-    LOG_IF(FATAL, key_size == 0);
+    ALWAYS_ASSERT(key_size > 0);
     alloc_size +=
         (RecordMetadata::PadKeyLength(key_size) + sizeof(uint64_t) + sizeof(RecordMetadata));
   }
@@ -177,7 +177,7 @@ InternalNode::InternalNode(uint32_t node_size,
                            uint64_t right_child_addr,
                            uint64_t left_most_child_addr)
     : BaseNode(false, node_size) {
-  LOG_IF(FATAL, !src_node);
+  ALWAYS_ASSERT(src_node);
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
 
   uint64_t offset = node_size;
@@ -213,7 +213,7 @@ InternalNode::InternalNode(uint32_t node_size,
     } else {
       // Compare the two keys to see which one to insert (first)
       auto cmp = KeyCompare(m_key, m_key_size, key, key_size);
-      LOG_IF(FATAL, cmp == 0 && key_size == m_key_size);
+      ALWAYS_ASSERT(!(cmp == 0 && key_size == m_key_size));
 
       if (cmp > 0) {
         assert(insert_idx >= 1);
@@ -296,7 +296,7 @@ bool InternalNode::PrepareForSplit(Stack &stack,
   // After adding a key and pointers the new node would be too large. This
   // means we are effectively 'moving up' the tree to do split
   // So now we split the node and generate two new internal nodes
-  LOG_IF(FATAL, header.sorted_count < 2);
+  ALWAYS_ASSERT(header.sorted_count >= 2);
   uint32_t n_left = header.sorted_count >> 1;
 
   auto i_left = pd->ReserveAndAddEntry(
@@ -317,13 +317,13 @@ bool InternalNode::PrepareForSplit(Stack &stack,
   uint64_t separator_payload = 0;
   bool success = GetRawRecord(separator_meta, nullptr, &separator_key,
                               &separator_payload);
-  LOG_IF(FATAL, !success);
+  ALWAYS_ASSERT(success);
 
   int cmp = memcmp(key, separator_key, std::min<uint32_t>(key_size, separator_key_size));
   if (cmp == 0) {
     cmp = key_size - separator_key_size;
   }
-  LOG_IF(FATAL, cmp == 0);
+  ALWAYS_ASSERT(cmp != 0);
   if (cmp < 0) {
     // Should go to left
     InternalNode::New(this, 0, n_left, key, key_size,
@@ -1319,8 +1319,7 @@ bool LeafNode::PrepareForSplit(Stack &stack,
                                LeafNode **left, LeafNode **right,
                                InternalNode **new_parent,
                                bool backoff) {
-  LOG_IF(FATAL, header.GetStatus(pmwcas_pool->GetEpoch()).GetRecordCount() <= 2)
-  << "Fewer than 2 records, can't split";
+  ALWAYS_ASSERT(header.GetStatus(pmwcas_pool->GetEpoch()).GetRecordCount() > 2);
 
   // Prepare new nodes: a parent node, a left leaf and a right leaf
   LeafNode::New(left, this->header.size);

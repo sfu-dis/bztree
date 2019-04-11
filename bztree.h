@@ -14,6 +14,10 @@
 #include <pmwcas.h>
 #include <mwcas/mwcas.h>
 
+#ifndef ALWAYS_ASSERT
+#define ALWAYS_ASSERT(expr) (expr) ? (void)0 : abort()
+#endif
+
 namespace bztree {
 
 #ifdef PMDK
@@ -103,7 +107,7 @@ struct NodeHeader {
     }
 
     inline void PrepareForInsert(uint32_t size) {
-      LOG_IF(FATAL, size == 0);
+      ALWAYS_ASSERT(size > 0);
       // Increment [record count] by one and [block size] by payload size
       word += ((uint64_t{1} << 44) + (uint64_t{size} << 22));
     }
@@ -223,7 +227,7 @@ class BaseNode {
  public:
   static const inline int KeyCompare(const char *key1, uint32_t size1,
                                      const char *key2, uint32_t size2) {
-    LOG_IF(FATAL, !key1 && !key2);
+    ALWAYS_ASSERT(key1 || key2);
     if (!key1) {
       return -1;
     } else if (!key2) {
@@ -396,8 +400,9 @@ struct Stack {
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
-  inline void Push(InternalNode *node, uint32_t meta_index) {
-    LOG_IF(FATAL, num_frames >= kMaxFrames) << "Not enough space in stack.";
+
+  inline void Push(InternalNode *node, RecordMetadata meta) {
+    ALWAYS_ASSERT(num_frames < kMaxFrames);
     auto &frame = frames[num_frames++];
     frame.node = node;
     frame.meta_index = meta_index;
