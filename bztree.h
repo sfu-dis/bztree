@@ -89,7 +89,9 @@ struct NodeHeader {
     static const uint64_t kBlockSizeMask = uint64_t{0x3FFFFF} << 22;    // Bits 44-23
     static const uint64_t kDeleteSizeMask = uint64_t{0x3FFFFF} << 0;    // Bits 22-1
 
-    inline void Freeze() { word |= kFrozenMask; }
+    inline StatusWord Freeze() {
+      return StatusWord{word | kFrozenMask};
+    }
     inline bool IsFrozen() { return (word & kFrozenMask) > 0; }
     inline uint16_t GetRecordCount() { return (uint16_t) ((word & kRecordCountMask) >> 44); }
     inline void SetRecordCount(uint16_t count) {
@@ -99,7 +101,7 @@ struct NodeHeader {
     inline void SetBlockSize(uint32_t size) {
       word = (word & (~kBlockSizeMask)) | (uint64_t{size} << 22);
     }
-    inline uint32_t GetDeleteSize() { return (uint32_t) (word & kDeleteSizeMask); }
+    inline uint32_t GetDeletedSize() { return (uint32_t) (word & kDeleteSizeMask); }
     inline void SetDeleteSize(uint32_t size) {
       word = (word & (~kDeleteSizeMask)) | uint64_t{size};
     }
@@ -195,6 +197,7 @@ struct RecordMetadata {
   }
 };
 
+class Stack;
 class BaseNode {
  protected:
   bool is_leaf;
@@ -270,9 +273,6 @@ class BaseNode {
   // 3. [payload] - 8-byte payload
   inline bool GetRawRecord(RecordMetadata meta, char **data, char **key, uint64_t *payload,
                            pmwcas::EpochManager *epoch = nullptr) {
-    if (!meta.IsVisible()) {
-      return false;
-    }
     assert(meta.GetTotalLength());
     char *tmp_data = reinterpret_cast<char *>(this) + meta.GetOffset();
     if (data != nullptr) {
@@ -297,14 +297,27 @@ class BaseNode {
     return true;
   }
 
+  inline char *GetKey(RecordMetadata meta) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+    uint64_t offset = meta.GetOffset();
+    return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
+  }
+
   inline bool IsFrozen(pmwcas::EpochManager *epoch) {
     return GetHeader()->GetStatus(epoch).IsFrozen();
   }
+
+  ReturnCode CheckMerge(Stack *stack, const char *key, uint32_t key_size, bool backoff);
 };
 
-class Stack;
-
 // Internal node: immutable once created, no free space, keys are always sorted
+// operations that might mutate the InternalNode:
+//    a. create a new node, this will set the freeze bit in status
+//    b. update a pointer, this will check the status field and swap in a new pointer
+// in both cases, the record metadata should not be touched,
+// thus we can safely dereference them without a wrapper.
 class InternalNode : public BaseNode {
  public:
   static void New(InternalNode *src_node, const char *key, uint32_t key_size,
@@ -318,6 +331,7 @@ class InternalNode : public BaseNode {
                   uint64_t left_child_addr, uint64_t right_child_addr,
                   InternalNode **mem,
                   uint64_t left_most_child_addr);
+  static void New(InternalNode **mem, uint32_t node_size);
 
   InternalNode(uint32_t node_size, const char *key, uint16_t key_size,
                uint64_t left_child_addr, uint64_t right_child_addr);
@@ -342,9 +356,12 @@ class InternalNode : public BaseNode {
                     pmwcas::Descriptor *pd, pmwcas::DescriptorPool *pmwcas_pool);
   uint32_t GetChildIndex(const char *key, uint16_t key_size,
                          pmwcas::DescriptorPool *pool, bool get_le = true);
+
+  // epoch here is required: record ptr might be a desc due to UPDATE operation
+  // but record_metadata don't need a epoch
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
-    GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
+    GetRawRecord(record_metadata[index], nullptr, nullptr, &child_addr, epoch);
 
 #ifdef PMDK
     return Allocator::Get()->GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
@@ -353,16 +370,27 @@ class InternalNode : public BaseNode {
 #endif
   }
   void Dump(pmwcas::EpochManager *epoch, bool dump_children = false);
+
+  // delete a child from internal node
+  // | key0, val0 | key1, val1 | key2, val2 | key3, val3 |
+  // ==>
+  // | key0, val0 | key1, val1' | key3, val3 |
+  void DeleteRecord(uint32_t meta_to_update,
+                    uint64_t new_child_ptr,
+                    InternalNode **new_node);
+
+  static bool MergeNodes(InternalNode *left_node, InternalNode *right_node,
+                         const char *key, uint32_t key_size, InternalNode **new_node);
 };
 
 class LeafNode;
 class BzTree;
 struct Stack {
   struct Frame {
-    Frame() : node(nullptr), meta() {}
+    Frame() : node(nullptr), meta_index() {}
     ~Frame() {}
     InternalNode *node;
-    RecordMetadata meta;
+    uint32_t meta_index;
   };
   static const uint32_t kMaxFrames = 32;
   Frame frames[kMaxFrames];
@@ -372,12 +400,12 @@ struct Stack {
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
+
   inline void Push(InternalNode *node, RecordMetadata meta) {
     ALWAYS_ASSERT(num_frames < kMaxFrames);
-
     auto &frame = frames[num_frames++];
     frame.node = node;
-    frame.meta = meta;
+    frame.meta_index = meta_index;
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() {
@@ -412,6 +440,10 @@ class LeafNode : public BaseNode {
                        LeafNode **left, LeafNode **right,
                        InternalNode **new_parent, bool backoff);
 
+  // merge two nodes into a new one
+  // copy the meta/data to the new node
+  static bool MergeNodes(LeafNode *left_node, LeafNode *right_node, LeafNode **new_node);
+
   // Initialize new, empty node with a list of records; no concurrency control;
   // only useful before any inserts to the node. For now the only users are split
   // (when preparing a new node) and consolidation.
@@ -442,17 +474,9 @@ class LeafNode : public BaseNode {
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
-  inline char *GetKey(RecordMetadata meta) {
-    if (!meta.IsVisible()) {
-      return nullptr;
-    }
-    uint64_t offset = meta.GetOffset();
-    return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
-  }
-
   // Specialized GetRawRecord for leaf node only (key can't be nullptr)
   inline bool GetRawRecord(RecordMetadata meta, char **key,
-                           uint64_t *payload, pmwcas::EpochManager *epoch) {
+                           uint64_t *payload, pmwcas::EpochManager *epoch = nullptr) {
     char *unused = nullptr;
     return BaseNode::GetRawRecord(meta, &unused, key, payload, epoch);
   }
@@ -580,6 +604,10 @@ class BzTree {
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
+  BaseNode *TraverseToNode(bztree::Stack *stack,
+                           const char *key, uint16_t key_size,
+                           bztree::BaseNode *stop_at = nullptr,
+                           bool le_child = true);
 
   void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
 #ifdef PMDK
@@ -605,9 +633,10 @@ class BzTree {
     return index_epoch;
   }
 
- private:
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr,pmwcas::Descriptor *pd);
   ParameterSet parameters;
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
+
+ private:
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
   uint64_t pmdk_addr;
