@@ -286,6 +286,3 @@ target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
 
 set(ENABLE_MERGE 1 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE ENABLE_MERGE=${ENABLE_MERGE})
-
-target_compile_definitions(bztree PRIVATE DESC_CAP=4)
-target_compile_definitions(bztree PRIVATE GOOGLE_FRAMEWORK=1)
