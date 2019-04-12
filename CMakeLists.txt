@@ -250,7 +250,7 @@ add_dependencies(bztree GLog)
 add_dependencies(bztree GFlags)
 add_dependencies(bztree GTest)
 
-set(APPEND BZTREE_LINK_LIBS
+list(APPEND BZTREE_LINK_LIBS
   glog
   gflags
   gtest
