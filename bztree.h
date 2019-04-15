@@ -340,8 +340,7 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::Descriptor *pd, pmwcas::DescriptorPool *pmwcas_pool);
-  uint32_t GetChildIndex(const char *key, uint16_t key_size,
-                         pmwcas::DescriptorPool *pool, bool get_le = true);
+  uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_le = true);
   inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
     uint64_t child_addr;
     GetRawRecord(GetMetadata(index, epoch), nullptr, nullptr, &child_addr, epoch);
@@ -606,7 +605,7 @@ class BzTree {
   }
 
  private:
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr,pmwcas::Descriptor *pd);
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
   ParameterSet parameters;
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;

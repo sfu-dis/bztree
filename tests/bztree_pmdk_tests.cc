@@ -12,7 +12,7 @@
 #include "../bztree.h"
 #include "util/performance_test.h"
 
-#define TEST_POOL_NAME "pool_bztree" 
+#define TEST_POOL_NAME "pool_bztree"
 #define TEST_LAYOUT_NAME "layout_bztree"
 
 class BzTreePMEMTest : public ::testing::Test {
@@ -113,12 +113,12 @@ struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
 };
 
 static uint32_t pool_size = 50000;
-static uint32_t item_per_thread = 1000;
-static uint32_t thread_count = 20;
+static uint32_t item_per_thread = 50000;
+static uint32_t thread_count = 1;
 GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
   pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create(TEST_POOL_NAME,
                                                     TEST_LAYOUT_NAME,
-                                                    1024 * 1024 * 1024),
+                                                    (uint64_t) 1024 * 1024 * 1024 * 1),
                       pmwcas::PMDKAllocator::Destroy,
                       pmwcas::LinuxEnvironment::Create,
                       pmwcas::LinuxEnvironment::Destroy);
