@@ -354,8 +354,7 @@ class InternalNode : public BaseNode {
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::Descriptor *pd, pmwcas::DescriptorPool *pmwcas_pool);
-  uint32_t GetChildIndex(const char *key, uint16_t key_size,
-                         pmwcas::DescriptorPool *pool, bool get_le = true);
+  uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_le = true);
 
   // epoch here is required: record ptr might be a desc due to UPDATE operation
   // but record_metadata don't need a epoch
@@ -401,7 +400,7 @@ struct Stack {
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
 
-  inline void Push(InternalNode *node, RecordMetadata meta) {
+  inline void Push(InternalNode *node, uint32_t meta_index) {
     ALWAYS_ASSERT(num_frames < kMaxFrames);
     auto &frame = frames[num_frames++];
     frame.node = node;

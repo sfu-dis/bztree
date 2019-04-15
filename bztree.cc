@@ -130,9 +130,9 @@ void InternalNode::New(InternalNode *src_node,
 #else
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(new_node), alloc_size);
   memset(*new_node, 0, alloc_size);
-  new (*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
-                               key, key_size, left_child_addr, right_child_addr,
-                               left_most_child_addr);
+  new(*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+                              key, key_size, left_child_addr, right_child_addr,
+                              left_most_child_addr);
 #ifdef PMEM
   pmwcas::NVRAM::Flush(alloc_size, *new_node);
 #endif  // PMEM
@@ -1130,6 +1130,7 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     } while (rc.IsNodeFrozen() || rc.IsPMWCASFailure());
     assert(false);
   }
+  return rc;
 }
 
 ReturnCode InternalNode::Update(RecordMetadata meta,
@@ -1157,15 +1158,14 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
 
 uint32_t InternalNode::GetChildIndex(const char *key,
                                      uint16_t key_size,
-                                     pmwcas::DescriptorPool *pool,
                                      bool get_le) {
   // Keys in internal nodes are always sorted, visible
   int32_t left = 0, right = header.sorted_count - 1, mid = 0;
   while (true) {
     mid = (left + right) / 2;
-    auto meta = GetMetadata(static_cast<uint32_t>(mid), pool->GetEpoch());
+    auto meta = record_metadata[mid];
     char *record_key = nullptr;
-    GetRawRecord(meta, nullptr, &record_key, nullptr, pool->GetEpoch());
+    GetRawRecord(meta, nullptr, &record_key, nullptr, nullptr);
     auto cmp = KeyCompare(key, key_size, record_key, meta.GetKeyLength());
     if (cmp == 0) {
       // Key exists
@@ -1407,7 +1407,7 @@ BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
   while (node != stop_at && !node->IsLeaf()) {
     assert(!node->IsLeaf());
     parent = reinterpret_cast<InternalNode *>(node);
-    meta_index = parent->GetChildIndex(key, key_size, GetPMWCASPool(), le_child);
+    meta_index = parent->GetChildIndex(key, key_size, le_child);
     node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
     assert(node);
     if (stack != nullptr) {
@@ -1429,7 +1429,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
   assert(node);
   while (!node->IsLeaf()) {
     parent = reinterpret_cast<InternalNode *>(node);
-    meta_index = parent->GetChildIndex(key, key_size, GetPMWCASPool(), le_child);
+    meta_index = parent->GetChildIndex(key, key_size, le_child);
     node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
     assert(node);
     if (stack != nullptr) {

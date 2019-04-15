@@ -250,7 +250,7 @@ add_dependencies(bztree GLog)
 add_dependencies(bztree GFlags)
 add_dependencies(bztree GTest)
 
-set(APPEND BZTREE_LINK_LIBS
+list(APPEND BZTREE_LINK_LIBS
   glog
   gflags
   gtest
@@ -284,5 +284,5 @@ add_custom_target(
 set(MAX_FREEZE_RETRY 1 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
 
-set(ENABLE_MERGE 1 CACHE STRING "MAX retry on frozen node")
+set(ENABLE_MERGE 0 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE ENABLE_MERGE=${ENABLE_MERGE})
