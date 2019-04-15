@@ -92,8 +92,6 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
   }
 };
 
-
-
 struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
   bztree::BzTree *tree;
   uint32_t item_per_thread;
@@ -133,7 +131,32 @@ struct MultiThreadUpsertTest : public pmwcas::PerformanceTest {
     }
   }
 };
+struct MultiThreadDeleteTest : public pmwcas::PerformanceTest {
+  bztree::BzTree *tree;
+  uint32_t item_per_thread;
+  uint32_t thread_count;
+  MultiThreadDeleteTest(uint32_t item_per_thread, uint32_t thread_count, bztree::BzTree *tree)
+      : tree(tree), thread_count(thread_count), item_per_thread(item_per_thread) {}
 
+  void Entry(size_t thread_index) override {
+    for (uint32_t i = 0; i < item_per_thread; i++) {
+      auto value = i + item_per_thread * thread_index;
+      auto str_value = std::to_string(value);
+      auto rc = tree->Insert(str_value.c_str(), str_value.length(), value);
+      ASSERT_TRUE(rc.IsOk());
+    }
+
+    WaitForStart();
+
+    uint32_t actual_delete = item_per_thread;
+    for (uint32_t i = 0; i < actual_delete; i += 1) {
+      auto value = i + item_per_thread * thread_index;
+      auto str_value = std::to_string(value);
+      auto rc = tree->Delete(str_value.c_str(), str_value.length());
+      LOG_IF(FATAL, !rc.IsOk()) << "Invalid rc code:" << (uint32_t) rc.rc << std::endl;
+    }
+  }
+};
 GTEST_TEST(BztreeTest, MultiThreadRead) {
 //  auto thread_count = pmwcas::Environment::Get()->GetCoreCount();
   uint32_t thread_count = 8;
@@ -202,6 +225,19 @@ GTEST_TEST(BztreeTest, MiltiUpsertTest) {
   MultiThreadUpsertTest t(item_per_thread, thread_count, tree.get());
   t.Run(thread_count);
   t.SanityCheck();
+  pmwcas::Thread::ClearRegistry(true);
+}
+
+GTEST_TEST(BztreeTest, DeleteTest) {
+  uint32_t thread_count = 1;
+  uint32_t item_per_thread = 1000;
+  std::unique_ptr<pmwcas::DescriptorPool> pool(
+      new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
+  );
+  bztree::BzTree::ParameterSet param;
+  std::unique_ptr<bztree::BzTree> tree = std::make_unique<bztree::BzTree>(param, pool.get());
+  MultiThreadDeleteTest t(item_per_thread, thread_count, tree.get());
+  t.Run(thread_count);
   pmwcas::Thread::ClearRegistry(true);
 }
 

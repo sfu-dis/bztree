@@ -668,11 +668,6 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
 
       RecordMetadata current = GetMetadata(static_cast<uint32_t>(middle), epoch);
 
-      // The found record isn't visible
-      if (!current.IsVisible()) {
-        break;
-      }
-
       char *current_key = nullptr;
       GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
       assert(current_key || !is_leaf);
@@ -683,6 +678,10 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       } else if (cmp_result == 0) {
         if (out_metadata_ptr) {
           *out_metadata_ptr = record_metadata + middle;
+        }
+        // The found record isn't visible
+        if (!current.IsVisible()) {
+          break;
         }
         return current;
       } else {
@@ -744,7 +743,6 @@ ReturnCode LeafNode::Delete(const char *key,
 
   auto new_meta = metadata;
   new_meta.SetVisible(false);
-  new_meta.SetOffset(0);
 
   auto new_status = old_status;
   auto old_delete_size = old_status.GetDeleteSize();
