@@ -285,4 +285,5 @@ set(MAX_FREEZE_RETRY 1 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
 
 set(ENABLE_MERGE 0 CACHE STRING "MAX retry on frozen node")
+message(STATUS "ENABLE_MERGE: " ${ENABLE_MERGE})
 target_compile_definitions(bztree PRIVATE ENABLE_MERGE=${ENABLE_MERGE})
