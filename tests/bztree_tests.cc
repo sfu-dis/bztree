@@ -141,7 +141,8 @@ TEST_F(LeafNodeFixtures, SplitPrep) {
   bztree::LeafNode *right = nullptr;
   node->Freeze(pool);
   bztree::InternalNode *parent = nullptr;
-  node->PrepareForSplit(stack, 3000, pool->AllocateDescriptor(), pool, &left, &right, &parent, true);
+  node->PrepareForSplit(stack, 3000, pool->AllocateDescriptor(),
+                        pool, &left, &right, &parent, true);
   ASSERT_NE(parent, nullptr);
   ASSERT_NE(left, nullptr);
   ASSERT_NE(right, nullptr);
@@ -268,11 +269,23 @@ TEST_F(BzTreeTest, Upsert) {
 }
 
 TEST_F(BzTreeTest, Delete) {
-  InsertDummy();
-  uint64_t payload;
-  ASSERT_TRUE(tree->Delete("11", 2).IsNotFound());
-  ASSERT_TRUE(tree->Delete("10", 2).IsOk());
-  ASSERT_TRUE(tree->Read("10", 2, &payload).IsNotFound());
+  for (uint64_t i = 0; i < 50; i++) {
+    std::string key = std::to_string(i);
+    tree->Insert(key.c_str(), key.length(), i);
+  }
+
+  for (uint64_t i = 0; i < 40; i++) {
+    std::string key = std::to_string(i);
+    bztree::ReturnCode rc = tree->Delete(key.c_str(), key.length());
+    ASSERT_TRUE(rc.IsOk());
+  }
+//  int items[] = {0, 1, 10, 13, 14, 15};
+//  for (auto item:items) {
+//    std::string key = std::to_string(item);
+//    bztree::ReturnCode rc = tree->Delete(key.c_str(), key.length());
+//    ASSERT_TRUE(rc.IsOk());
+//  }
+  tree->Dump();
 }
 
 TEST_F(BzTreeTest, RangeScan) {
