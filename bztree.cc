@@ -1009,7 +1009,6 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     sibling_index = parent_frame->meta_index + 1;
   } else {
     // Both left sibling and right sibling are good, we stay unchanged
-    LOG_IF(INFO, !backoff) << "return with backoff false, meta_index:" << parent_frame->meta_index;
     if (!backoff) {
     }
     return ReturnCode::Ok();
