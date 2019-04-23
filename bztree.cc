@@ -652,9 +652,9 @@ ReturnCode LeafNode::Update(const char *key,
     return ReturnCode::Ok();
   }
 
-//  1. update the corresponding payload
-//  2. make sure meta data is not changed
-//  3. make sure status word is not changed
+  // 1. Update the corresponding payload
+  // 2. Make sure meta data is not changed
+  // 3. Make sure status word is not changed
   auto pd = pmwcas_pool->AllocateDescriptor();
   pd->AddEntry(reinterpret_cast<uint64_t *>(record_key + metadata.GetPaddedKeyLength()),
                record_payload, payload);
@@ -1044,10 +1044,10 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   pd = pmwcas_pool->AllocateDescriptor();
   pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                          reinterpret_cast<uint64_t>(nullptr),
-                         pmwcas::Descriptor::kRecycleOnRecovery);
+                         pmwcas::Descriptor::kRecycleNewOnFailure);
   pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                          reinterpret_cast<uint64_t>(nullptr),
-                         pmwcas::Descriptor::kRecycleOnRecovery);
+                         pmwcas::Descriptor::kRecycleNewOnFailure);
   auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
   auto *new_node = reinterpret_cast<BaseNode **>(pd->GetNewValuePtr(1));
 
@@ -1483,13 +1483,13 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     // TODO(hao): should implement a cascading memory recycle callback
     pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
-                           pmwcas::Descriptor::kRecycleOnRecovery);
+                           pmwcas::Descriptor::kRecycleNewOnFailure);
     pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
-                           pmwcas::Descriptor::kRecycleOnRecovery);
+                           pmwcas::Descriptor::kRecycleNewOnFailure);
     pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
-                           pmwcas::Descriptor::kRecycleOnRecovery);
+                           pmwcas::Descriptor::kRecycleNewOnFailure);
     uint64_t *ptr_r = pd->GetNewValuePtr(0);
     uint64_t *ptr_l = pd->GetNewValuePtr(1);
     uint64_t *ptr_parent = pd->GetNewValuePtr(2);
