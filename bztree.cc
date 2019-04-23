@@ -1666,7 +1666,8 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
       freeze_retry += 1;
     }
   } while (rc.IsNodeFrozen() || rc.IsPMWCASFailure());
-  assert(false);
+  ALWAYS_ASSERT(false);
+  return rc;  // Just to silence the compiler
 }
 
 void BzTree::Dump() {
