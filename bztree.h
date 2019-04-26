@@ -119,7 +119,7 @@ struct NodeHeader {
   NodeHeader() : size(0), sorted_count(0) {}
   inline StatusWord GetStatus(pmwcas::EpochManager *epoch) {
     auto status_val = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        &this->status.word)->GetValue(epoch);
+        &this->status.word)->GetValueProtected();
     return StatusWord{status_val};
   }
 };
@@ -245,7 +245,7 @@ class BaseNode {
   inline RecordMetadata GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
     // ensure the metadata is installed
     auto meta = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        record_metadata + i)->GetValue(epoch);
+        record_metadata + i)->GetValueProtected();
     return RecordMetadata{meta};
   }
   explicit BaseNode(bool leaf, uint32_t size) : is_leaf(leaf) {
@@ -288,7 +288,7 @@ class BaseNode {
       uint64_t tmp_payload;
       if (epoch != nullptr) {
         tmp_payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-            tmp_data + padded_key_len)->GetValue(epoch);
+            tmp_data + padded_key_len)->GetValueProtected();
       } else {
         tmp_payload = *reinterpret_cast<uint64_t *> (tmp_data + padded_key_len);
       }
@@ -521,7 +521,7 @@ struct Record {
 
     auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
     auto payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        source_addr + meta.GetPaddedKeyLength())->GetValue(epoch);
+        source_addr + meta.GetPaddedKeyLength())->GetValueProtected();
     memcpy(r->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
     return r;
   }
@@ -643,7 +643,7 @@ class BzTree {
 
   inline BaseNode *GetRootNodeSafe() {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        &root)->GetValue(GetPMWCASPool()->GetEpoch());
+        &root)->GetValueProtected();
 #ifdef PMDK
     return Allocator::Get()->GetDirect(reinterpret_cast<BaseNode *>(root_node));
 #else

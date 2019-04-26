@@ -782,7 +782,7 @@ ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
 
   char *source_addr = (reinterpret_cast<char *>(this) + meta.GetOffset());
   *payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-      source_addr + meta.GetPaddedKeyLength())->GetValue(pmwcas_pool->GetEpoch());
+      source_addr + meta.GetPaddedKeyLength())->GetValueProtected();
   return ReturnCode::Ok();
 }
 
