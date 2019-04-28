@@ -596,10 +596,9 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
   if (metadata.IsInserting()) {
     return ReCheck;
   }
-  assert(metadata.IsVisible());
-  char *curr_key = GetKey(metadata);
-  assert(curr_key);
-  if (KeyCompare(key, key_size, curr_key, metadata.GetKeyLength()) == 0) {
+
+  ALWAYS_ASSERT(metadata.IsVisible());
+  if (KeyCompare(key, key_size, GetKey(metadata), metadata.GetKeyLength()) == 0) {
     return Duplicate;
   }
   return ReCheck;
@@ -607,22 +606,25 @@ LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
 
 LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
                                              uint32_t end_pos, pmwcas::EpochManager *epoch) {
-  retry:
   auto current_status = GetHeader()->GetStatus(epoch);
   if (current_status.IsFrozen()) {
     return NodeFrozen;
   }
-  auto metadata = SearchRecordMeta(epoch, key, key_size, nullptr, header.sorted_count, end_pos);
-  if (metadata.IsVacant()) {
-    return IsUnique;
-  }
-  if (metadata.IsInserting()) {
-    goto retry;
-  }
-  assert(metadata.IsVisible());
-  char *curr_key = GetKey(metadata);
-  if (KeyCompare(key, key_size, curr_key, metadata.GetKeyLength()) == 0) {
-    return Duplicate;
+
+  // Linear search on unsorted field
+  uint32_t linear_end = std::min<uint32_t>(header.GetStatus(epoch).GetRecordCount(), end_pos);
+  for (uint32_t i = header.sorted_count; i < linear_end; i++) {
+    RecordMetadata md = GetMetadata(i, epoch);
+    while (md.IsInserting()) {
+      md = GetMetadata(i, epoch);
+    }
+    if (md.IsVacant()) {
+      continue;
+    }
+    auto len = md.GetKeyLength();
+    if (md.IsVisible() && key_size == len && (KeyCompare(key, key_size, GetKey(md), len) == 0)) {
+      return Duplicate;
+    }
   }
   return IsUnique;
 }
@@ -724,10 +726,9 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       }
 
       if (current.IsVisible()) {
-        char *current_key = nullptr;
-        GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
-        assert(current_key || !is_leaf);
-        if (KeyCompare(key, key_size, current_key, current.GetKeyLength()) == 0) {
+        auto current_size = current.GetKeyLength();
+        if (current_size == key_size &&
+            KeyCompare(key, key_size, GetKey(current), current_size) == 0) {
           if (out_metadata_ptr) {
             *out_metadata_ptr = record_metadata + i;
           }
