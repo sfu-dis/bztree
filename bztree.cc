@@ -813,12 +813,39 @@ ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
   return ReturnCode::Ok();
 }
 
-ReturnCode LeafNode::RangeScan(const char *key1,
-                               uint32_t size1,
-                               const char *key2,
-                               uint32_t size2,
-                               std::vector<Record *> *result,
-                               pmwcas::DescriptorPool *pmwcas_pool) {
+ReturnCode LeafNode::RangeScanBySize(const char *key1,
+                                     uint32_t size1,
+                                     uint32_t *to_scan,
+                                     std::vector<Record *> *result,
+                                     pmwcas::DescriptorPool *pmwcas_pool) {
+  // Enter a new epoch and copy data
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+
+  // Have to scan all keys
+  uint32_t i = 0;
+  auto count = header.GetStatus().GetRecordCount();
+  for (uint32_t i = 0; i < count; ++i) {
+    auto curr_meta = GetMetadata(i);
+    if (curr_meta.IsVisible()) {
+      result->emplace_back(Record::New(curr_meta, this));
+    }
+  }
+
+  std::sort(result->begin(), result->end(),
+            [this](Record *a, Record *b) -> bool {
+              auto cmp = BaseNode::KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
+                                              b->GetKey(), b->meta.GetKeyLength());
+              return cmp < 0;
+            });
+  return ReturnCode::Ok();
+}
+
+ReturnCode LeafNode::RangeScanByKey(const char *key1,
+                                    uint32_t size1,
+                                    const char *key2,
+                                    uint32_t size2,
+                                    std::vector<Record *> *result,
+                                    pmwcas::DescriptorPool *pmwcas_pool) {
   // entering a new epoch and copying the data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 

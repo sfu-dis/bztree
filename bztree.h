@@ -463,12 +463,19 @@ class LeafNode : public BaseNode {
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload,
                   pmwcas::DescriptorPool *pmwcas_pool);
 
-  ReturnCode RangeScan(const char *key1,
-                       uint32_t size1,
-                       const char *key2,
-                       uint32_t size2,
-                       std::vector<Record *> *result,
-                       pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode RangeScanByKey(const char *key1,
+                            uint32_t size1,
+                            const char *key2,
+                            uint32_t size2,
+                            std::vector<Record *> *result,
+                            pmwcas::DescriptorPool *pmwcas_pool);
+
+  ReturnCode RangeScanBySize(const char *key1,
+                             uint32_t size1,
+                             uint32_t *to_scan,
+                             std::vector<Record *> *result,
+                             pmwcas::DescriptorPool *pmwcas_pool);
+
 
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
@@ -594,9 +601,13 @@ class BzTree {
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
 
-  inline std::unique_ptr<Iterator> RangeScan(const char *key1, uint16_t size1,
-                                             const char *key2, uint16_t size2) {
+  inline std::unique_ptr<Iterator> RangeScanByKey(const char *key1, uint16_t size1,
+                                                  const char *key2, uint16_t size2) {
     return std::make_unique<Iterator>(this, key1, size1, key2, size2);
+  }
+  inline std::unique_ptr<Iterator> RangeScanBySize(const char *key1, uint16_t size1,
+                                                   uint32_t scan_size) {
+    return std::make_unique<Iterator>(this, key1, size1, scan_size);
   }
 
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
@@ -663,8 +674,21 @@ class Iterator {
     this->begin_size = begin_size;
     this->end_size = end_size;
     this->tree = tree;
+    this->scan_size = ~uint32_t{0};
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
+    node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
+    item_it = item_vec.begin();
+  }
+
+  explicit Iterator(BzTree *tree, const char *begin_key, uint16_t begin_size, uint32_t scan_size) {
+    this->begin_key = begin_key;
+    this->end_key = end_key;
+    this->begin_size = begin_size;
+    this->end_size = end_size;
+    this->tree = tree;
+    this->scan_size = scan_size;
+    node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
+    node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->GetPMWCASPool());
     item_it = item_vec.begin();
   }
 
@@ -687,7 +711,7 @@ class Iterator {
                                         false);
       if (node != nullptr) {
         item_vec.clear();
-        node->RangeScan(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
+        node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
         item_it = item_vec.begin();
         return GetNext();
       } else {
@@ -703,6 +727,7 @@ class Iterator {
   const char *end_key;
   uint16_t end_size;
   LeafNode *node;
+  uint32_t scan_size;
   std::vector<Record *> item_vec;
   std::vector<Record *>::iterator item_it;
 };

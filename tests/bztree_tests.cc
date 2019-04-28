@@ -159,11 +159,11 @@ TEST_F(LeafNodeFixtures, Update) {
   ASSERT_READ(node, "200", 3, 201);
 }
 
-TEST_F(LeafNodeFixtures, RangeScan) {
+TEST_F(LeafNodeFixtures, RangeScanByKey) {
   pool->GetEpoch()->Protect();
   InsertDummy();
   std::vector<bztree::Record *> result;
-  ASSERT_TRUE(node->RangeScan("10", 2, "40", 2, &result, pool).IsOk());
+  ASSERT_TRUE(node->RangeScanByKey("10", 2, "40", 2, &result, pool).IsOk());
   ASSERT_EQ(result.size(), 14);
   ASSERT_EQ(result[0]->GetPayload(), 10);
   ASSERT_EQ(result[2]->GetPayload(), 200);
@@ -288,14 +288,30 @@ TEST_F(BzTreeTest, DISABLED_Delete) {
   tree->Dump();
 }
 
-TEST_F(BzTreeTest, RangeScan) {
+TEST_F(BzTreeTest, RangeScanByKey) {
   static const uint32_t kMaxKey = 125;
   for (uint32_t i = 100; i <= kMaxKey; i++) {
     auto key = std::to_string(i);
     tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
   }
-  auto iter = tree->RangeScan("100", 3, "125", 3);
+  auto iter = tree->RangeScanByKey("100", 3, "125", 3);
   for (uint32_t i = 100; i <= 125; i += 1) {
+    auto record = iter->GetNext();
+    ASSERT_TRUE(record != nullptr);
+    auto key = std::string(record->GetKey(), 3);
+    ASSERT_EQ(i, record->GetPayload());
+    ASSERT_EQ(key, std::to_string(i));
+  }
+}
+
+TEST_F(BzTreeTest, RangeScanBySize) {
+  static const uint32_t kMaxKey = 125;
+  for (uint32_t i = 100; i <= kMaxKey; i++) {
+    auto key = std::to_string(i);
+    tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
+  }
+  auto iter = tree->RangeScanBySize("100", 3, 15);
+  for (uint32_t i = 100; i <= 15; i += 1) {
     auto record = iter->GetNext();
     ASSERT_TRUE(record != nullptr);
     auto key = std::string(record->GetKey(), 3);
