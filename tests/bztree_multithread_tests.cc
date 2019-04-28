@@ -246,7 +246,7 @@ struct MultiThreadDeleteTest : public pmwcas::PerformanceTest {
     }
   }
 };
-GTEST_TEST(MultiThreadDeleteTest, SingleNodeDeleteTest) {
+GTEST_TEST(MultiThreadDeleteTest, DISABLED_SingleNodeDeleteTest) {
   uint32_t thread_count = 5;
   uint32_t item_per_thread = 20;
   uint32_t total_record = 200;
@@ -260,7 +260,7 @@ GTEST_TEST(MultiThreadDeleteTest, SingleNodeDeleteTest) {
   t.SanityCheck();
   pmwcas::Thread::ClearRegistry(true);
 }
-GTEST_TEST(MultiThreadDeleteTest, MultiLevelDeleteTest) {
+GTEST_TEST(MultiThreadDeleteTest, DISABLED_MultiLevelDeleteTest) {
   uint32_t thread_count = 30;
   uint32_t item_per_thread = 100;
   uint32_t total_record = 3200;

@@ -1070,10 +1070,10 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   pd = pmwcas_pool->AllocateDescriptor();
   pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                          reinterpret_cast<uint64_t>(nullptr),
-                         pmwcas::Descriptor::kRecycleNewOnFailure);
+                         pmwcas::Descriptor::kRecycleOnRecovery);
   pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                          reinterpret_cast<uint64_t>(nullptr),
-                         pmwcas::Descriptor::kRecycleNewOnFailure);
+                         pmwcas::Descriptor::kRecycleOnRecovery);
   auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
   auto *new_node = reinterpret_cast<BaseNode **>(pd->GetNewValuePtr(1));
 
@@ -1175,7 +1175,7 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   pd->AddEntry(GetPayloadPtr(meta),
                reinterpret_cast<uint64_t>(old_child),
                reinterpret_cast<uint64_t>(new_child),
-               pmwcas::Descriptor::kRecycleNewOnFailure);
+               pmwcas::Descriptor::kRecycleOnRecovery);
   if (pd->MwCAS()) {
     return ReturnCode::Ok();
   } else {
@@ -1513,13 +1513,13 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
     // TODO(hao): should implement a cascading memory recycle callback
     pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
-                           pmwcas::Descriptor::kRecycleNewOnFailure);
+                           pmwcas::Descriptor::kRecycleOnRecovery);
     pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
-                           pmwcas::Descriptor::kRecycleNewOnFailure);
+                           pmwcas::Descriptor::kRecycleOnRecovery);
     pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
                            reinterpret_cast<uint64_t>(nullptr),
-                           pmwcas::Descriptor::kRecycleNewOnFailure);
+                           pmwcas::Descriptor::kRecycleOnRecovery);
     uint64_t *ptr_r = pd->GetNewValuePtr(0);
     uint64_t *ptr_l = pd->GetNewValuePtr(1);
     uint64_t *ptr_parent = pd->GetNewValuePtr(2);
