@@ -623,7 +623,7 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
         check_idx.push_back(i);
       }
       return ReCheck;
-    } else if (md.IsVacant()) {
+    } else if (md.IsVacant() || !md.IsVisible()) {
       return IsUnique;
     } else {
       ALWAYS_ASSERT(md.IsVisible());
