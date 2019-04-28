@@ -117,7 +117,7 @@ struct NodeHeader {
   StatusWord status;
   uint32_t sorted_count;
   NodeHeader() : size(0), sorted_count(0) {}
-  inline StatusWord GetStatus(pmwcas::EpochManager *epoch) {
+  inline StatusWord GetStatus() {
     auto status_val = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
         &this->status.word)->GetValueProtected();
     return StatusWord{status_val};
@@ -242,7 +242,7 @@ class BaseNode {
   }
   // Set the frozen bit to prevent future modifications to the node
   bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
-  inline RecordMetadata GetMetadata(uint32_t i, pmwcas::EpochManager *epoch) {
+  inline RecordMetadata GetMetadata(uint32_t i) {
     // ensure the metadata is installed
     auto meta = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
         record_metadata + i)->GetValueProtected();
@@ -305,8 +305,8 @@ class BaseNode {
     return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
   }
 
-  inline bool IsFrozen(pmwcas::EpochManager *epoch) {
-    return GetHeader()->GetStatus(epoch).IsFrozen();
+  inline bool IsFrozen() {
+    return GetHeader()->GetStatus().IsFrozen();
   }
 
   ReturnCode CheckMerge(Stack *stack, const char *key, uint32_t key_size, bool backoff);
@@ -480,8 +480,8 @@ class LeafNode : public BaseNode {
     return BaseNode::GetRawRecord(meta, &unused, key, payload, epoch);
   }
 
-  inline uint32_t GetFreeSpace(pmwcas::EpochManager *epoch) {
-    auto status = header.GetStatus(epoch);
+  inline uint32_t GetFreeSpace() {
+    auto status = header.GetStatus();
     assert(header.size >= GetUsedSpace(status));
     return header.size - GetUsedSpace(status);
   }
@@ -497,8 +497,7 @@ class LeafNode : public BaseNode {
   Uniqueness CheckUnique(const char *key, uint32_t key_size, pmwcas::EpochManager *epoch);
   Uniqueness RecheckUnique(const char *key,
                            uint32_t key_size,
-                           uint32_t end_pos,
-                           pmwcas::EpochManager *epoch);
+                           uint32_t end_pos);
 };
 
 struct Record {
@@ -506,7 +505,7 @@ struct Record {
   char data[0];
 
   explicit Record(RecordMetadata meta) : meta(meta) {}
-  static inline Record *New(RecordMetadata meta, BaseNode *node, pmwcas::EpochManager *epoch) {
+  static inline Record *New(RecordMetadata meta, BaseNode *node) {
     if (!meta.IsVisible()) {
       return nullptr;
     }
