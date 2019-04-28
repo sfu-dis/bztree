@@ -716,14 +716,14 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
       assert(current_key || !is_leaf);
 
+      if (!current.IsVisible()) {
+        return RecordMetadata{0};
+      }
+
       auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
       if (cmp_result < 0) {
         last = middle - 1;
       } else if (cmp_result == 0) {
-        // The found record isn't visible
-        if (!current.IsVisible()) {
-          return RecordMetadata{0};
-        }
         if (out_metadata_ptr) {
           *out_metadata_ptr = record_metadata + middle;
         }
@@ -1457,11 +1457,13 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
     parent = reinterpret_cast<InternalNode *>(node);
     meta_index = parent->GetChildIndex(key, key_size, le_child);
     node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
+    __builtin_prefetch((const void *)(node), 0, 3);
     assert(node);
     if (stack != nullptr) {
       stack->Push(parent, meta_index);
     }
   }
+  __builtin_prefetch((const void *)(node), 0, 3);
   return reinterpret_cast<LeafNode *>(node);
 }
 
