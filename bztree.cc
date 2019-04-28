@@ -178,6 +178,7 @@ InternalNode::InternalNode(uint32_t node_size,
                            uint64_t left_most_child_addr)
     : BaseNode(false, node_size) {
   ALWAYS_ASSERT(src_node);
+  __builtin_prefetch((const void *)(src_node), 0, 3);
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
 
   uint64_t offset = node_size;
@@ -355,6 +356,7 @@ bool InternalNode::PrepareForSplit(Stack &stack,
                       (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node);
     return true;
   }
+  __builtin_prefetch((const void *)(parent), 0, 2);
 
   // Try to freeze the parent node first
   bool frozen_by_me = false;
@@ -1172,7 +1174,8 @@ ReturnCode InternalNode::Update(RecordMetadata meta,
   pd->AddEntry(&(&header.status)->word, status.word, status.word);
   pd->AddEntry(GetPayloadPtr(meta),
                reinterpret_cast<uint64_t>(old_child),
-               reinterpret_cast<uint64_t>(new_child));
+               reinterpret_cast<uint64_t>(new_child),
+               pmwcas::Descriptor::kRecycleNewOnFailure);
   if (pd->MwCAS()) {
     return ReturnCode::Ok();
   } else {
@@ -1445,6 +1448,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
                                  bool le_child) {
   BaseNode *node = GetRootNodeSafe();
+  __builtin_prefetch((const void *)(root), 0, 3);
   if (stack) {
     stack->SetRoot(node);
   }
