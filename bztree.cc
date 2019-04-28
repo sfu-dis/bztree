@@ -613,17 +613,43 @@ LeafNode::Uniqueness LeafNode::RecheckUnique(const char *key, uint32_t key_size,
 
   // Linear search on unsorted field
   uint32_t linear_end = std::min<uint32_t>(header.GetStatus(epoch).GetRecordCount(), end_pos);
-  for (uint32_t i = header.sorted_count; i < linear_end; i++) {
+  thread_local std::vector<uint32_t> check_idx;
+  check_idx.clear();
+
+  auto check_metadata = [key, key_size, epoch, this](uint32_t i, bool push) -> LeafNode::Uniqueness {
     RecordMetadata md = GetMetadata(i, epoch);
-    while (md.IsInserting()) {
-      md = GetMetadata(i, epoch);
+    if (md.IsInserting()) {
+      if (push) {
+        check_idx.push_back(i);
+      }
+      return ReCheck;
+    } else if (md.IsVacant()) {
+      return IsUnique;
+    } else {
+      ALWAYS_ASSERT(md.IsVisible());
+      auto len = md.GetKeyLength();
+      if (key_size == len && (KeyCompare(key, key_size, GetKey(md), len) == 0)) {
+        return Duplicate;
+      }
+      return IsUnique;
     }
-    if (md.IsVacant()) {
-      continue;
-    }
-    auto len = md.GetKeyLength();
-    if (md.IsVisible() && key_size == len && (KeyCompare(key, key_size, GetKey(md), len) == 0)) {
+  };
+
+  for (uint32_t i = header.sorted_count; i < linear_end; i++) {
+    if (check_metadata(i, true) == Duplicate) {
       return Duplicate;
+    }
+  }
+
+  uint32_t need_check = check_idx.size();
+  while (need_check > 0) {
+    for (uint32_t i = 0; i < check_idx.size(); ++i) {
+      auto result = check_metadata(i, false);
+      if (result == Duplicate) {
+        return Duplicate;
+      } else if (result != ReCheck) {
+        --need_check;
+      }
     }
   }
   return IsUnique;
