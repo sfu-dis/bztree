@@ -109,7 +109,7 @@ TEST_F(LeafNodeFixtures, DuplicateInsert) {
   ASSERT_READ(new_node, "201", 3, 201);
 }
 
-TEST_F(LeafNodeFixtures, DISABLED_Delete) {
+TEST_F(LeafNodeFixtures, Delete) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
   uint64_t payload;
@@ -268,7 +268,7 @@ TEST_F(BzTreeTest, Upsert) {
   ASSERT_EQ(payload, 21);
 }
 
-TEST_F(BzTreeTest, DISABLED_Delete) {
+TEST_F(BzTreeTest, Delete) {
   for (uint64_t i = 0; i < 50; i++) {
     std::string key = std::to_string(i);
     tree->Insert(key.c_str(), key.length(), i);

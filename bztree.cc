@@ -716,14 +716,13 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
       GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
       assert(current_key || !is_leaf);
 
-      if (!current.IsVisible()) {
-        return RecordMetadata{0};
-      }
-
       auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
       if (cmp_result < 0) {
         last = middle - 1;
       } else if (cmp_result == 0) {
+        if (!current.IsVisible()) {
+          break;
+        }
         if (out_metadata_ptr) {
           *out_metadata_ptr = record_metadata + middle;
         }
