@@ -310,14 +310,19 @@ TEST_F(BzTreeTest, RangeScanBySize) {
     auto key = std::to_string(i);
     tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
   }
-  auto iter = tree->RangeScanBySize("1000", 4, 8000);
-  for (uint32_t i = 1000; i <= 9000; i += 1) {
-    auto record = iter->GetNext();
-    ASSERT_TRUE(record != nullptr);
-    auto key = std::string(record->GetKey(), 4);
-    ASSERT_EQ(i, record->GetPayload());
-    ASSERT_EQ(key, std::to_string(i));
+
+  auto iter = tree->RangeScanBySize("9990", 4, 100);
+  int count = 0;
+  while (true) {
+    auto *r = iter->GetNext();
+    if (!r) {
+      break;
+    }
+    ++count;
+    std::string key_str((char*)r + sizeof(bztree::Record), 4);
+    LOG(INFO) << count << " key=" << key_str;
   }
+  ASSERT_EQ(count, 10);
 }
 
 int main(int argc, char **argv) {

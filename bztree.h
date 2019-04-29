@@ -677,6 +677,7 @@ class Iterator {
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
     node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
     item_it = item_vec.begin();
+    by_key = true;
   }
 
   explicit Iterator(BzTree *tree, const char *begin_key, uint16_t begin_size, uint32_t scan_size) {
@@ -689,6 +690,7 @@ class Iterator {
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
     node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->GetPMWCASPool());
     item_it = item_vec.begin();
+    by_key = false;
   }
 
   ~Iterator() {
@@ -697,7 +699,7 @@ class Iterator {
     }
   }
 
-  inline Record *GetNext() {
+  inline Record *GetNextByKey() {
     if (item_vec.size() == 0) {
       return nullptr;
     }
@@ -714,13 +716,55 @@ class Iterator {
                                         false);
       if (node) {
         item_vec.clear();
-        node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->GetPMWCASPool());
+        node->RangeScanByKey(last_record->GetKey(), last_record->meta.GetKeyLength(), end_key, end_size, &item_vec, tree->GetPMWCASPool());
         item_it = item_vec.begin();
         return GetNext();
       } else {
         return nullptr;
       }
     }
+  }
+
+  inline Record *GetNextBySize() {
+    if (item_vec.size() == 0) {
+      return nullptr;
+    }
+
+    auto old_it = item_it;
+    if (item_it != item_vec.end()) {
+      item_it += 1;
+      return *old_it;
+    } else {
+      auto &last_record = item_vec.back();
+      node = this->tree->TraverseToLeaf(nullptr,
+                                        last_record->GetKey(),
+                                        last_record->meta.GetKeyLength(),
+                                        false);
+      if (node) {
+        item_vec.clear();
+        const char *last_key = last_record->GetKey();
+        uint32_t last_len = last_record->meta.GetKeyLength();
+        node->RangeScanBySize(last_key, last_len, &scan_size, &item_vec, tree->GetPMWCASPool());
+
+        // Exclude the first which is the previous key
+        item_it = item_vec.begin();
+        Record *r = *item_it;
+        if (BaseNode::KeyCompare(last_key, last_len, r->GetKey(), r->meta.GetKeyLength()) == 0) {
+          ++item_it;
+        }
+
+        if (item_it == item_vec.end()) {
+          return nullptr;
+        }
+        return GetNext();
+      } else {
+        return nullptr;
+      }
+    }
+  }
+
+  inline Record *GetNext() {
+    return by_key ? GetNextByKey() : GetNextBySize();
   }
 
  private:
@@ -731,6 +775,7 @@ class Iterator {
   uint16_t end_size;
   LeafNode *node;
   uint32_t scan_size;
+  bool by_key;
   std::vector<Record *> item_vec;
   std::vector<Record *>::iterator item_it;
 };
