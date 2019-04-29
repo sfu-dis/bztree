@@ -818,6 +818,10 @@ ReturnCode LeafNode::RangeScanBySize(const char *key1,
                                      uint32_t *to_scan,
                                      std::vector<Record *> *result,
                                      pmwcas::DescriptorPool *pmwcas_pool) {
+  if (*to_scan == 0) {
+    return ReturnCode::Ok();
+  }
+
   // Enter a new epoch and copy data
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
@@ -840,6 +844,8 @@ ReturnCode LeafNode::RangeScanBySize(const char *key1,
                                               b->GetKey(), b->meta.GetKeyLength());
               return cmp < 0;
             });
+
+  *to_scan = result->size() > count ? 0 : *to_scan - count;
   return ReturnCode::Ok();
 }
 
