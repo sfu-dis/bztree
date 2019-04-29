@@ -109,7 +109,7 @@ TEST_F(LeafNodeFixtures, DuplicateInsert) {
   ASSERT_READ(new_node, "201", 3, 201);
 }
 
-TEST_F(LeafNodeFixtures, DISABLED_Delete) {
+TEST_F(LeafNodeFixtures, Delete) {
   pmwcas::EpochGuard guard(pool->GetEpoch());
   InsertDummy();
   uint64_t payload;
