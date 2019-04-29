@@ -7,7 +7,6 @@
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
-#include <gperftools/profiler.h>
 #include <random>
 
 #include "util/performance_test.h"
@@ -246,7 +245,7 @@ struct MultiThreadDeleteTest : public pmwcas::PerformanceTest {
     }
   }
 };
-GTEST_TEST(MultiThreadDeleteTest, DISABLED_SingleNodeDeleteTest) {
+GTEST_TEST(MultiThreadDeleteTest, SingleNodeDeleteTest) {
   uint32_t thread_count = 5;
   uint32_t item_per_thread = 20;
   uint32_t total_record = 200;
@@ -260,7 +259,7 @@ GTEST_TEST(MultiThreadDeleteTest, DISABLED_SingleNodeDeleteTest) {
   t.SanityCheck();
   pmwcas::Thread::ClearRegistry(true);
 }
-GTEST_TEST(MultiThreadDeleteTest, DISABLED_MultiLevelDeleteTest) {
+GTEST_TEST(MultiThreadDeleteTest, MultiLevelDeleteTest) {
   uint32_t thread_count = 30;
   uint32_t item_per_thread = 100;
   uint32_t total_record = 3200;

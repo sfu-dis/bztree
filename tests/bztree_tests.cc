@@ -268,7 +268,7 @@ TEST_F(BzTreeTest, Upsert) {
   ASSERT_EQ(payload, 21);
 }
 
-TEST_F(BzTreeTest, DISABLED_Delete) {
+TEST_F(BzTreeTest, Delete) {
   for (uint64_t i = 0; i < 50; i++) {
     std::string key = std::to_string(i);
     tree->Insert(key.c_str(), key.length(), i);
