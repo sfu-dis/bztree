@@ -305,16 +305,16 @@ TEST_F(BzTreeTest, RangeScanByKey) {
 }
 
 TEST_F(BzTreeTest, RangeScanBySize) {
-  static const uint32_t kMaxKey = 125;
-  for (uint32_t i = 100; i <= kMaxKey; i++) {
+  static const uint32_t kMaxKey = 9999;
+  for (uint32_t i = 1000; i <= kMaxKey; i++) {
     auto key = std::to_string(i);
     tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
   }
-  auto iter = tree->RangeScanBySize("100", 3, 15);
-  for (uint32_t i = 100; i <= 15; i += 1) {
+  auto iter = tree->RangeScanBySize("1000", 4, 8000);
+  for (uint32_t i = 1000; i <= 9000; i += 1) {
     auto record = iter->GetNext();
     ASSERT_TRUE(record != nullptr);
-    auto key = std::string(record->GetKey(), 3);
+    auto key = std::string(record->GetKey(), 4);
     ASSERT_EQ(i, record->GetPayload());
     ASSERT_EQ(key, std::to_string(i));
   }

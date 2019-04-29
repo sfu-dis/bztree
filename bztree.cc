@@ -178,7 +178,7 @@ InternalNode::InternalNode(uint32_t node_size,
                            uint64_t left_most_child_addr)
     : BaseNode(false, node_size) {
   ALWAYS_ASSERT(src_node);
-  __builtin_prefetch((const void *)(src_node), 0, 3);
+  __builtin_prefetch((const void *) (src_node), 0, 3);
   auto padded_key_size = RecordMetadata::PadKeyLength(key_size);
 
   uint64_t offset = node_size;
@@ -356,7 +356,7 @@ bool InternalNode::PrepareForSplit(Stack &stack,
                       (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node);
     return true;
   }
-  __builtin_prefetch((const void *)(parent), 0, 2);
+  __builtin_prefetch((const void *) (parent), 0, 2);
 
   // Try to freeze the parent node first
   bool frozen_by_me = false;
@@ -827,7 +827,10 @@ ReturnCode LeafNode::RangeScanBySize(const char *key1,
   for (uint32_t i = 0; i < count; ++i) {
     auto curr_meta = GetMetadata(i);
     if (curr_meta.IsVisible()) {
-      result->emplace_back(Record::New(curr_meta, this));
+      int cmp = BaseNode::KeyCompare(key1, size1, GetKey(curr_meta), curr_meta.GetKeyLength());
+      if (cmp <= 0) {
+        result->emplace_back(Record::New(curr_meta, this));
+      }
     }
   }
 
@@ -1475,7 +1478,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
                                  bool le_child) {
   BaseNode *node = GetRootNodeSafe();
-  __builtin_prefetch((const void *)(root), 0, 3);
+  __builtin_prefetch((const void *) (root), 0, 3);
   if (stack) {
     stack->SetRoot(node);
   }
@@ -1486,13 +1489,13 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
     parent = reinterpret_cast<InternalNode *>(node);
     meta_index = parent->GetChildIndex(key, key_size, le_child);
     node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
-    __builtin_prefetch((const void *)(node), 0, 3);
+    __builtin_prefetch((const void *) (node), 0, 3);
     assert(node);
     if (stack != nullptr) {
       stack->Push(parent, meta_index);
     }
   }
-  __builtin_prefetch((const void *)(node), 0, 3);
+  __builtin_prefetch((const void *) (node), 0, 3);
   return reinterpret_cast<LeafNode *>(node);
 }
 

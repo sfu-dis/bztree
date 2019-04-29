@@ -476,7 +476,6 @@ class LeafNode : public BaseNode {
                              std::vector<Record *> *result,
                              pmwcas::DescriptorPool *pmwcas_pool);
 
-
   // Consolidate all records in sorted order
   LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
 
@@ -682,9 +681,9 @@ class Iterator {
 
   explicit Iterator(BzTree *tree, const char *begin_key, uint16_t begin_size, uint32_t scan_size) {
     this->begin_key = begin_key;
-    this->end_key = end_key;
+    this->end_key = nullptr;
     this->begin_size = begin_size;
-    this->end_size = end_size;
+    this->end_size = 0;
     this->tree = tree;
     this->scan_size = scan_size;
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
@@ -699,6 +698,10 @@ class Iterator {
   }
 
   inline Record *GetNext() {
+    if (item_vec.size() == 0) {
+      return nullptr;
+    }
+
     auto old_it = item_it;
     if (item_it != item_vec.end()) {
       item_it += 1;
@@ -709,9 +712,9 @@ class Iterator {
                                         last_record->GetKey(),
                                         last_record->meta.GetKeyLength(),
                                         false);
-      if (node != nullptr) {
+      if (node) {
         item_vec.clear();
-        node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
+        node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->GetPMWCASPool());
         item_it = item_vec.begin();
         return GetNext();
       } else {
