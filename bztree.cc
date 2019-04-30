@@ -320,7 +320,7 @@ bool InternalNode::PrepareForSplit(Stack &stack,
                               &separator_payload);
   ALWAYS_ASSERT(success);
 
-  int cmp = memcmp(key, separator_key, std::min<uint32_t>(key_size, separator_key_size));
+  int cmp = KeyCompare(key, key_size, separator_key, separator_key_size);
   if (cmp == 0) {
     cmp = key_size - separator_key_size;
   }
@@ -1482,8 +1482,10 @@ BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
 LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
                                  bool le_child) {
+  static const uint32_t kCacheLineSize = 64;
   BaseNode *node = GetRootNodeSafe();
   __builtin_prefetch((const void *) (root), 0, 3);
+
   if (stack) {
     stack->SetRoot(node);
   }
@@ -1500,7 +1502,10 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
       stack->Push(parent, meta_index);
     }
   }
-  __builtin_prefetch((const void *) (node), 0, 3);
+
+  for (uint32_t i = 0; i < parameters.leaf_node_size / kCacheLineSize; ++i) {
+    __builtin_prefetch((const void *)((char *)node + i * kCacheLineSize), 0, 3);
+  }
   return reinterpret_cast<LeafNode *>(node);
 }
 
