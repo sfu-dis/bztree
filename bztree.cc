@@ -1504,7 +1504,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
   }
 
   for (uint32_t i = 0; i < parameters.leaf_node_size / kCacheLineSize; ++i) {
-    __builtin_prefetch((const void *)((char *)node + i * kCacheLineSize), 0, 3);
+    __builtin_prefetch((const void *) ((char *) node + i * kCacheLineSize), 0, 3);
   }
   return reinterpret_cast<LeafNode *>(node);
 }
