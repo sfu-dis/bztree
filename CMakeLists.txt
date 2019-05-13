@@ -61,12 +61,11 @@ else ()
 endif ()
 
 # PMwCAS
-add_definitions(-DDESC_CAP=16)
+set(DESC_CAP 16)
 FetchContent_Declare(
         pmwcas
         GIT_REPOSITORY git@github.com:HaoPatrick/pmwcas.git
         GIT_TAG master
-        CMAKE_ARGS -DPMEM_BACKEND=${PMEM_BACKEND} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DDESC_CAP=16 -DBUILD_APPS=${BUILD_TESTS} -DGOOGLE_FRAMEWORK=${GOOGLE_FRAMEWORK}
 )
 FetchContent_GetProperties(pmwcas)
 if (NOT pmwcas_POPULATED)
@@ -143,9 +142,9 @@ add_custom_target(
         || (exit 0)
 )
 
-set(MAX_FREEZE_RETRY 1 CACHE STRING "MAX retry on frozen node")
+set(MAX_FREEZE_RETRY 1)
 target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
 
-set(ENABLE_MERGE 0 CACHE STRING "MAX retry on frozen node")
+set(ENABLE_MERGE 0)
 message(STATUS "ENABLE_MERGE: " ${ENABLE_MERGE})
 target_compile_definitions(bztree PRIVATE ENABLE_MERGE=${ENABLE_MERGE})
