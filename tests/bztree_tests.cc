@@ -45,20 +45,20 @@ class LeafNodeFixtures : public ::testing::Test {
   }
 
  protected:
-  pmwcas::DescriptorPool *pool;
+  nv_ptr<pmwcas::DescriptorPool> pool;
   bztree::LeafNode *node;
   void SetUp() override {
     pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
                         pmwcas::DefaultAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(1000, 1, false);
+    pool.set(reinterpret_cast<uint64_t >(new pmwcas::DescriptorPool(1000, 1, false)));
     bztree::LeafNode::New(&node, node_size);
   }
 
   void TearDown() override {
     delete node;
-    delete pool;
+    delete &(*pool);
     pmwcas::Thread::ClearRegistry();
   }
 };
@@ -319,7 +319,7 @@ TEST_F(BzTreeTest, RangeScanBySize) {
       break;
     }
     ++count;
-    std::string key_str((char*)r + sizeof(bztree::Record), 4);
+    std::string key_str((char *) r + sizeof(bztree::Record), 4);
     LOG(INFO) << count << " key=" << key_str;
   }
   ASSERT_EQ(count, 10);

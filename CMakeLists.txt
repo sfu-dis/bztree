@@ -61,7 +61,6 @@ else ()
 endif ()
 
 # PMwCAS
-set(DESC_CAP 16)
 FetchContent_Declare(
         pmwcas
         GIT_REPOSITORY git@github.com:HaoPatrick/pmwcas.git

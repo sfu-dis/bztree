@@ -18,6 +18,9 @@
 #define ALWAYS_ASSERT(expr) (expr) ? (void)0 : abort()
 #endif
 
+template<typename T>
+using nv_ptr= pmwcas::nv_ptr<T>;
+
 namespace bztree {
 
 #ifdef PMDK
@@ -241,7 +244,7 @@ class BaseNode {
     return cmp;
   }
   // Set the frozen bit to prevent future modifications to the node
-  bool Freeze(pmwcas::DescriptorPool *pmwcas_pool);
+  bool Freeze(nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
   inline RecordMetadata GetMetadata(uint32_t i) {
     // ensure the metadata is installed
     auto meta = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
@@ -346,14 +349,14 @@ class InternalNode : public BaseNode {
                        const char *key, uint32_t key_size,
                        uint64_t left_child_addr, uint64_t right_child_addr,
                        InternalNode **new_node, pmwcas::Descriptor *pd,
-                       pmwcas::DescriptorPool *pool, bool backoff);
+                       nv_ptr<pmwcas::DescriptorPool> pool, bool backoff);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
     char *ptr = reinterpret_cast<char *>(this) + meta.GetOffset() + meta.GetPaddedKeyLength();
     return reinterpret_cast<uint64_t *>(ptr);
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
-                    pmwcas::Descriptor *pd, pmwcas::DescriptorPool *pmwcas_pool);
+                    pmwcas::Descriptor *pd);
   uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_le = true);
 
   // epoch here is required: record ptr might be a desc due to UPDATE operation
@@ -432,10 +435,10 @@ class LeafNode : public BaseNode {
   ~LeafNode() = default;
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
-                    pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold);
+                    nv_ptr<pmwcas::DescriptorPool> pmwcas_pool, uint32_t split_threshold);
   bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
                        pmwcas::Descriptor *pd,
-                       pmwcas::DescriptorPool *pmwcas_pool,
+                       nv_ptr<pmwcas::DescriptorPool> pmwcas_pool,
                        LeafNode **left, LeafNode **right,
                        InternalNode **new_parent, bool backoff);
 
@@ -456,28 +459,28 @@ class LeafNode : public BaseNode {
                 pmwcas::EpochManager *epoch);
 
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload,
-                    pmwcas::DescriptorPool *pmwcas_pool);
+                    nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
 
-  ReturnCode Delete(const char *key, uint16_t key_size, pmwcas::DescriptorPool *pmwcas_pool);
+  ReturnCode Delete(const char *key, uint16_t key_size, nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
 
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload,
-                  pmwcas::DescriptorPool *pmwcas_pool);
+                  nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
 
   ReturnCode RangeScanByKey(const char *key1,
                             uint32_t size1,
                             const char *key2,
                             uint32_t size2,
                             std::vector<Record *> *result,
-                            pmwcas::DescriptorPool *pmwcas_pool);
+                            nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
 
   ReturnCode RangeScanBySize(const char *key1,
                              uint32_t size1,
                              uint32_t *to_scan,
                              std::vector<Record *> *result,
-                             pmwcas::DescriptorPool *pmwcas_pool);
+                             nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
 
   // Consolidate all records in sorted order
-  LeafNode *Consolidate(pmwcas::DescriptorPool *pmwcas_pool);
+  LeafNode *Consolidate(nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
 
   // Specialized GetRawRecord for leaf node only (key can't be nullptr)
   inline bool GetRawRecord(RecordMetadata meta, char **key,
@@ -558,7 +561,11 @@ class BzTree {
 
   // init a new tree
   BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, uint64_t pmdk_addr = 0)
-      : parameters(param), root(nullptr), pmdk_addr(pmdk_addr), index_epoch(0) {
+      : parameters(param),
+        root(nullptr),
+        pmdk_addr(pmdk_addr),
+        index_epoch(0),
+        pmwcas_nv_pool(reinterpret_cast<uint64_t>(pool)) {
     global_epoch = index_epoch;
     SetPMWCASPool(pool);
     pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
@@ -578,8 +585,7 @@ class BzTree {
     if (global_epoch != index_epoch) {
       global_epoch = index_epoch;
     }
-    pmwcas::DescriptorPool *pool = GetPMWCASPool();
-    pool->Recovery(false);
+    pmwcas_nv_pool->Recovery(false);
 
     pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
   }
@@ -609,6 +615,7 @@ class BzTree {
     return std::make_unique<Iterator>(this, key1, size1, scan_size);
   }
 
+  // TODO(hao): make this func explict
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
@@ -642,8 +649,9 @@ class BzTree {
   }
 
   ParameterSet parameters;
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
+  nv_ptr<pmwcas::DescriptorPool> pmwcas_nv_pool;
 
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
  private:
   BaseNode *root;
   pmwcas::DescriptorPool *pmwcas_pool;
@@ -675,7 +683,7 @@ class Iterator {
     this->tree = tree;
     this->scan_size = ~uint32_t{0};
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
+    node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->pmwcas_nv_pool);
     item_it = item_vec.begin();
     by_key = true;
   }
@@ -688,7 +696,7 @@ class Iterator {
     this->tree = tree;
     this->scan_size = scan_size;
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->GetPMWCASPool());
+    node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->pmwcas_nv_pool);
     item_it = item_vec.begin();
     by_key = false;
   }
@@ -716,7 +724,12 @@ class Iterator {
                                         false);
       if (node) {
         item_vec.clear();
-        node->RangeScanByKey(last_record->GetKey(), last_record->meta.GetKeyLength(), end_key, end_size, &item_vec, tree->GetPMWCASPool());
+        node->RangeScanByKey(last_record->GetKey(),
+                             last_record->meta.GetKeyLength(),
+                             end_key,
+                             end_size,
+                             &item_vec,
+                             tree->pmwcas_nv_pool);
         item_it = item_vec.begin();
         return GetNext();
       } else {
@@ -744,7 +757,7 @@ class Iterator {
         item_vec.clear();
         const char *last_key = last_record->GetKey();
         uint32_t last_len = last_record->meta.GetKeyLength();
-        node->RangeScanBySize(last_key, last_len, &scan_size, &item_vec, tree->GetPMWCASPool());
+        node->RangeScanBySize(last_key, last_len, &scan_size, &item_vec, tree->pmwcas_nv_pool);
 
         // Exclude the first which is the previous key
         item_it = item_vec.begin();
