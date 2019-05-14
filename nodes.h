@@ -2,8 +2,8 @@
 
 #include "basenode.h"
 
-// Internal node: immutable once created, no free space, keys are always sorted
-// operations that might mutate the InternalNode:
+namespace bztree {
+
 //    a. create a new node, this will set the freeze bit in status
 //    b. update a pointer, this will check the status field and swap in a new pointer
 // in both cases, the record metadata should not be touched,
@@ -145,11 +145,14 @@ class LeafNode : public BaseNode {
   void Dump(pmwcas::EpochManager *epoch);
 
  private:
+
   enum Uniqueness { IsUnique, Duplicate, ReCheck, NodeFrozen };
+
   Uniqueness CheckUnique(const char *key, uint32_t key_size, pmwcas::EpochManager *epoch);
+
   Uniqueness RecheckUnique(const char *key,
                            uint32_t key_size,
                            uint32_t end_pos);
 };
-
+}
 

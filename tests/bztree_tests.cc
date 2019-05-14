@@ -45,7 +45,7 @@ class LeafNodeFixtures : public ::testing::Test {
   }
 
  protected:
-  nv_ptr<pmwcas::DescriptorPool> pool;
+  pmwcas::nv_ptr<pmwcas::DescriptorPool> pool;
   bztree::LeafNode *node;
   void SetUp() override {
     pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
@@ -179,7 +179,7 @@ TEST_F(LeafNodeFixtures, RangeScanByKey) {
 
 class BzTreeTest : public ::testing::Test {
  protected:
-  nv_ptr<pmwcas::DescriptorPool> pool;
+  pmwcas::nv_ptr<pmwcas::DescriptorPool> pool;
   bztree::BzTree *tree;
 
 //  Insert 0:10:100
@@ -196,7 +196,7 @@ class BzTreeTest : public ::testing::Test {
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
     pool.set(reinterpret_cast<uint64_t >(new pmwcas::DescriptorPool(2000, 1, false)));
-    bztree::BzTree::ParameterSet param(256, 128, 256);
+    bztree::ParameterSet param(256, 128, 256);
     tree = bztree::BzTree::New(param, pool);
   }
 

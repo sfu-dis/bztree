@@ -18,65 +18,12 @@
 #include "basenode.h"
 #include "nodes.h"
 
-#ifndef ALWAYS_ASSERT
-#define ALWAYS_ASSERT(expr) (expr) ? (void)0 : abort()
-#endif
-
-template<typename T>
-using nv_ptr= pmwcas::nv_ptr<T>;
-
 namespace bztree {
 
-struct Record {
-  RecordMetadata meta;
-  char data[0];
-
-  explicit Record(RecordMetadata meta) : meta(meta) {}
-  static inline Record *New(RecordMetadata meta, BaseNode *node) {
-    if (!meta.IsVisible()) {
-      return nullptr;
-    }
-
-    Record *r = reinterpret_cast<Record *>(malloc(meta.GetTotalLength() + sizeof(meta)));
-    memset(r, 0, meta.GetTotalLength() + sizeof(Record));
-    new(r) Record(meta);
-
-    // Key will never be changed and it will not be a pmwcas descriptor
-    // but payload is fixed length 8-byte value, can be updated by pmwcas
-    memcpy(r->data, reinterpret_cast<char *>(node) + meta.GetOffset(), meta.GetPaddedKeyLength());
-
-    auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
-    auto payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        source_addr + meta.GetPaddedKeyLength())->GetValueProtected();
-    memcpy(r->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
-    return r;
-  }
-
-  inline const uint64_t GetPayload() {
-    return *reinterpret_cast<uint64_t *>(data + meta.GetPaddedKeyLength());
-  }
-  inline const char *GetKey() const { return data; }
-  inline bool operator<(const Record &out) {
-    int cmp = KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
-                                   out.GetKey(), out.meta.GetKeyLength());
-    return cmp < 0;
-  }
-};
 class Iterator;
+
 class BzTree {
  public:
-  struct ParameterSet {
-    const uint32_t split_threshold;
-    const uint32_t merge_threshold;
-    const uint32_t leaf_node_size;
-    ParameterSet() : split_threshold(3072), merge_threshold(1024), leaf_node_size(4096) {}
-    ParameterSet(uint32_t split_threshold, uint32_t merge_threshold, uint32_t leaf_node_size = 4096)
-        : split_threshold(split_threshold),
-          merge_threshold(merge_threshold),
-          leaf_node_size(leaf_node_size) {}
-    ~ParameterSet() {}
-  };
-
   // init a new tree
   BzTree(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool, uint64_t pmdk_addr = 0)
       : parameters(param),
@@ -103,7 +50,6 @@ class BzTree {
       global_epoch = index_epoch;
     }
     pmwcas_pool->Recovery(false);
-
     pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
   }
 #endif

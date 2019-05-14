@@ -9,10 +9,15 @@
 
 #include <cstdint>
 
+namespace bztree {
 extern uint64_t global_epoch;
 
 template<typename T>
 using nv_ptr= pmwcas::nv_ptr<T>;
+
+#ifndef ALWAYS_ASSERT
+#define ALWAYS_ASSERT(expr) (expr) ? (void)0 : abort()
+#endif
 
 #ifdef PMDK
 struct Allocator {
@@ -93,6 +98,19 @@ static const inline int KeyInRange(const char *key, uint32_t size,
     return 1;
   }
 }
+
+struct ParameterSet {
+  const uint32_t split_threshold;
+  const uint32_t merge_threshold;
+  const uint32_t leaf_node_size;
+  ParameterSet() : split_threshold(3072), merge_threshold(1024), leaf_node_size(4096) {}
+  ParameterSet(uint32_t split_threshold, uint32_t merge_threshold, uint32_t leaf_node_size = 4096)
+      : split_threshold(split_threshold),
+        merge_threshold(merge_threshold),
+        leaf_node_size(leaf_node_size) {}
+  ~ParameterSet() = default;
+};
+
 struct NodeHeader {
   // Header:
   // |-------64 bits-------|---32 bits---|---32 bits---|
@@ -222,3 +240,80 @@ struct RecordMetadata {
         (((meta & kAllocationEpochMask) >> 32u) == global_epoch);
   }
 };
+
+class BaseNode;
+struct Record {
+  RecordMetadata meta;
+  char data[0];
+
+  explicit Record(RecordMetadata meta) : meta(meta) {}
+  static inline Record *New(RecordMetadata meta, BaseNode *node) {
+    if (!meta.IsVisible()) {
+      return nullptr;
+    }
+
+    Record *r = reinterpret_cast<Record *>(malloc(meta.GetTotalLength() + sizeof(meta)));
+    memset(r, 0, meta.GetTotalLength() + sizeof(Record));
+    new(r) Record(meta);
+
+    // Key will never be changed and it will not be a pmwcas descriptor
+    // but payload is fixed length 8-byte value, can be updated by pmwcas
+    memcpy(r->data, reinterpret_cast<char *>(node) + meta.GetOffset(), meta.GetPaddedKeyLength());
+
+    auto source_addr = (reinterpret_cast<char *>(node) + meta.GetOffset());
+    auto payload = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
+        source_addr + meta.GetPaddedKeyLength())->GetValueProtected();
+    memcpy(r->data + meta.GetPaddedKeyLength(), &payload, sizeof(payload));
+    return r;
+  }
+
+  inline const uint64_t GetPayload() {
+    return *reinterpret_cast<uint64_t *>(data + meta.GetPaddedKeyLength());
+  }
+  inline const char *GetKey() const { return data; }
+  inline bool operator<(const Record &out) {
+    int cmp = KeyCompare(this->GetKey(), this->meta.GetKeyLength(),
+                         out.GetKey(), out.meta.GetKeyLength());
+    return cmp < 0;
+  }
+};
+
+// TODO: stack should be defined under bztree
+class InternalNode;
+class BzTree;
+
+struct Stack {
+  struct Frame {
+    Frame() : node(nullptr), meta_index() {}
+    ~Frame() = default;
+
+    InternalNode *node;
+    uint32_t meta_index;
+  };
+  static const uint32_t kMaxFrames = 32;
+  Frame frames[kMaxFrames];
+  uint32_t num_frames;
+  BzTree *tree;
+  BaseNode *root;
+
+  Stack() : num_frames(0) {}
+  ~Stack() { num_frames = 0; }
+
+  inline void Push(InternalNode *node, uint32_t meta_index) {
+    ALWAYS_ASSERT(num_frames < kMaxFrames);
+    auto &frame = frames[num_frames++];
+    frame.node = node;
+    frame.meta_index = meta_index;
+  }
+  inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
+  inline void Clear() {
+    root = nullptr;
+    num_frames = 0;
+  }
+  inline bool IsEmpty() { return num_frames == 0; }
+  inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
+  inline BaseNode *GetRoot() { return root; }
+  inline void SetRoot(BaseNode *node) { root = node; }
+};
+}
+

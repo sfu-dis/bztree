@@ -12,8 +12,7 @@
 #include <mwcas/mwcas.h>
 #include "util.h"
 
-class Stack;
-class Record;
+namespace bztree {
 
 class BaseNode {
  public:
@@ -78,10 +77,11 @@ class BaseNode {
     return GetHeader()->GetStatus().IsFrozen();
   }
 
-//  ReturnCode CheckMerge(Stack *stack, const char *key, uint32_t key_size, bool backoff);
+  ReturnCode CheckMerge(Stack *stack, const char *key, uint32_t key_size, bool backoff);
 
  protected:
   bool is_leaf;
   NodeHeader header;
   RecordMetadata record_metadata[0];
 };
+}
