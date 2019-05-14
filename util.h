@@ -137,15 +137,15 @@ struct NodeHeader {
       return StatusWord{word | kFrozenMask};
     }
     inline bool IsFrozen() { return (word & kFrozenMask) > 0; }
-    inline uint16_t GetRecordCount() { return (uint16_t)((word & kRecordCountMask) >> 44u); }
+    inline uint16_t GetRecordCount() { return (uint16_t) ((word & kRecordCountMask) >> 44u); }
     inline void SetRecordCount(uint16_t count) {
       word = (word & (~kRecordCountMask)) | (uint64_t{count} << 44u);
     }
-    inline uint32_t GetBlockSize() { return (uint32_t)((word & kBlockSizeMask) >> 22u); }
+    inline uint32_t GetBlockSize() { return (uint32_t) ((word & kBlockSizeMask) >> 22u); }
     inline void SetBlockSize(uint32_t in_size) {
       word = (word & (~kBlockSizeMask)) | (uint64_t{in_size} << 22u);
     }
-    inline uint32_t GetDeletedSize() { return (uint32_t)(word & kDeleteSizeMask); }
+    inline uint32_t GetDeletedSize() { return (uint32_t) (word & kDeleteSizeMask); }
     inline void SetDeleteSize(uint32_t in_size) {
       word = (word & (~kDeleteSizeMask)) | uint64_t{in_size};
     }
@@ -182,7 +182,7 @@ struct RecordMetadata {
   static const uint64_t kAllocationEpochMask = uint64_t{0x7FFFFFF} << 32u;  // Bit 59-33
 
   inline bool IsVacant() { return meta == 0; }
-  inline uint16_t GetKeyLength() const { return (uint16_t)((meta & kKeyLengthMask) >> 16u); }
+  inline uint16_t GetKeyLength() const { return (uint16_t) ((meta & kKeyLengthMask) >> 16u); }
 
   // Get the padded key length from accurate key length
   inline uint16_t GetPaddedKeyLength() {
@@ -193,8 +193,8 @@ struct RecordMetadata {
   static inline constexpr uint16_t PadKeyLength(uint16_t key_length) {
     return (key_length + sizeof(uint64_t) - 1) / sizeof(uint64_t) * sizeof(uint64_t);
   }
-  inline uint16_t GetTotalLength() { return (uint16_t)(meta & kTotalLengthMask); }
-  inline uint32_t GetOffset() { return (uint32_t)((meta & kOffsetMask) >> 32u); }
+  inline uint16_t GetTotalLength() { return (uint16_t) (meta & kTotalLengthMask); }
+  inline uint32_t GetOffset() { return (uint32_t) ((meta & kOffsetMask) >> 32u); }
   inline bool OffsetIsEpoch() {
     return (GetOffset() >> 27u) == 1;
   }
@@ -294,7 +294,7 @@ struct Stack {
   Frame frames[kMaxFrames];
   uint32_t num_frames;
   BzTree *tree;
-  BaseNode *root;
+  nv_ptr<BaseNode> root;
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
@@ -307,13 +307,13 @@ struct Stack {
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() {
-    root = nullptr;
+    root = nv_ptr<BaseNode>();
     num_frames = 0;
   }
   inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
-  inline BaseNode *GetRoot() { return root; }
-  inline void SetRoot(BaseNode *node) { root = node; }
+  inline nv_ptr<BaseNode> GetRoot() { return root; }
+  inline void SetRoot(nv_ptr<BaseNode> node) { root = node; }
 };
 }
 

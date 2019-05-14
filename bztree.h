@@ -74,12 +74,11 @@ class BzTree {
   bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
 
  private:
-  nv_ptr<BaseNode> *nv_root;
-  BaseNode *root;
+  nv_ptr<BaseNode> root;
   uint64_t pmdk_addr;
   uint64_t index_epoch;
 
-  inline BaseNode *GetRootNodeSafe();
+  inline nv_ptr<BaseNode> GetRootNodeSafe();
 };
 
 class Iterator {
