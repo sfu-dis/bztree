@@ -25,43 +25,15 @@ class Iterator;
 class BzTree {
  public:
   // init a new tree
-  BzTree(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool, uint64_t pmdk_addr = 0)
-      : parameters(param),
-        root(nullptr),
-        pmdk_addr(pmdk_addr),
-        index_epoch(0),
-        pmwcas_pool(pool) {
-    global_epoch = index_epoch;
-    pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
-    auto *pd = pool->AllocateDescriptor();
-    auto index = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&root),
-                                        reinterpret_cast<uint64_t>(nullptr),
-                                        pmwcas::Descriptor::kRecycleOnRecovery);
-    auto root_ptr = pd->GetNewValuePtr(index);
-    LeafNode::New(reinterpret_cast<LeafNode **>(root_ptr), param.leaf_node_size);
-    pd->MwCAS();
-  }
+  explicit BzTree(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool, uint64_t pmdk_addr = 0);
 
 #ifdef PMEM
-  void Recovery() {
-    index_epoch += 1;
-    // avoid multiple increment if there are multiple bztrees
-    if (global_epoch != index_epoch) {
-      global_epoch = index_epoch;
-    }
-    pmwcas_pool->Recovery(false);
-    pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
-  }
+  void Recovery();
 #endif
 
   void Dump();
 
-  inline static BzTree *New(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool) {
-    BzTree *tree;
-    pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(&tree), sizeof(BzTree));
-    new(tree) BzTree(param, pool);
-    return tree;
-  }
+  static BzTree *New(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool);
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
@@ -81,6 +53,7 @@ class BzTree {
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
+
   BaseNode *TraverseToNode(Stack *stack,
                            const char *key, uint16_t key_size,
                            BaseNode *stop_at = nullptr,
@@ -95,23 +68,17 @@ class BzTree {
   }
 
   ParameterSet parameters;
+
   nv_ptr<pmwcas::DescriptorPool> pmwcas_pool;
 
   bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
+
  private:
   BaseNode *root;
   uint64_t pmdk_addr;
   uint64_t index_epoch;
 
-  inline BaseNode *GetRootNodeSafe() {
-    auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
-        &root)->GetValueProtected();
-#ifdef PMDK
-    return Allocator::Get()->GetDirect(reinterpret_cast<BaseNode *>(root_node));
-#else
-    return reinterpret_cast<BaseNode *>(root_node);
-#endif
-  }
+  inline BaseNode *GetRootNodeSafe();
 };
 
 class Iterator {

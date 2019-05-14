@@ -19,6 +19,52 @@ pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
 
 uint64_t global_epoch = 0;
 
+BzTree::BzTree(const bztree::ParameterSet &param, bztree::nv_ptr<pmwcas::DescriptorPool> pool, uint64_t pmdk_addr)
+    : parameters(param),
+      root(nullptr),
+      pmdk_addr(pmdk_addr),
+      index_epoch(0),
+      pmwcas_pool(pool) {
+  global_epoch = index_epoch;
+  pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
+  auto *pd = pool->AllocateDescriptor();
+  auto index = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&root),
+                                      reinterpret_cast<uint64_t>(nullptr),
+                                      pmwcas::Descriptor::kRecycleOnRecovery);
+  auto root_ptr = pd->GetNewValuePtr(index);
+  LeafNode::New(reinterpret_cast<LeafNode **>(root_ptr), param.leaf_node_size);
+  pd->MwCAS();
+}
+
+#ifdef PMEM
+void BzTree::Recovery() {
+  index_epoch += 1;
+  // avoid multiple increment if there are multiple bztrees
+  if (global_epoch != index_epoch) {
+    global_epoch = index_epoch;
+  }
+  pmwcas_pool->Recovery(false);
+  pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
+}
+#endif
+
+BzTree *BzTree::New(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool) {
+  BzTree *tree;
+  pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(&tree), sizeof(BzTree));
+  new(tree) BzTree(param, pool);
+  return tree;
+}
+
+BaseNode *BzTree::GetRootNodeSafe() {
+  auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
+      &root)->GetValueProtected();
+#ifdef PMDK
+  return Allocator::Get()->GetDirect(reinterpret_cast<BaseNode *>(root_node));
+#else
+  return reinterpret_cast<BaseNode *>(root_node);
+#endif
+}
+
 BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
                                  const char *key, uint16_t key_size,
                                  bztree::BaseNode *stop_at,
