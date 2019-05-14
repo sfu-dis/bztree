@@ -73,7 +73,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
     for (const auto &pair:value_missing) {
       std::cout << "Value missing i = " << pair.first << std::endl
                 << "=================" << std::endl;
-      pair.second->Dump(tree->pmwcas_nv_pool->GetEpoch(), true);
+      pair.second->Dump(tree->pmwcas_pool->GetEpoch(), true);
     }
     if (value_missing.size() > 0) {
       ASSERT_TRUE(false);

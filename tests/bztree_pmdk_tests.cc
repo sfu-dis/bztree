@@ -12,7 +12,7 @@
 #include "../bztree.h"
 #include "util/performance_test.h"
 
-#define TEST_POOL_NAME "pool_bztree" 
+#define TEST_POOL_NAME "pool_bztree"
 #define TEST_LAYOUT_NAME "layout_bztree"
 
 class BzTreePMEMTest : public ::testing::Test {
@@ -36,14 +36,12 @@ TEST_F(BzTreePMEMTest, InsertTest) {
   bztree::Allocator::Init(pmdk_allocator);
 
   auto bztree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  pmwcas::DescriptorPool *pool = nullptr;
-  pmdk_allocator->Allocate((void **) &pool, sizeof(pmwcas::DescriptorPool));
+  nv_ptr <pmwcas::DescriptorPool> pool;
+  pmdk_allocator->Allocate(&pool, sizeof(pmwcas::DescriptorPool));
 
-  new(pool) pmwcas::DescriptorPool(100000, 1, false);
+  new(pool.get_direct()) pmwcas::DescriptorPool(100000, 1, false);
   bztree::BzTree::ParameterSet param(3072, 0, 4096);
   new(bztree)bztree::BzTree(param, pool);
-  pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
-  pmdk_allocator->PersistPtr(pool, sizeof(pmwcas::DescriptorPool));
 
   tree = bztree;
 
@@ -65,14 +63,14 @@ TEST_F(BzTreePMEMTest, ReadTest) {
   auto pmdk_allocator = reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
   bztree::Allocator::Init(pmdk_allocator);
 
-  pmwcas::DescriptorPool *pool;
-  pmdk_allocator->Allocate((void **) &pool, sizeof(pmwcas::DescriptorPool));
-  new(pool) pmwcas::DescriptorPool(2000, 1, false);
+  nv_ptr<pmwcas::DescriptorPool> pool;
+  pmdk_allocator->Allocate( &pool, sizeof(pmwcas::DescriptorPool));
+  new(pool.get_direct()) pmwcas::DescriptorPool(2000, 1, false);
 
   auto root_obj = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
 
   tree = root_obj;
-  tree->SetPMWCASPool(pool);
+  tree->pmwcas_pool.set(pool.get_offset());
 
   const uint32_t kMaxKey = 20000;
   for (uint32_t i = 1; i < kMaxKey; ++i) {
@@ -127,9 +125,9 @@ GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
   bztree::Allocator::Init(pmdk_allocator);
 
   auto bztree = reinterpret_cast<bztree::BzTree *>(pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  pmwcas::DescriptorPool *pool;
-  pmdk_allocator->Allocate((void **) &pool, sizeof(pmwcas::DescriptorPool));
-  new(pool) pmwcas::DescriptorPool(pool_size, thread_count, false);
+  nv_ptr<pmwcas::DescriptorPool> pool;
+  pmdk_allocator->Allocate(&pool, sizeof(pmwcas::DescriptorPool));
+  new(pool.get_direct()) pmwcas::DescriptorPool(pool_size, thread_count, false);
 
   bztree::BzTree::ParameterSet param(3072, 0, 4096);
   new(bztree)bztree::BzTree(param, pool, reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));

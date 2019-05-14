@@ -179,7 +179,7 @@ TEST_F(LeafNodeFixtures, RangeScanByKey) {
 
 class BzTreeTest : public ::testing::Test {
  protected:
-  pmwcas::DescriptorPool *pool;
+  nv_ptr<pmwcas::DescriptorPool> pool;
   bztree::BzTree *tree;
 
 //  Insert 0:10:100
@@ -195,14 +195,14 @@ class BzTreeTest : public ::testing::Test {
                         pmwcas::DefaultAllocator::Destroy,
                         pmwcas::LinuxEnvironment::Create,
                         pmwcas::LinuxEnvironment::Destroy);
-    pool = new pmwcas::DescriptorPool(2000, 1, false);
+    pool.set(reinterpret_cast<uint64_t >(new pmwcas::DescriptorPool(2000, 1, false)));
     bztree::BzTree::ParameterSet param(256, 128, 256);
     tree = bztree::BzTree::New(param, pool);
   }
 
   void TearDown() override {
     delete tree;
-    delete pool;
+    delete pool.get_direct();
     pmwcas::Thread::ClearRegistry();
   }
 };

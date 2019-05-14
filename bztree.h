@@ -560,15 +560,14 @@ class BzTree {
   };
 
   // init a new tree
-  BzTree(const ParameterSet &param, pmwcas::DescriptorPool *pool, uint64_t pmdk_addr = 0)
+  BzTree(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool, uint64_t pmdk_addr = 0)
       : parameters(param),
         root(nullptr),
         pmdk_addr(pmdk_addr),
         index_epoch(0),
-        pmwcas_nv_pool(reinterpret_cast<uint64_t>(pool)) {
+        pmwcas_pool(pool) {
     global_epoch = index_epoch;
-    SetPMWCASPool(pool);
-    pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
+    pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
     auto *pd = pool->AllocateDescriptor();
     auto index = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&root),
                                         reinterpret_cast<uint64_t>(nullptr),
@@ -585,7 +584,7 @@ class BzTree {
     if (global_epoch != index_epoch) {
       global_epoch = index_epoch;
     }
-    pmwcas_nv_pool->Recovery(false);
+    pmwcas_pool->Recovery(false);
 
     pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
   }
@@ -593,7 +592,7 @@ class BzTree {
 
   void Dump();
 
-  inline static BzTree *New(const ParameterSet &param, pmwcas::DescriptorPool *pool) {
+  inline static BzTree *New(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool) {
     BzTree *tree;
     pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(&tree), sizeof(BzTree));
     new(tree) BzTree(param, pool);
@@ -615,7 +614,6 @@ class BzTree {
     return std::make_unique<Iterator>(this, key1, size1, scan_size);
   }
 
-  // TODO(hao): make this func explict
   LeafNode *TraverseToLeaf(Stack *stack, const char *key,
                            uint16_t key_size,
                            bool le_child = true);
@@ -623,22 +621,6 @@ class BzTree {
                            const char *key, uint16_t key_size,
                            bztree::BaseNode *stop_at = nullptr,
                            bool le_child = true);
-
-  void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
-#ifdef PMDK
-    this->pmwcas_pool = Allocator::Get()->GetOffset(pool);
-#else
-    this->pmwcas_pool = pool;
-#endif
-  }
-
-  inline pmwcas::DescriptorPool *GetPMWCASPool() {
-#ifdef PMDK
-    return Allocator::Get()->GetDirect(pmwcas_pool);
-#else
-    return pmwcas_pool;
-#endif
-  }
 
   inline uint64_t GetPMDKAddr() {
     return pmdk_addr;
@@ -649,12 +631,11 @@ class BzTree {
   }
 
   ParameterSet parameters;
-  nv_ptr<pmwcas::DescriptorPool> pmwcas_nv_pool;
+  nv_ptr<pmwcas::DescriptorPool> pmwcas_pool;
 
   bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
  private:
   BaseNode *root;
-  pmwcas::DescriptorPool *pmwcas_pool;
   uint64_t pmdk_addr;
   uint64_t index_epoch;
 
@@ -683,7 +664,7 @@ class Iterator {
     this->tree = tree;
     this->scan_size = ~uint32_t{0};
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->pmwcas_nv_pool);
+    node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->pmwcas_pool);
     item_it = item_vec.begin();
     by_key = true;
   }
@@ -696,7 +677,7 @@ class Iterator {
     this->tree = tree;
     this->scan_size = scan_size;
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->pmwcas_nv_pool);
+    node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->pmwcas_pool);
     item_it = item_vec.begin();
     by_key = false;
   }
@@ -729,7 +710,7 @@ class Iterator {
                              end_key,
                              end_size,
                              &item_vec,
-                             tree->pmwcas_nv_pool);
+                             tree->pmwcas_pool);
         item_it = item_vec.begin();
         return GetNext();
       } else {
@@ -757,7 +738,7 @@ class Iterator {
         item_vec.clear();
         const char *last_key = last_record->GetKey();
         uint32_t last_len = last_record->meta.GetKeyLength();
-        node->RangeScanBySize(last_key, last_len, &scan_size, &item_vec, tree->pmwcas_nv_pool);
+        node->RangeScanBySize(last_key, last_len, &scan_size, &item_vec, tree->pmwcas_pool);
 
         // Exclude the first which is the previous key
         item_it = item_vec.begin();
