@@ -74,6 +74,7 @@ class BzTree {
   bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
 
  private:
+  nv_ptr<BaseNode> *nv_root;
   BaseNode *root;
   uint64_t pmdk_addr;
   uint64_t index_epoch;
