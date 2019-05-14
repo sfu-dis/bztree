@@ -111,7 +111,7 @@ set_property(GLOBAL APPEND PROPERTY BZTREE_SRC
         )
 get_property(BZTREE_LIB_SRC GLOBAL PROPERTY BZTREE_SRC)
 
-add_library(bztree SHARED ${BZTREE_LIB_SRC})
+add_library(bztree SHARED ${BZTREE_LIB_SRC} basenode.cpp)
 target_include_directories(bztree PUBLIC ${pmwcas_SOURCE_DIR})
 target_link_libraries(bztree pmwcas glog::glog gtest_main)
 
