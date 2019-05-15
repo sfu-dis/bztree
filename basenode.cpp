@@ -5,8 +5,6 @@
 // Xiangpeng Hao <xiangpeng_hao@sfu.ca>
 // Tianzheng Wang <tzwang@sfu.ca>
 
-#pragma once
-
 #include "basenode.h"
 #include "bztree.h"
 
