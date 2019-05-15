@@ -288,21 +288,6 @@ TEST_F(BzTreeTest, Delete) {
   tree->Dump();
 }
 
-TEST_F(BzTreeTest, RangeScanByKey) {
-  static const uint32_t kMaxKey = 125;
-  for (uint32_t i = 100; i <= kMaxKey; i++) {
-    auto key = std::to_string(i);
-    tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
-  }
-  auto iter = tree->RangeScanByKey("100", 3, "125", 3);
-  for (uint32_t i = 100; i <= 125; i += 1) {
-    auto record = iter->GetNext();
-    ASSERT_TRUE(record != nullptr);
-    auto key = std::string(record->GetKey(), 3);
-    ASSERT_EQ(i, record->GetPayload());
-    ASSERT_EQ(key, std::to_string(i));
-  }
-}
 
 TEST_F(BzTreeTest, RangeScanBySize) {
   static const uint32_t kMaxKey = 9999;
@@ -311,18 +296,18 @@ TEST_F(BzTreeTest, RangeScanBySize) {
     tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
   }
 
-  auto iter = tree->RangeScanBySize("9990", 4, 100);
+  auto iter = tree->RangeScanBySize("9000", 4, 2000);
   int count = 0;
   while (true) {
-    auto *r = iter->GetNext();
+    auto r = iter->GetNext();
     if (!r) {
       break;
     }
     ++count;
-    std::string key_str((char*)r + sizeof(bztree::Record), 4);
-    LOG(INFO) << count << " key=" << key_str;
+    std::string key_str(r->GetKey(), 4);
+//    LOG(INFO) << count << " key=" << key_str << std::endl;
   }
-  ASSERT_EQ(count, 10);
+  ASSERT_EQ(count, 1000);
 }
 
 int main(int argc, char **argv) {

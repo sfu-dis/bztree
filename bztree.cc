@@ -811,13 +811,15 @@ ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
       source_addr + meta.GetPaddedKeyLength())->GetValueProtected();
   return ReturnCode::Ok();
 }
-
 ReturnCode LeafNode::RangeScanBySize(const char *key1,
                                      uint32_t size1,
-                                     uint32_t *to_scan,
-                                     std::vector<Record *> *result,
+                                     uint32_t to_scan,
+                                     std::list<std::unique_ptr<Record>> *result,
                                      pmwcas::DescriptorPool *pmwcas_pool) {
-  if (*to_scan == 0) {
+  thread_local std::vector<Record *> tmp_result;
+  tmp_result.clear();
+
+  if (to_scan == 0) {
     return ReturnCode::Ok();
   }
 
@@ -825,26 +827,27 @@ ReturnCode LeafNode::RangeScanBySize(const char *key1,
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
   // Have to scan all keys
-  uint32_t i = 0;
   auto count = header.GetStatus().GetRecordCount();
   for (uint32_t i = 0; i < count; ++i) {
     auto curr_meta = GetMetadata(i);
     if (curr_meta.IsVisible()) {
-      int cmp = BaseNode::KeyCompare(key1, size1, GetKey(curr_meta), curr_meta.GetKeyLength());
+      int cmp = KeyCompare(key1, size1, GetKey(curr_meta), curr_meta.GetKeyLength());
       if (cmp <= 0) {
-        result->emplace_back(Record::New(curr_meta, this));
+        tmp_result.emplace_back(Record::New(curr_meta, this));
       }
     }
   }
 
-  std::sort(result->begin(), result->end(),
+  std::sort(tmp_result.begin(), tmp_result.end(),
             [this](Record *a, Record *b) -> bool {
-              auto cmp = BaseNode::KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
-                                              b->GetKey(), b->meta.GetKeyLength());
+              auto cmp = KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
+                                    b->GetKey(), b->meta.GetKeyLength());
               return cmp < 0;
             });
 
-  *to_scan = result->size() > count ? 0 : *to_scan - count;
+  for (auto item:tmp_result) {
+    result->emplace_back(item);
+  }
   return ReturnCode::Ok();
 }
 
@@ -1504,7 +1507,7 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
   }
 
   for (uint32_t i = 0; i < parameters.leaf_node_size / kCacheLineSize; ++i) {
-    __builtin_prefetch((const void *)((char *)node + i * kCacheLineSize), 0, 3);
+    __builtin_prefetch((const void *) ((char *) node + i * kCacheLineSize), 0, 3);
   }
   return reinterpret_cast<LeafNode *>(node);
 }

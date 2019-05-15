@@ -472,8 +472,8 @@ class LeafNode : public BaseNode {
 
   ReturnCode RangeScanBySize(const char *key1,
                              uint32_t size1,
-                             uint32_t *to_scan,
-                             std::vector<Record *> *result,
+                             uint32_t to_scan,
+                             std::list<std::unique_ptr<Record>> *result,
                              pmwcas::DescriptorPool *pmwcas_pool);
 
   // Consolidate all records in sorted order
@@ -600,10 +600,6 @@ class BzTree {
   ReturnCode Upsert(const char *key, uint16_t key_size, uint64_t payload);
   ReturnCode Delete(const char *key, uint16_t key_size);
 
-  inline std::unique_ptr<Iterator> RangeScanByKey(const char *key1, uint16_t size1,
-                                                  const char *key2, uint16_t size2) {
-    return std::make_unique<Iterator>(this, key1, size1, key2, size2);
-  }
   inline std::unique_ptr<Iterator> RangeScanBySize(const char *key1, uint16_t size1,
                                                    uint32_t scan_size) {
     return std::make_unique<Iterator>(this, key1, size1, scan_size);
@@ -663,121 +659,62 @@ class BzTree {
 
 class Iterator {
  public:
-  explicit Iterator(BzTree *tree,
-                    const char *begin_key,
-                    uint16_t begin_size,
-                    const char *end_key,
-                    uint16_t end_size) {
-    this->begin_key = begin_key;
-    this->end_key = end_key;
-    this->begin_size = begin_size;
-    this->end_size = end_size;
-    this->tree = tree;
-    this->scan_size = ~uint32_t{0};
+  explicit Iterator(BzTree *tree, const char *begin_key, uint16_t begin_size, uint32_t scan_size) :
+      key(begin_key), size(begin_size), tree(tree), remaining_size(scan_size) {
     node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScanByKey(begin_key, begin_size, end_key, end_size, &item_vec, tree->GetPMWCASPool());
-    item_it = item_vec.begin();
-    by_key = true;
+    node->RangeScanBySize(begin_key, begin_size, scan_size, &item_vec, tree->GetPMWCASPool());
   }
 
-  explicit Iterator(BzTree *tree, const char *begin_key, uint16_t begin_size, uint32_t scan_size) {
-    this->begin_key = begin_key;
-    this->end_key = nullptr;
-    this->begin_size = begin_size;
-    this->end_size = 0;
-    this->tree = tree;
-    this->scan_size = scan_size;
-    node = this->tree->TraverseToLeaf(nullptr, begin_key, begin_size);
-    node->RangeScanBySize(begin_key, begin_size, &scan_size, &item_vec, tree->GetPMWCASPool());
-    item_it = item_vec.begin();
-    by_key = false;
-  }
+  ~Iterator() = default;
 
-  ~Iterator() {
-    for (auto &v : item_vec) {
-      free(v);  // malloc-allocated Record
-    }
-  }
-
-  inline Record *GetNextByKey() {
-    if (item_vec.size() == 0) {
+  inline std::unique_ptr<Record> GetNext() {
+    if (item_vec.empty() || remaining_size == 0) {
       return nullptr;
     }
 
-    auto old_it = item_it;
-    if (item_it != item_vec.end()) {
-      item_it += 1;
-      return *old_it;
-    } else {
-      auto &last_record = item_vec.back();
-      node = this->tree->TraverseToLeaf(nullptr,
-                                        last_record->GetKey(),
-                                        last_record->meta.GetKeyLength(),
-                                        false);
-      if (node) {
-        item_vec.clear();
-        node->RangeScanByKey(last_record->GetKey(), last_record->meta.GetKeyLength(), end_key, end_size, &item_vec, tree->GetPMWCASPool());
-        item_it = item_vec.begin();
-        return GetNext();
-      } else {
-        return nullptr;
-      }
+    remaining_size -= 1;
+    // we have more than one record
+    if (item_vec.size() > 1) {
+      auto front = std::move(item_vec.front());
+      item_vec.pop_front();
+      return front;
     }
-  }
 
-  inline Record *GetNextBySize() {
-    if (item_vec.size() == 0) {
+    // there's only one record in the vector
+    auto last_record = std::move(item_vec.front());
+    item_vec.pop_front();
+
+    node = this->tree->TraverseToLeaf(nullptr,
+                                      last_record->GetKey(),
+                                      last_record->meta.GetKeyLength(),
+                                      false);
+    if (node == nullptr) {
       return nullptr;
     }
+    item_vec.clear();
+    const char *last_key = last_record->GetKey();
+    uint32_t last_len = last_record->meta.GetKeyLength();
+    node->RangeScanBySize(last_key, last_len, remaining_size, &item_vec, tree->GetPMWCASPool());
 
-    auto old_it = item_it;
-    if (item_it != item_vec.end()) {
-      item_it += 1;
-      return *old_it;
-    } else {
-      auto &last_record = item_vec.back();
-      node = this->tree->TraverseToLeaf(nullptr,
-                                        last_record->GetKey(),
-                                        last_record->meta.GetKeyLength(),
-                                        false);
-      if (node) {
-        item_vec.clear();
-        const char *last_key = last_record->GetKey();
-        uint32_t last_len = last_record->meta.GetKeyLength();
-        node->RangeScanBySize(last_key, last_len, &scan_size, &item_vec, tree->GetPMWCASPool());
-
-        // Exclude the first which is the previous key
-        item_it = item_vec.begin();
-        Record *r = *item_it;
-        if (BaseNode::KeyCompare(last_key, last_len, r->GetKey(), r->meta.GetKeyLength()) == 0) {
-          ++item_it;
-        }
-
-        if (item_it == item_vec.end()) {
-          return nullptr;
-        }
-        return GetNext();
-      } else {
-        return nullptr;
-      }
+    // FIXME(hao): this a temp workaround
+    // should fix traverse to leaf instead
+    // check if we hit the same record
+    auto new_front = item_vec.front().get();
+    if (BaseNode::KeyCompare(new_front->GetKey(), new_front->meta.GetKeyLength(),
+                             last_record->GetKey(), last_record->meta.GetKeyLength()) == 0) {
+      item_vec.clear();
+      return last_record;
     }
-  }
-
-  inline Record *GetNext() {
-    return by_key ? GetNextByKey() : GetNextBySize();
+    return last_record;
   }
 
  private:
+  const char *key;
+  uint16_t size;
+  uint32_t remaining_size;
   BzTree *tree;
-  const char *begin_key;
-  uint16_t begin_size;
-  const char *end_key;
-  uint16_t end_size;
   LeafNode *node;
-  uint32_t scan_size;
-  bool by_key;
-  std::vector<Record *> item_vec;
-  std::vector<Record *>::iterator item_it;
+  std::list<std::unique_ptr<Record>> item_vec;
 };
 
 }  // namespace bztree
