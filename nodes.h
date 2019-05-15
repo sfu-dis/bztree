@@ -125,8 +125,8 @@ class LeafNode : public BaseNode {
 
   ReturnCode RangeScanBySize(const char *key1,
                              uint32_t size1,
-                             uint32_t *to_scan,
-                             std::vector<Record *> *result,
+                             uint32_t to_scan,
+                             std::list<std::unique_ptr<Record>> *result,
                              nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
 
   // Consolidate all records in sorted order

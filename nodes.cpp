@@ -148,7 +148,7 @@ InternalNode::InternalNode(uint32_t node_size,
   memcpy(ptr + padded_key_size, &right_child_addr, sizeof(right_child_addr));
 
   assert((uint64_t) ptr == (uint64_t)
-             this + sizeof(*this) + 2 * sizeof(RecordMetadata));
+      this + sizeof(*this) + 2 * sizeof(RecordMetadata));
 }
 
 InternalNode::InternalNode(uint32_t node_size,
@@ -337,7 +337,7 @@ bool InternalNode::PrepareForSplit(Stack &stack,
   if (parent == nullptr) {
     // Good!
     InternalNode::New(separator_key, separator_key_size,
-                      (uint64_t) * ptr_l, (uint64_t) * ptr_r, new_node);
+                      (uint64_t) *ptr_l, (uint64_t) *ptr_r, new_node);
     return true;
   }
   __builtin_prefetch((const void *) (parent), 0, 2);
@@ -356,7 +356,7 @@ bool InternalNode::PrepareForSplit(Stack &stack,
 
   return parent->PrepareForSplit(stack, split_threshold,
                                  separator_key, separator_key_size,
-                                 (uint64_t) * ptr_l, (uint64_t) * ptr_r,
+                                 (uint64_t) *ptr_l, (uint64_t) *ptr_r,
                                  new_node, pd, pool, backoff);
 }
 
@@ -679,7 +679,7 @@ ReturnCode LeafNode::Delete(const char *key,
 ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
                           nv_ptr<pmwcas::DescriptorPool> pmwcas_pool) {
   auto meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, nullptr,
-                               0, (uint32_t) - 1, false);
+                               0, (uint32_t) -1, false);
   if (meta.IsVacant()) {
     return ReturnCode::NotFound();
   }
@@ -692,10 +692,13 @@ ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
 
 ReturnCode LeafNode::RangeScanBySize(const char *key1,
                                      uint32_t size1,
-                                     uint32_t *to_scan,
-                                     std::vector<Record *> *result,
+                                     uint32_t to_scan,
+                                     std::list<std::unique_ptr<Record>> *result,
                                      nv_ptr<pmwcas::DescriptorPool> pmwcas_pool) {
-  if (*to_scan == 0) {
+  thread_local std::vector<Record *> tmp_result;
+  tmp_result.clear();
+
+  if (to_scan == 0) {
     return ReturnCode::Ok();
   }
 
@@ -709,19 +712,21 @@ ReturnCode LeafNode::RangeScanBySize(const char *key1,
     if (curr_meta.IsVisible()) {
       int cmp = KeyCompare(key1, size1, GetKey(curr_meta), curr_meta.GetKeyLength());
       if (cmp <= 0) {
-        result->emplace_back(Record::New(curr_meta, this));
+        tmp_result.emplace_back(Record::New(curr_meta, this));
       }
     }
   }
 
-  std::sort(result->begin(), result->end(),
+  std::sort(tmp_result.begin(), tmp_result.end(),
             [this](Record *a, Record *b) -> bool {
               auto cmp = KeyCompare(a->GetKey(), a->meta.GetKeyLength(),
                                     b->GetKey(), b->meta.GetKeyLength());
               return cmp < 0;
             });
 
-  *to_scan = result->size() > count ? 0 : *to_scan - count;
+  for (auto item:tmp_result) {
+    result->emplace_back(item);
+  }
   return ReturnCode::Ok();
 }
 
