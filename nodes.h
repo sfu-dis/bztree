@@ -85,6 +85,7 @@ class LeafNode : public BaseNode {
 
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
                     nv_ptr<pmwcas::DescriptorPool> pmwcas_pool, uint32_t split_threshold);
+
   bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
                        pmwcas::Descriptor *pd,
                        nv_ptr<pmwcas::DescriptorPool> pmwcas_pool,

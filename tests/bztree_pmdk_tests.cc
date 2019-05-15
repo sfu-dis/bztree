@@ -130,7 +130,7 @@ GTEST_TEST(BztreePMEMTest, MiltiInsertTest) {
   new(pool.get_direct()) pmwcas::DescriptorPool(pool_size, thread_count, false);
 
   bztree::ParameterSet param(3072, 0, 4096);
-  new(bztree)bztree::BzTree(param, pool, reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));
+  new(bztree)bztree::BzTree(param, pool);
 
   MultiThreadUpsertTest t(item_per_thread, thread_count, bztree);
   t.Run(thread_count);

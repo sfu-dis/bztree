@@ -294,7 +294,7 @@ struct Stack {
   Frame frames[kMaxFrames];
   uint32_t num_frames;
   BzTree *tree;
-  nv_ptr<BaseNode> root;
+  BaseNode *root;
 
   Stack() : num_frames(0) {}
   ~Stack() { num_frames = 0; }
@@ -307,13 +307,13 @@ struct Stack {
   }
   inline Frame *Pop() { return num_frames == 0 ? nullptr : &frames[--num_frames]; }
   inline void Clear() {
-    root = nv_ptr<BaseNode>();
+    root = nullptr;
     num_frames = 0;
   }
   inline bool IsEmpty() { return num_frames == 0; }
   inline Frame *Top() { return num_frames == 0 ? nullptr : &frames[num_frames - 1]; }
-  inline nv_ptr<BaseNode> GetRoot() { return root; }
-  inline void SetRoot(nv_ptr<BaseNode> node) { root = node; }
+  inline BaseNode *GetRoot() { return root; }
+  inline void SetRoot(BaseNode *node) { root = node; }
 };
 }
 

@@ -19,10 +19,9 @@ pmwcas::PMDKAllocator *Allocator::allocator_ = nullptr;
 
 uint64_t global_epoch = 0;
 
-BzTree::BzTree(const bztree::ParameterSet &param, bztree::nv_ptr<pmwcas::DescriptorPool> pool, uint64_t pmdk_addr)
+BzTree::BzTree(const bztree::ParameterSet &param, bztree::nv_ptr<pmwcas::DescriptorPool> pool)
     : parameters(param),
       root(),
-      pmdk_addr(pmdk_addr),
       index_epoch(0),
       pmwcas_pool(pool) {
   global_epoch = index_epoch;
@@ -55,7 +54,7 @@ BzTree *BzTree::New(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> po
   return tree;
 }
 
-nv_ptr<BaseNode> BzTree::GetRootNodeSafe() {
+nv_ptr<BaseNode> BzTree::GetRootNode() {
   auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
       &root)->GetValueProtected();
   return nv_ptr<BaseNode>(root_node);
@@ -65,11 +64,10 @@ BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
                                  const char *key, uint16_t key_size,
                                  bztree::BaseNode *stop_at,
                                  bool le_child) {
-  nv_ptr<BaseNode> nv_node = GetRootNodeSafe();
+  auto node = GetRootNode().get_direct();
   if (stack) {
-    stack->SetRoot(nv_node);
+    stack->SetRoot(node);
   }
-  auto node = nv_node.get_direct();
   InternalNode *parent = nullptr;
   uint32_t meta_index = 0;
   while (node != stop_at && !node->IsLeaf()) {
@@ -89,12 +87,11 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
                                  uint16_t key_size,
                                  bool le_child) {
   static const uint32_t kCacheLineSize = 64;
-  nv_ptr<BaseNode> nv_node = GetRootNodeSafe();
-  auto *node = nv_node.get_direct();
+  auto *node = GetRootNode().get_direct();
   __builtin_prefetch((const void *) (node), 0, 3);
 
   if (stack) {
-    stack->SetRoot(nv_node);
+    stack->SetRoot(node);
   }
   InternalNode *parent = nullptr;
   uint32_t meta_index = 0;
@@ -230,7 +227,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
       // No grand parent or already popped out by during split propagation
       // In case of PMDK, ptr_parent is already in PMDK offset format (done by
       // InternalNode::New).
-      ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot().get_offset()), *ptr_parent, pd);
+      ChangeRoot(reinterpret_cast<uint64_t>(nv_ptr<BaseNode>(stack.GetRoot()).get_offset()), *ptr_parent, pd);
     }
   }
 }
@@ -347,7 +344,7 @@ void BzTree::Dump() {
   std::cout << "-----------------------------" << std::endl;
   std::cout << "Dumping tree with root node: " << root.get_direct() << std::endl;
   // Traverse each level and dump each node
-  auto real_root = GetRootNodeSafe();
+  auto real_root = GetRootNode();
   if (real_root->IsLeaf()) {
     (reinterpret_cast<LeafNode *>(real_root.get_direct())->Dump(pmwcas_pool->GetEpoch()));
   } else {

@@ -25,7 +25,7 @@ class Iterator;
 class BzTree {
  public:
   // init a new tree
-  explicit BzTree(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool, uint64_t pmdk_addr = 0);
+  explicit BzTree(const ParameterSet &param, nv_ptr<pmwcas::DescriptorPool> pool);
 
 #ifdef PMEM
   void Recovery();
@@ -59,26 +59,19 @@ class BzTree {
                            BaseNode *stop_at = nullptr,
                            bool le_child = true);
 
-  inline uint64_t GetPMDKAddr() {
-    return pmdk_addr;
-  }
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
 
-  inline uint64_t GetEpoch() {
-    return index_epoch;
-  }
+  inline nv_ptr<BaseNode> GetRootNode();
 
   ParameterSet parameters;
 
   nv_ptr<pmwcas::DescriptorPool> pmwcas_pool;
 
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
-
  private:
   nv_ptr<BaseNode> root;
-  uint64_t pmdk_addr;
-  uint64_t index_epoch;
 
-  inline nv_ptr<BaseNode> GetRootNodeSafe();
+  // epoch of this tree
+  uint64_t index_epoch;
 };
 
 class Iterator {

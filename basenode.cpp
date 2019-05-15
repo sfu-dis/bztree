@@ -293,7 +293,7 @@ ReturnCode BaseNode::CheckMerge(Stack *stack, const char *key,
   auto grandpa_frame = stack->Top();
   ReturnCode rc;
   if (!grandpa_frame) {
-    rc = stack->tree->ChangeRoot(reinterpret_cast<uint64_t>(stack->GetRoot().get_offset()),
+    rc = stack->tree->ChangeRoot(reinterpret_cast<uint64_t>(nv_ptr<BaseNode>(stack->GetRoot()).get_offset()),
                                  reinterpret_cast<uint64_t>(*new_parent), pd) ?
          ReturnCode::Ok() : ReturnCode::PMWCASFailure();
     return rc;
