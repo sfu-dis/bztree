@@ -703,7 +703,6 @@ ReturnCode LeafNode::RangeScanBySize(const char *key1,
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
   // Have to scan all keys
-  uint32_t i = 0;
   auto count = header.GetStatus().GetRecordCount();
   for (uint32_t i = 0; i < count; ++i) {
     auto curr_meta = GetMetadata(i);
