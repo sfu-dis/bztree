@@ -296,7 +296,7 @@ TEST_F(BzTreeTest, RangeScanBySize) {
     tree->Insert(key.c_str(), static_cast<uint16_t>(key.length()), i);
   }
 
-  auto iter = tree->RangeScanBySize("9000", 4, 2000);
+  auto iter = tree->RangeScanBySize("9000", 4, 100);
   int count = 0;
   while (true) {
     auto r = iter->GetNext();
@@ -306,6 +306,18 @@ TEST_F(BzTreeTest, RangeScanBySize) {
     ++count;
     std::string key_str(r->GetKey(), 4);
 //    LOG(INFO) << count << " key=" << key_str << std::endl;
+  }
+  ASSERT_EQ(count, 100);
+
+  iter = tree->RangeScanBySize("9000", 4, 2000);
+  count = 0;
+  while (true) {
+    auto r = iter->GetNext();
+    if (!r) {
+      break;
+    }
+    ++count;
+    std::string key_str(r->GetKey(), 4);
   }
   ASSERT_EQ(count, 1000);
 }

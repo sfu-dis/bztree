@@ -699,11 +699,13 @@ class Iterator {
     // FIXME(hao): this a temp workaround
     // should fix traverse to leaf instead
     // check if we hit the same record
-    auto new_front = item_vec.front().get();
-    if (BaseNode::KeyCompare(new_front->GetKey(), new_front->meta.GetKeyLength(),
-                             last_record->GetKey(), last_record->meta.GetKeyLength()) == 0) {
-      item_vec.clear();
-      return last_record;
+    if (!item_vec.empty()) {
+      auto new_front = item_vec.front().get();
+      if (BaseNode::KeyCompare(new_front->GetKey(), new_front->meta.GetKeyLength(),
+                               last_record->GetKey(), last_record->meta.GetKeyLength()) == 0) {
+        item_vec.clear();
+        return last_record;
+      }
     }
     return last_record;
   }
