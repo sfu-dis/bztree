@@ -45,6 +45,11 @@ class InternalNode : public BaseNode {
     return reinterpret_cast<uint64_t *>(ptr);
   }
 
+  inline uint64_t GetPayloadProtected(RecordMetadata meta) {
+    return reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
+        GetPayloadPtr(meta))->GetValueProtected();
+  }
+
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
                     pmwcas::Descriptor *pd);
 
@@ -52,10 +57,8 @@ class InternalNode : public BaseNode {
 
   // epoch here is required: record ptr might be a desc due to UPDATE operation
   // but record_metadata don't need a epoch
-  inline BaseNode *GetChildByMetaIndex(uint32_t index, pmwcas::EpochManager *epoch) {
-    uint64_t child_addr;
-    GetRawRecord(record_metadata[index], nullptr, nullptr, &child_addr, epoch);
-
+  inline BaseNode *GetChildByMetaIndex(uint32_t index) {
+    uint64_t child_addr = GetPayloadProtected(record_metadata[index]);
 #ifdef PMDK
     return Allocator::Get()->GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
 #else
@@ -105,8 +108,7 @@ class LeafNode : public BaseNode {
   // inserted to the node. Note end_it is non-inclusive.
   void CopyFrom(LeafNode *node,
                 std::vector<RecordMetadata>::iterator begin_it,
-                std::vector<RecordMetadata>::iterator end_it,
-                pmwcas::EpochManager *epoch);
+                std::vector<RecordMetadata>::iterator end_it);
 
   ReturnCode Update(const char *key, uint16_t key_size, uint64_t payload,
                     nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
@@ -133,16 +135,15 @@ class LeafNode : public BaseNode {
 
   // Specialized GetRawRecord for leaf node only (key can't be nullptr)
   inline bool GetRawRecord(RecordMetadata meta, char **key,
-                           uint64_t *payload, pmwcas::EpochManager *epoch = nullptr) {
+                           uint64_t *payload) {
     char *unused = nullptr;
-    return BaseNode::GetRawRecord(meta, &unused, key, payload, epoch);
+    return BaseNode::GetRawRecord(meta, &unused, key, payload);
   }
 
   // Make sure this node is frozen before calling this function
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
-                             bool visible_only,
-                             pmwcas::EpochManager *epoch);
-  void Dump(pmwcas::EpochManager *epoch);
+                             bool visible_only);
+  void Dump();
 
  private:
 

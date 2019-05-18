@@ -377,7 +377,7 @@ void LeafNode::New(LeafNode **mem, uint32_t node_size) {
 #endif  // PMDK
 }
 
-void LeafNode::Dump(pmwcas::EpochManager *epoch) {
+void LeafNode::Dump() {
   BaseNode::Dump();
   std::cout << " Key-Payload Pairs:" << std::endl;
   for (uint32_t i = 0; i < header.status.GetRecordCount(); ++i) {
@@ -385,7 +385,7 @@ void LeafNode::Dump(pmwcas::EpochManager *epoch) {
     if (meta.IsVisible()) {
       uint64_t payload = 0;
       char *key = nullptr;
-      GetRawRecord(meta, &key, &payload, epoch);
+      GetRawRecord(meta, &key, &payload);
       assert(key);
       std::string keystr(key, key + meta.GetKeyLength());
       std::cout << " - record " << i << ": key = " << keystr
@@ -423,7 +423,7 @@ void InternalNode::Dump(pmwcas::EpochManager *epoch, bool dump_children) {
       BaseNode *node = reinterpret_cast<BaseNode *>(node_addr);
 #endif
       if (node->IsLeaf()) {
-        (reinterpret_cast<LeafNode *>(node))->Dump(epoch);
+        (reinterpret_cast<LeafNode *>(node))->Dump();
       } else {
         (reinterpret_cast<InternalNode *>(node))->Dump(epoch, true);
       }
@@ -623,7 +623,7 @@ ReturnCode LeafNode::Update(const char *key,
 
   char *record_key = nullptr;
   uint64_t record_payload = 0;
-  GetRawRecord(metadata, &record_key, &record_payload, pmwcas_pool->GetEpoch());
+  GetRawRecord(metadata, &record_key, &record_payload);
   if (payload == record_payload) {
     return ReturnCode::Ok();
   }
@@ -748,7 +748,7 @@ ReturnCode LeafNode::RangeScanByKey(const char *key1,
       continue;
     }
     char *curr_key;
-    GetRawRecord(curr_meta, &curr_key, nullptr, pmwcas_pool->GetEpoch());
+    GetRawRecord(curr_meta, &curr_key, nullptr);
     auto range_code = KeyInRange(curr_key, curr_meta.GetKeyLength(), key1, size1, key2, size2);
     if (range_code == 0) {
       result->emplace_back(Record::New(curr_meta, this));
@@ -777,12 +777,12 @@ LeafNode *LeafNode::Consolidate(nv_ptr<pmwcas::DescriptorPool> pmwcas_pool) {
 
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
-  SortMetadataByKey(meta_vec, true, pmwcas_pool->GetEpoch());
+  SortMetadataByKey(meta_vec, true);
 
   // Allocate and populate a new node
   LeafNode *new_leaf = nullptr;
   LeafNode::New(&new_leaf, this->header.size);
-  new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end(), pmwcas_pool->GetEpoch());
+  new_leaf->CopyFrom(this, meta_vec.begin(), meta_vec.end());
 
 #ifdef PMEM
   pmwcas::NVRAM::Flush(this->header.size, new_leaf);
@@ -792,8 +792,7 @@ LeafNode *LeafNode::Consolidate(nv_ptr<pmwcas::DescriptorPool> pmwcas_pool) {
 }
 
 uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
-                                     bool visible_only,
-                                     pmwcas::EpochManager *epoch) {
+                                     bool visible_only) {
   // Node is frozen at this point
   // there should not be any on-going pmwcas
   assert(header.status.IsFrozen());
@@ -824,8 +823,7 @@ uint32_t LeafNode::SortMetadataByKey(std::vector<RecordMetadata> &vec,
 
 void LeafNode::CopyFrom(LeafNode *node,
                         std::vector<RecordMetadata>::iterator begin_it,
-                        std::vector<RecordMetadata>::iterator end_it,
-                        pmwcas::EpochManager *epoch) {
+                        std::vector<RecordMetadata>::iterator end_it) {
   // meta_vec is assumed to be in sorted order, insert records one by one
   uint32_t offset = this->header.size;
   uint16_t nrecords = 0;
@@ -833,7 +831,7 @@ void LeafNode::CopyFrom(LeafNode *node,
     auto meta = *it;
     uint64_t payload = 0;
     char *key;
-    node->GetRawRecord(meta, &key, &payload, epoch);
+    node->GetRawRecord(meta, &key, &payload);
 
     // Copy data
     assert(meta.GetTotalLength() >= sizeof(uint64_t));
@@ -1067,7 +1065,7 @@ bool LeafNode::PrepareForSplit(Stack &stack,
 
   thread_local std::vector<RecordMetadata> meta_vec;
   meta_vec.clear();
-  uint32_t total_size = SortMetadataByKey(meta_vec, true, pmwcas_pool->GetEpoch());
+  uint32_t total_size = SortMetadataByKey(meta_vec, true);
 
   int32_t left_size = total_size / 2;
   uint32_t nleft = 0;
@@ -1086,12 +1084,12 @@ bool LeafNode::PrepareForSplit(Stack &stack,
   auto left_end_it = meta_vec.begin() + nleft;
 #ifdef PMDK
   (Allocator::Get()->GetDirect(*left))->CopyFrom(this, meta_vec.begin(),
-                                                 left_end_it, pmwcas_pool->GetEpoch());
+                                                 left_end_it);
   (Allocator::Get()->GetDirect(*right))->CopyFrom(this, left_end_it,
-                                                  meta_vec.end(), pmwcas_pool->GetEpoch());
+                                                  meta_vec.end());
 #else
-  (*left)->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
-  (*right)->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
+  (*left)->CopyFrom(this, meta_vec.begin(), left_end_it);
+  (*right)->CopyFrom(this, left_end_it, meta_vec.end());
 #endif
 
   // Separator exists in the new left leaf node, i.e., when traversing the tree,

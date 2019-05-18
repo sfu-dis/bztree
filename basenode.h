@@ -68,7 +68,6 @@ class BaseNode {
 
   inline char *GetKey(RecordMetadata meta) {
     assert(meta.IsVisible());
-    uint64_t offset = meta.GetOffset();
     return &(reinterpret_cast<char *>(this))[meta.GetOffset()];
   }
 

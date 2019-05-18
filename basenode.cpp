@@ -12,9 +12,9 @@ namespace bztree {
 
 void BaseNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
-  std::cout << " Dumping node: " << this << (is_leaf ? " (leaf)" : " (internal)") << std::endl;
+  std::cout << " Dumping node: " << this << (IsLeaf()? " (leaf)" : " (internal)") << std::endl;
   std::cout << " Header:\n";
-  if (is_leaf) {
+  if (IsLeaf()) {
     std::cout << " - free space: " << GetFreeSpace()
               << std::endl;
   }
@@ -175,7 +175,7 @@ ReturnCode BaseNode::CheckMerge(Stack *stack, const char *key,
     if (meta_index < 0 || meta_index >= parent->GetHeader()->sorted_count) {
       return false;
     }
-    auto sibling = parent->GetChildByMetaIndex(meta_index, epoch);
+    auto sibling = parent->GetChildByMetaIndex(meta_index);
     if (sibling->IsLeaf()) {
       auto status = sibling->GetHeader()->GetStatus();
       auto valid_size = LeafNode::GetUsedSpace(status) - status.GetDeletedSize();
@@ -198,7 +198,7 @@ ReturnCode BaseNode::CheckMerge(Stack *stack, const char *key,
 
   // we found a suitable sibling
   // do the real merge
-  BaseNode *sibling = parent->GetChildByMetaIndex(sibling_index, epoch);
+  BaseNode *sibling = parent->GetChildByMetaIndex(sibling_index);
 
   // Phase 1: freeze both nodes, and their parent
   auto node_status = this->GetHeader()->GetStatus();

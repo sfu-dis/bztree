@@ -74,7 +74,7 @@ BaseNode *BzTree::TraverseToNode(bztree::Stack *stack,
     assert(!node->IsLeaf());
     parent = reinterpret_cast<InternalNode *>(node);
     meta_index = parent->GetChildIndex(key, key_size, le_child);
-    node = parent->GetChildByMetaIndex(meta_index, pmwcas_pool->GetEpoch());
+    node = parent->GetChildByMetaIndex(meta_index);
     assert(node);
     if (stack != nullptr) {
       stack->Push(parent, meta_index);
@@ -99,17 +99,16 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
   while (!node->IsLeaf()) {
     parent = reinterpret_cast<InternalNode *>(node);
     meta_index = parent->GetChildIndex(key, key_size, le_child);
-    node = parent->GetChildByMetaIndex(meta_index, pmwcas_pool->GetEpoch());
-    __builtin_prefetch((const void *) (node), 0, 3);
+    node = parent->GetChildByMetaIndex(meta_index);
     assert(node);
+    for (uint32_t i = 0; i < parameters.leaf_node_size / kCacheLineSize; ++i) {
+      __builtin_prefetch((const void *) ((char *) node + i * kCacheLineSize), 0, 3);
+    }
     if (stack != nullptr) {
       stack->Push(parent, meta_index);
     }
   }
 
-  for (uint32_t i = 0; i < parameters.leaf_node_size / kCacheLineSize; ++i) {
-    __builtin_prefetch((const void *) ((char *) node + i * kCacheLineSize), 0, 3);
-  }
   return reinterpret_cast<LeafNode *>(node);
 }
 
@@ -346,7 +345,7 @@ void BzTree::Dump() {
   // Traverse each level and dump each node
   auto real_root = GetRootNode();
   if (real_root->IsLeaf()) {
-    (reinterpret_cast<LeafNode *>(real_root.get_direct())->Dump(pmwcas_pool->GetEpoch()));
+    (reinterpret_cast<LeafNode *>(real_root.get_direct())->Dump());
   } else {
     (reinterpret_cast<InternalNode *>(real_root.get_direct()))->Dump(
         pmwcas_pool->GetEpoch(), true /* inlcude children */);
