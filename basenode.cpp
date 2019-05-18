@@ -75,8 +75,7 @@ bool BaseNode::GetRawRecord(RecordMetadata meta,
   return true;
 }
 
-RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
-                                          const char *key,
+RecordMetadata BaseNode::SearchRecordMeta(const char *key,
                                           uint32_t key_size,
                                           RecordMetadata **out_metadata_ptr,
                                           uint32_t start_pos,
@@ -84,31 +83,19 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
                                           bool check_concurrency) {
   if (start_pos < header.sorted_count) {
     // Binary search on sorted field
-    int64_t first = start_pos;
-    int64_t last = std::min<uint32_t>(end_pos, header.sorted_count - 1);
-    int64_t middle;
-    while (header.sorted_count != 0 && first <= last) {
-      middle = (first + last) / 2;
-
-      RecordMetadata current = GetMetadata(static_cast<uint32_t>(middle));
-
-      char *current_key = nullptr;
-      GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
+    for (uint32_t i = start_pos; i < header.sorted_count; i++) {
+      RecordMetadata current = GetMetadata(static_cast<uint32_t>(i));
+      char *current_key = GetKey(current);
       assert(current_key || !is_leaf);
-
       auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
-      if (cmp_result < 0) {
-        last = middle - 1;
-      } else if (cmp_result == 0) {
+      if (cmp_result == 0) {
         if (!current.IsVisible()) {
           break;
         }
         if (out_metadata_ptr) {
-          *out_metadata_ptr = record_metadata + middle;
+          *out_metadata_ptr = record_metadata + i;
         }
         return current;
-      } else {
-        first = middle + 1;
       }
     }
   }

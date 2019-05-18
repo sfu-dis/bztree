@@ -532,7 +532,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
                                            uint32_t key_size,
                                            pmwcas::EpochManager *epoch) {
-  auto metadata = SearchRecordMeta(epoch, key, key_size, nullptr);
+  auto metadata = SearchRecordMeta(key, key_size, nullptr);
   if (metadata.IsVacant()) {
     return IsUnique;
   }
@@ -614,7 +614,7 @@ ReturnCode LeafNode::Update(const char *key,
   }
 
   RecordMetadata *meta_ptr = nullptr;
-  auto metadata = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, &meta_ptr);
+  auto metadata = SearchRecordMeta(key, key_size, &meta_ptr);
   if (metadata.IsVacant()) {
     return ReturnCode::NotFound();
   } else if (metadata.IsInserting()) {
@@ -653,7 +653,7 @@ ReturnCode LeafNode::Delete(const char *key,
   }
 
   RecordMetadata *meta_ptr = nullptr;
-  auto metadata = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, &meta_ptr);
+  auto metadata = SearchRecordMeta(key, key_size, &meta_ptr);
   if (metadata.IsVacant()) {
     return ReturnCode::NotFound();
   } else if (metadata.IsInserting()) {
@@ -676,9 +676,8 @@ ReturnCode LeafNode::Delete(const char *key,
   }
   return ReturnCode::Ok();
 }
-ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload,
-                          nv_ptr<pmwcas::DescriptorPool> pmwcas_pool) {
-  auto meta = SearchRecordMeta(pmwcas_pool->GetEpoch(), key, key_size, nullptr,
+ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload) {
+  auto meta = SearchRecordMeta(key, key_size, nullptr,
                                0, (uint32_t) -1, false);
   if (meta.IsVacant()) {
     return ReturnCode::NotFound();
@@ -920,35 +919,16 @@ uint32_t InternalNode::GetChildIndex(const char *key,
                                      uint16_t key_size,
                                      bool get_le) {
   // Keys in internal nodes are always sorted, visible
-  int32_t left = 0, right = header.sorted_count - 1, mid = 0;
-  while (true) {
-    mid = (left + right) / 2;
-    auto meta = record_metadata[mid];
-    char *record_key = nullptr;
-    GetRawRecord(meta, nullptr, &record_key, nullptr, nullptr);
+  for (uint32_t i = 1; i < header.sorted_count; i++) {
+    auto meta = record_metadata[i];
+    char *record_key = GetKey(meta);
     auto cmp = KeyCompare(key, key_size, record_key, meta.GetKeyLength());
-    if (cmp == 0) {
-      // Key exists
-      if (get_le) {
-        return static_cast<uint32_t>(mid - 1);
-      } else {
-        return static_cast<uint32_t>(mid);
-      }
-    }
-    if (left > right) {
-      if (cmp <= 0 && get_le) {
-        return static_cast<uint32_t>(mid - 1);
-      } else {
-        return static_cast<uint32_t> (mid);
-      }
-    } else {
-      if (cmp > 0) {
-        left = mid + 1;
-      } else {
-        right = mid - 1;
-      }
+    if (cmp <= 0) {
+//       Key exists
+      return i - get_le;
     }
   }
+  return header.sorted_count - 1;
 }
 
 bool InternalNode::MergeNodes(InternalNode *left_node,

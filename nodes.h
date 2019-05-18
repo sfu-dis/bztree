@@ -113,8 +113,7 @@ class LeafNode : public BaseNode {
 
   ReturnCode Delete(const char *key, uint16_t key_size, nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
 
-  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload,
-                  nv_ptr<pmwcas::DescriptorPool> pmwcas_pool);
+  ReturnCode Read(const char *key, uint16_t key_size, uint64_t *payload);
 
   ReturnCode RangeScanByKey(const char *key1,
                             uint32_t size1,

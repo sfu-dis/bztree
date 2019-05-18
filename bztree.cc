@@ -253,7 +253,7 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
     return ReturnCode::NotFound();
   }
   uint64_t tmp_payload;
-  auto rc = node->Read(key, key_size, &tmp_payload, pmwcas_pool);
+  auto rc = node->Read(key, key_size, &tmp_payload);
   if (rc.IsOk()) {
     *payload = tmp_payload;
   }
@@ -289,7 +289,7 @@ ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) 
     return Insert(key, key_size, payload);
   }
   uint64_t tmp_payload;
-  auto rc = node->Read(key, key_size, &tmp_payload, pmwcas_pool);
+  auto rc = node->Read(key, key_size, &tmp_payload);
   if (rc.IsNotFound()) {
     return Insert(key, key_size, payload);
   } else if (rc.IsOk()) {
