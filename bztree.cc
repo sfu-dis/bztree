@@ -242,12 +242,9 @@ bool BzTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr,
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
-  thread_local Stack stack;
-  stack.tree = this;
-  stack.Clear();
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
-  LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+  LeafNode *node = TraverseToLeaf(nullptr, key, key_size);
   if (node == nullptr) {
     return ReturnCode::NotFound();
   }
@@ -260,13 +257,10 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
 }
 
 ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack;
-  stack.tree = this;
   ReturnCode rc;
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
   do {
-    stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+    LeafNode *node = TraverseToLeaf(nullptr, key, key_size);
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
@@ -276,12 +270,9 @@ ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) 
 }
 
 ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack;
-  stack.tree = this;
-  stack.Clear();
   pmwcas::EpochGuard guard(pmwcas_pool->GetEpoch());
 
-  LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+  LeafNode *node = TraverseToLeaf(nullptr, key, key_size);
   // FIXME(tzwang): be more clever here to get the node this record would be
   // landing in?
   if (node == nullptr) {
@@ -309,8 +300,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   pmwcas::EpochGuard guard(epoch);
   LeafNode *node;
   do {
-    stack.Clear();
-    node = TraverseToLeaf(&stack, key, key_size);
+    node = TraverseToLeaf(nullptr, key, key_size);
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }

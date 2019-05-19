@@ -149,7 +149,7 @@ class LeafNode : public BaseNode {
 
   enum Uniqueness { IsUnique, Duplicate, ReCheck, NodeFrozen };
 
-  Uniqueness CheckUnique(const char *key, uint32_t key_size, pmwcas::EpochManager *epoch);
+  Uniqueness CheckUnique(const char *key, uint32_t key_size);
 
   Uniqueness RecheckUnique(const char *key,
                            uint32_t key_size,

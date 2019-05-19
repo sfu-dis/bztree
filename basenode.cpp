@@ -12,7 +12,7 @@ namespace bztree {
 
 void BaseNode::Dump() {
   std::cout << "-----------------------------" << std::endl;
-  std::cout << " Dumping node: " << this << (IsLeaf()? " (leaf)" : " (internal)") << std::endl;
+  std::cout << " Dumping node: " << this << (IsLeaf() ? " (leaf)" : " (internal)") << std::endl;
   std::cout << " Header:\n";
   if (IsLeaf()) {
     std::cout << " - free space: " << GetFreeSpace()
@@ -78,54 +78,48 @@ bool BaseNode::GetRawRecord(RecordMetadata meta,
 RecordMetadata BaseNode::SearchRecordMeta(const char *key,
                                           uint32_t key_size,
                                           RecordMetadata **out_metadata_ptr,
-                                          uint32_t start_pos,
-                                          uint32_t end_pos,
                                           bool check_concurrency) {
-  if (start_pos < header.sorted_count) {
-    // Binary search on sorted field
-    for (uint32_t i = start_pos; i < header.sorted_count; i++) {
-      RecordMetadata current = GetMetadata(static_cast<uint32_t>(i));
-      char *current_key = GetKey(current);
-      assert(current_key || !is_leaf);
-      auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
-      if (cmp_result == 0) {
-        if (!current.IsVisible()) {
-          break;
-        }
+  // Binary search on sorted field
+  for (uint32_t i = 0; i < header.sorted_count; i++) {
+    RecordMetadata current = GetMetadata(i);
+    char *current_key = GetKey(current);
+    assert(current_key || !is_leaf);
+    auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
+    if (cmp_result == 0) {
+      if (!current.IsVisible()) {
+        break;
+      }
+      if (out_metadata_ptr) {
+        *out_metadata_ptr = record_metadata + i;
+      }
+      return current;
+    }
+  }
+  // Linear search on unsorted field
+//  uint32_t linear_end = std::min<uint32_t>(header.GetStatus().GetRecordCount(), end_pos);
+  for (uint32_t i = header.sorted_count; i < header.GetStatus().GetRecordCount(); i++) {
+    RecordMetadata current = GetMetadata(i);
+
+    if (current.IsInserting()) {
+      if (check_concurrency) {
+        // Encountered an in-progress insert, recheck later
         if (out_metadata_ptr) {
           *out_metadata_ptr = record_metadata + i;
         }
         return current;
+      } else {
+        continue;
       }
     }
-  }
-  if (end_pos > header.sorted_count) {
-    // Linear search on unsorted field
-    uint32_t linear_end = std::min<uint32_t>(header.GetStatus().GetRecordCount(), end_pos);
-    for (uint32_t i = header.sorted_count; i < linear_end; i++) {
-      RecordMetadata current = GetMetadata(i);
 
-      if (current.IsInserting()) {
-        if (check_concurrency) {
-          // Encountered an in-progress insert, recheck later
-          if (out_metadata_ptr) {
-            *out_metadata_ptr = record_metadata + i;
-          }
-          return current;
-        } else {
-          continue;
+    if (current.IsVisible()) {
+      auto current_size = current.GetKeyLength();
+      if (current_size == key_size &&
+          KeyCompare(key, key_size, GetKey(current), current_size) == 0) {
+        if (out_metadata_ptr) {
+          *out_metadata_ptr = record_metadata + i;
         }
-      }
-
-      if (current.IsVisible()) {
-        auto current_size = current.GetKeyLength();
-        if (current_size == key_size &&
-            KeyCompare(key, key_size, GetKey(current), current_size) == 0) {
-          if (out_metadata_ptr) {
-            *out_metadata_ptr = record_metadata + i;
-          }
-          return current;
-        }
+        return current;
       }
     }
   }

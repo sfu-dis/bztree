@@ -441,7 +441,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
     return ReturnCode::NodeFrozen();
   }
 
-  auto uniqueness = CheckUnique(key, key_size, pmwcas_pool->GetEpoch());
+  auto uniqueness = CheckUnique(key, key_size);
   if (uniqueness == Duplicate) {
     return ReturnCode::KeyExists();
   }
@@ -530,8 +530,7 @@ ReturnCode LeafNode::Insert(const char *key, uint16_t key_size, uint64_t payload
 }
 
 LeafNode::Uniqueness LeafNode::CheckUnique(const char *key,
-                                           uint32_t key_size,
-                                           pmwcas::EpochManager *epoch) {
+                                           uint32_t key_size) {
   auto metadata = SearchRecordMeta(key, key_size, nullptr);
   if (metadata.IsVacant()) {
     return IsUnique;
@@ -677,8 +676,7 @@ ReturnCode LeafNode::Delete(const char *key,
   return ReturnCode::Ok();
 }
 ReturnCode LeafNode::Read(const char *key, uint16_t key_size, uint64_t *payload) {
-  auto meta = SearchRecordMeta(key, key_size, nullptr,
-                               0, (uint32_t) -1, false);
+  auto meta = SearchRecordMeta(key, key_size, nullptr, false);
   if (meta.IsVacant()) {
     return ReturnCode::NotFound();
   }

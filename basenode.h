@@ -52,8 +52,6 @@ class BaseNode {
   // if check_concurrency is false, it will ignore all inserting record
   RecordMetadata SearchRecordMeta(const char *key, uint32_t key_size,
                                   RecordMetadata **out_metadata,
-                                  uint32_t start_pos = 0,
-                                  uint32_t end_pos = (uint32_t) -1,
                                   bool check_concurrency = true);
 
   // Get the key and payload (8-byte), not thread-safe
