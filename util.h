@@ -64,6 +64,15 @@ struct ReturnCode {
   static inline ReturnCode NotEnoughSpace() { return ReturnCode(RetNotEnoughSpace); }
 };
 
+static const inline int my_memcmp(const char *key1, const char *key2, uint32_t size) {
+  for (uint32_t i = 0; i < size; i++) {
+    if (key1[i] != key2[i]) {
+      return key1[i] - key2[i];
+    }
+  }
+  return 0;
+}
+
 static const inline int KeyCompare(const char *key1, uint32_t size1,
                                    const char *key2, uint32_t size2) {
   if (!key1) {
@@ -71,8 +80,12 @@ static const inline int KeyCompare(const char *key1, uint32_t size1,
   } else if (!key2) {
     return 1;
   }
-
-  auto cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+  int cmp;
+  if (std::min(size1, size2) < 16) {
+    cmp = my_memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+  } else {
+    cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+  }
   if (cmp == 0) {
     return size1 - size2;
   }
