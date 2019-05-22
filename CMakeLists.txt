@@ -230,6 +230,8 @@ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
 if(${CMAKE_BUILD_TYPE} STREQUAL "Profile")
   add_compile_definitions("PROFILE")
   link_libraries("-lprofiler")
+elseif(${CMAKE_BUILD_TYPE} STREQUAL "Release")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Ofast -march=native")
 endif()
 
 set_property(GLOBAL APPEND PROPERTY BZTREE_SRC
