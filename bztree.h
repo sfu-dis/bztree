@@ -197,6 +197,15 @@ struct RecordMetadata {
   }
 };
 
+static const inline int my_memcmp(const char *key1, const char *key2, uint32_t size) {
+  for (uint32_t i = 0; i < size; i++) {
+    if (key1[i] != key2[i]) {
+      return key1[i] - key2[i];
+    }
+  }
+  return 0;
+}
+
 class Stack;
 class BaseNode {
  protected:
@@ -227,14 +236,17 @@ class BaseNode {
  public:
   static const inline int KeyCompare(const char *key1, uint32_t size1,
                                      const char *key2, uint32_t size2) {
-    ALWAYS_ASSERT(key1 || key2);
     if (!key1) {
       return -1;
     } else if (!key2) {
       return 1;
     }
-
-    auto cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+    int cmp;
+    if (std::min(size1, size2) < 16) {
+      cmp = my_memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+    } else {
+      cmp = memcmp(key1, key2, std::min<uint32_t>(size1, size2));
+    }
     if (cmp == 0) {
       return size1 - size2;
     }

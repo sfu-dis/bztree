@@ -702,63 +702,47 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
                                           uint32_t start_pos,
                                           uint32_t end_pos,
                                           bool check_concurrency) {
-  if (start_pos < header.sorted_count) {
-    // Binary search on sorted field
-    int64_t first = start_pos;
-    int64_t last = std::min<uint32_t>(end_pos, header.sorted_count - 1);
-    int64_t middle;
-    while (header.sorted_count != 0 && first <= last) {
-      middle = (first + last) / 2;
+  // Binary search on sorted field
+  for (uint32_t i = 0; i < header.sorted_count; i++) {
+    RecordMetadata current = GetMetadata(i);
+    char *current_key = GetKey(current);
+    assert(current_key || !is_leaf);
+    auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
+    if (cmp_result == 0) {
+      if (!current.IsVisible()) {
+        break;
+      }
+      if (out_metadata_ptr) {
+        *out_metadata_ptr = record_metadata + i;
+      }
+      return current;
+    }
+  }
+  // Linear search on unsorted field
+//  uint32_t linear_end = std::min<uint32_t>(header.GetStatus().GetRecordCount(), end_pos);
+  for (uint32_t i = header.sorted_count; i < header.GetStatus().GetRecordCount(); i++) {
+    RecordMetadata current = GetMetadata(i);
 
-      RecordMetadata current = GetMetadata(static_cast<uint32_t>(middle));
-
-      char *current_key = nullptr;
-      GetRawRecord(current, nullptr, &current_key, nullptr, epoch);
-      assert(current_key || !is_leaf);
-
-      auto cmp_result = KeyCompare(key, key_size, current_key, current.GetKeyLength());
-      if (cmp_result < 0) {
-        last = middle - 1;
-      } else if (cmp_result == 0) {
-        if (!current.IsVisible()) {
-          break;
-        }
+    if (current.IsInserting()) {
+      if (check_concurrency) {
+        // Encountered an in-progress insert, recheck later
         if (out_metadata_ptr) {
-          *out_metadata_ptr = record_metadata + middle;
+          *out_metadata_ptr = record_metadata + i;
         }
         return current;
       } else {
-        first = middle + 1;
+        continue;
       }
     }
-  }
-  if (end_pos > header.sorted_count) {
-    // Linear search on unsorted field
-    uint32_t linear_end = std::min<uint32_t>(header.GetStatus().GetRecordCount(), end_pos);
-    for (uint32_t i = header.sorted_count; i < linear_end; i++) {
-      RecordMetadata current = GetMetadata(i);
 
-      if (current.IsInserting()) {
-        if (check_concurrency) {
-          // Encountered an in-progress insert, recheck later
-          if (out_metadata_ptr) {
-            *out_metadata_ptr = record_metadata + i;
-          }
-          return current;
-        } else {
-          continue;
+    if (current.IsVisible()) {
+      auto current_size = current.GetKeyLength();
+      if (current_size == key_size &&
+          KeyCompare(key, key_size, GetKey(current), current_size) == 0) {
+        if (out_metadata_ptr) {
+          *out_metadata_ptr = record_metadata + i;
         }
-      }
-
-      if (current.IsVisible()) {
-        auto current_size = current.GetKeyLength();
-        if (current_size == key_size &&
-            KeyCompare(key, key_size, GetKey(current), current_size) == 0) {
-          if (out_metadata_ptr) {
-            *out_metadata_ptr = record_metadata + i;
-          }
-          return current;
-        }
+        return current;
       }
     }
   }
@@ -1499,7 +1483,9 @@ LeafNode *BzTree::TraverseToLeaf(Stack *stack, const char *key,
     parent = reinterpret_cast<InternalNode *>(node);
     meta_index = parent->GetChildIndex(key, key_size, le_child);
     node = parent->GetChildByMetaIndex(meta_index, GetPMWCASPool()->GetEpoch());
-    __builtin_prefetch((const void *) (node), 0, 3);
+    for (uint32_t i = 0; i < parameters.leaf_node_size / kCacheLineSize; ++i) {
+      __builtin_prefetch((const void *) ((char *) node + i * kCacheLineSize), 0, 3);
+    }
     assert(node);
     if (stack != nullptr) {
       stack->Push(parent, meta_index);
@@ -1647,12 +1633,9 @@ bool BzTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr,
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
-  thread_local Stack stack;
-  stack.tree = this;
-  stack.Clear();
   pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
 
-  LeafNode *node = TraverseToLeaf(&stack, key, key_size);
+  LeafNode *node = TraverseToLeaf(nullptr, key, key_size);
   if (node == nullptr) {
     return ReturnCode::NotFound();
   }
@@ -1665,13 +1648,10 @@ ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {
 }
 
 ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack;
-  stack.tree = this;
   ReturnCode rc;
   pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
   do {
-    stack.Clear();
-    LeafNode *node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
+    LeafNode *node = TraverseToLeaf(nullptr, key, key_size, GetPMWCASPool());
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
@@ -1681,12 +1661,9 @@ ReturnCode BzTree::Update(const char *key, uint16_t key_size, uint64_t payload) 
 }
 
 ReturnCode BzTree::Upsert(const char *key, uint16_t key_size, uint64_t payload) {
-  thread_local Stack stack;
-  stack.tree = this;
-  stack.Clear();
   pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
 
-  LeafNode *node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
+  LeafNode *node = TraverseToLeaf(nullptr, key, key_size, GetPMWCASPool());
   // FIXME(tzwang): be more clever here to get the node this record would be
   // landing in?
   if (node == nullptr) {
@@ -1715,7 +1692,7 @@ ReturnCode BzTree::Delete(const char *key, uint16_t key_size) {
   LeafNode *node;
   do {
     stack.Clear();
-    node = TraverseToLeaf(&stack, key, key_size, GetPMWCASPool());
+    node = TraverseToLeaf(nullptr, key, key_size, GetPMWCASPool());
     if (node == nullptr) {
       return ReturnCode::NotFound();
     }
