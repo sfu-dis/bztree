@@ -5,7 +5,7 @@ https://dl.acm.org/citation.cfm?id=3164147
 
 ## Build
 
-### USE PMDK
+### Use PMDK
 
 ```bash
 mkdir build & cd build
@@ -37,7 +37,7 @@ Checkout PiBench here: https://github.com/wangtzh/pibench
 ### Build/Create BzTree shared lib
 
 ```bash
-mkdir Releasee & cd Release
+mkdir Release & cd Release
 cmake -DCMAKE_BUILD_TYPE=Release -DPMEM_BACKEND=${BACKEND} -DGOOGLE_FRAMEWORK=0 -DBUILD_TESTS=0 ..
 ```
 
