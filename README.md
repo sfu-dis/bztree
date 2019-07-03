@@ -40,7 +40,3 @@ Checkout PiBench here: https://github.com/wangtzh/pibench
 mkdir Release & cd Release
 cmake -DCMAKE_BUILD_TYPE=Release -DPMEM_BACKEND=${BACKEND} -DGOOGLE_FRAMEWORK=0 -DBUILD_TESTS=0 ..
 ```
-
-### Benchmark Results
-
-See our paper: To be released 
