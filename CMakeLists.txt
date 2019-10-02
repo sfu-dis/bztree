@@ -72,12 +72,11 @@ ExternalProject_Add(PMWCAS
   LOG_BUILD ON
 )
 
-# PMwCAS and PMDK paths
+# PMwCAS
 include_directories(
   ${PMWCAS_PREFIX}/src/PMWCAS
   ${PMWCAS_PREFIX}/src/PMWCAS/src/
   ${PMWCAS_PREFIX}/src/PMWCAS/include
-  ${PMWCAS_PREFIX}/src/PMWCAS-build/pmdk/src/PMDK/src/include
 )
 link_directories(${PMWCAS_PREFIX}/src/PMWCAS-build/)
 
@@ -215,14 +214,6 @@ endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
 set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt -lpmwcas")
-if(${PMEM_BACKEND} STREQUAL "PMDK")
-  set(LINK_FLAGS "${LINK_FLAGS} -lpmemobj")
-  if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-    link_directories(${PMWCAS_PREFIX}/src/PMWCAS-build/pmdk/src/PMDK/src/debug)
-  else()
-    link_directories(${PMWCAS_PREFIX}/src/PMWCAS-build/pmdk/src/PMDK/src/nondebug)
-  endif()
-endif()
 link_libraries(${LINK_FLAGS})
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
@@ -257,6 +248,15 @@ list(APPEND BZTREE_LINK_LIBS
   gflags
   gtest
 )
+endif()
+
+if(${PMEM_BACKEND} STREQUAL "PMDK")
+  set(PMDK_LIB_PATH "/usr/local/lib" CACHE STRING "PMDK lib install path")
+  add_library(pmemobj SHARED IMPORTED)
+  set_property(TARGET pmemobj PROPERTY IMPORTED_LOCATION ${PMDK_LIB_PATH}/libpmemobj.so)
+  list(APPEND BZTREE_LINK_LIBS
+    pmemobj
+  )
 endif()
 
 if(${BUILD_TESTS})
