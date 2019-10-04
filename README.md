@@ -32,6 +32,12 @@ cmake -DPMEM_BACKEND=VOLATILE ..
 
 ## Benchmark on PiBench
 
+We officially support bztree wrapper for pibench:
+
+```bash
+make bztree_pibench_wrapper -j
+```
+
 Checkout PiBench here: https://github.com/wangtzh/pibench
 
 ### Build/Create BzTree shared lib
