@@ -4,8 +4,9 @@ if("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
 endif("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
 
 include(ExternalProject)
+include(FetchContent)
 project(bztree)
-cmake_minimum_required(VERSION 3.2.2)
+cmake_minimum_required(VERSION 3.11)
 
 # Set backend to PMDK by default to build persistent version. This will be passed
 # in directly to PMwCAS which provides persistence support.
@@ -71,6 +72,17 @@ ExternalProject_Add(PMWCAS
   LOG_CONFIGURE ON
   LOG_BUILD ON
 )
+
+FetchContent_Declare(
+        pibench 
+        GIT_REPOSITORY git@github.com:wangtzh/pibench.git
+        GIT_TAG master 
+)
+if (NOT pibench_POPULATED)
+  FetchContent_Populate(pibench)
+  include_directories(${pibench_SOURCE_DIR}/include)
+endif ()
+
 
 # PMwCAS
 include_directories(
@@ -271,6 +283,9 @@ if(${BUILD_TESTS})
     add_dependencies(bztree_tests cpplint)
   endif()
 endif()
+
+add_library(bztree_pibench_wrapper SHARED tests/bztree_pibench_wrapper.cc)
+target_link_libraries(bztree_pibench_wrapper bztree)
 
 add_custom_target(
   cpplint ALL
