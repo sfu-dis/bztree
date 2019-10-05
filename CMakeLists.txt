@@ -13,8 +13,6 @@ cmake_minimum_required(VERSION 3.11)
 set(PMEM_BACKEND "PMDK" CACHE STRING "Persistent memory backend type")
 string(TOUPPER ${PMEM_BACKEND} PMEM_BACKEND)
 
-find_package(glog 0.4.0 REQUIRED)
-
 # Both volatile and persistent versions are supported, by setting PMEM_BACKEND to:
 # PMDK    : use PMDK for persistence
 # EMU     : use simple shared memory for emulating persistent memory. This
@@ -96,6 +94,22 @@ include_directories(
 link_directories(${PMWCAS_PREFIX}/src/PMWCAS-build/)
 
 if(${GOOGLE_FRAMEWORK})
+
+######################## glog #####################
+# Google Log
+FetchContent_Declare(
+        glog
+        GIT_REPOSITORY https://github.com/google/glog.git
+        GIT_TAG v0.4.0
+)
+FetchContent_GetProperties(glog)
+if (NOT glog_POPULATED)
+  FetchContent_Populate(glog)
+  set(WITH_GFLAGS OFF CACHE BOOL "we don't use gflags")
+  add_subdirectory(${glog_SOURCE_DIR} ${glog_BINARY_DIR})
+endif ()
+
+
 ######################## gtest #####################
 # Google Test
 FetchContent_Declare(
