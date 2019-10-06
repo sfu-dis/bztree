@@ -6,8 +6,12 @@ extern "C" tree_api *create_tree(const tree_options_t &opt) {
   return new bztree_wrapper(opt);
 }
 
-bztree_wrapper::bztree_wrapper(const tree_options_t &opt) {
-  // FIXME(tzwang): vary the parameters later; here just for demo purpose
+static bool FileExists(const char *pool_path) {
+  struct stat buffer;
+  return (stat(pool_path, &buffer) == 0);
+}
+
+bztree::BzTree *create_new_tree(const tree_options_t &opt) {
   bztree::BzTree::ParameterSet param(1024, 512, 1024);
 
 #ifdef PMDK
@@ -41,7 +45,33 @@ bztree_wrapper::bztree_wrapper(const tree_options_t &opt) {
   auto *bztree = bztree::BzTree::New(param, pool);
 #endif
 
-  tree_ = bztree;
+  return bztree;
+}
+
+bztree::BzTree *recovery_from_pool(const tree_options_t &opt) {
+  pmwcas::InitLibrary(
+      pmwcas::PMDKAllocator::Create(opt.pool_path.c_str(), TEST_LAYOUT_NAME,
+                                    opt.pool_size),
+      pmwcas::PMDKAllocator::Destroy, pmwcas::LinuxEnvironment::Create,
+      pmwcas::LinuxEnvironment::Destroy);
+  auto pmdk_allocator =
+      reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
+  bztree::Allocator::Init(pmdk_allocator);
+
+  auto tree = reinterpret_cast<bztree::BzTree *>(
+      pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
+  tree->Recovery();
+  return tree;
+}
+
+bztree_wrapper::bztree_wrapper(const tree_options_t &opt) {
+  if (FileExists(opt.pool_path.c_str())) {
+    std::cout << "recovery from existing pool." << std::endl;
+    tree_ = recovery_from_pool(opt);
+  } else {
+    std::cout << "creating new tree on pool." << std::endl;
+    tree_ = create_new_tree(opt);
+  }
 }
 
 bztree_wrapper::~bztree_wrapper() { pmwcas::Thread::ClearRegistry(); }
@@ -109,5 +139,3 @@ int bztree_wrapper::scan(const char *key, size_t key_sz, int scan_sz,
   values_out = results.data();
   return scanned;
 }
-
-
