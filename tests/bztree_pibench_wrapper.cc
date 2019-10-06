@@ -110,17 +110,4 @@ int bztree_wrapper::scan(const char *key, size_t key_sz, int scan_sz,
   return scanned;
 }
 
-bool recovery(const tree_options_t &opt) {
-  pmwcas::InitLibrary(pmwcas::PMDKAllocator::Create(
-                          opt.pool_path, TEST_LAYOUT_NAME, opt.pool_size),
-                      pmwcas::PMDKAllocator::Destroy,
-                      pmwcas::LinuxEnvironment::Create,
-                      pmwcas::LinuxEnvironment::Destroy);
-  auto pmdk_allocator =
-      reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
-  bztree::Allocator::Init(pmdk_allocator);
 
-  auto tree = reinterpret_cast<bztree::BzTree *>(
-      pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  tree->Recovery();
-}
