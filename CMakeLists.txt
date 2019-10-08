@@ -1,3 +1,7 @@
+if (POLICY CMP0048)
+  cmake_policy(SET CMP0048 NEW)
+endif (POLICY CMP0048)
+
 # No in-source build
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_BINARY_DIR}")
   message(FATAL_ERROR "In-source builds are not allowed.")
@@ -129,7 +133,7 @@ endif()
 ####################################################
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
-set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt -lpmwcas")
+set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt")
 link_libraries(${LINK_FLAGS})
 
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
@@ -143,6 +147,7 @@ set_property(GLOBAL APPEND PROPERTY BZTREE_SRC
 )
 get_property(BZTREE_LIB_SRC GLOBAL PROPERTY BZTREE_SRC)
 
+add_library(bztree_static STATIC ${BZTREE_LIB_SRC})
 add_library(bztree SHARED ${BZTREE_LIB_SRC})
 add_dependencies(bztree cpplint)
 add_dependencies(bztree PMWCAS)
@@ -161,8 +166,8 @@ endif()
 
 if(${PMEM_BACKEND} STREQUAL "PMDK")
   set(PMDK_LIB_PATH "/usr/local/lib" CACHE STRING "PMDK lib install path")
-  add_library(pmemobj SHARED IMPORTED)
-  set_property(TARGET pmemobj PROPERTY IMPORTED_LOCATION ${PMDK_LIB_PATH}/libpmemobj.so)
+  add_library(pmemobj STATIC IMPORTED)
+  set_property(TARGET pmemobj PROPERTY IMPORTED_LOCATION ${PMDK_LIB_PATH}/libpmemobj.a)
   list(APPEND BZTREE_LINK_LIBS
     pmemobj
   )
@@ -182,9 +187,11 @@ if(${BUILD_TESTS})
 endif()
 
 target_link_libraries(bztree pmwcas gtest_main glog::glog)
+target_link_libraries(bztree_static pmwcas gtest_main glog::glog)
+set_property(TARGET bztree_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 add_library(bztree_pibench_wrapper SHARED tests/bztree_pibench_wrapper.cc)
-target_link_libraries(bztree_pibench_wrapper bztree)
+target_link_libraries(bztree_pibench_wrapper bztree_static gtest_main glog::glog)
 
 add_custom_target(
   cpplint ALL
@@ -199,7 +206,9 @@ add_custom_target(
 
 set(MAX_FREEZE_RETRY 1 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
+target_compile_definitions(bztree_static PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
 
 set(ENABLE_MERGE 0 CACHE STRING "MAX retry on frozen node")
 message(STATUS "ENABLE_MERGE: " ${ENABLE_MERGE})
 target_compile_definitions(bztree PRIVATE ENABLE_MERGE=${ENABLE_MERGE})
+target_compile_definitions(bztree_static PUBLIC ENABLE_MERGE=${ENABLE_MERGE})
