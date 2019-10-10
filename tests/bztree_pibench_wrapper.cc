@@ -61,6 +61,12 @@ bztree::BzTree *recovery_from_pool(const tree_options_t &opt) {
   auto tree = reinterpret_cast<bztree::BzTree *>(
       pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
   tree->Recovery();
+
+  pmwcas::DescriptorPool *pool = nullptr;
+  pmdk_allocator->Allocate((void **)&pool, sizeof(pmwcas::DescriptorPool));
+  new (pool) pmwcas::DescriptorPool(100000, opt.num_threads, false);
+  tree->SetPMWCASPool(pool);
+
   return tree;
 }
 
