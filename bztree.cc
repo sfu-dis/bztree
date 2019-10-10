@@ -1576,6 +1576,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size, uint64_t payload) 
                                                 reinterpret_cast<InternalNode **>(ptr_parent),
                                                 backoff);
     if (!should_proceed) {
+      pd->Abort();
       // TODO(tzwang): free memory allocated in ptr_l, ptr_r, and ptr_parent
       continue;
     }

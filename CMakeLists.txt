@@ -162,6 +162,9 @@ list(APPEND BZTREE_LINK_LIBS
   glog::glog
   gtest_main
 )
+target_link_libraries(bztree glog::glog gtest_main)
+target_link_libraries(bztree_static glog::glog gtest_main)
+
 endif()
 
 if(${PMEM_BACKEND} STREQUAL "PMDK")
@@ -186,12 +189,12 @@ if(${BUILD_TESTS})
   endif()
 endif()
 
-target_link_libraries(bztree pmwcas gtest_main glog::glog)
-target_link_libraries(bztree_static pmwcas gtest_main glog::glog)
+target_link_libraries(bztree pmwcas)
+target_link_libraries(bztree_static pmwcas)
 set_property(TARGET bztree_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 add_library(bztree_pibench_wrapper SHARED tests/bztree_pibench_wrapper.cc)
-target_link_libraries(bztree_pibench_wrapper bztree_static gtest_main glog::glog)
+target_link_libraries(bztree_pibench_wrapper bztree_static)
 
 add_custom_target(
   cpplint ALL
