@@ -56,6 +56,9 @@ endif()
 
 option(BUILD_TESTS, "Build test cases using gflags, glog and gtest" ON)
 if(${BUILD_TESTS})
+  if(NOT ${GOOGLE_FRAMEWORK})
+    message(FATAL_ERROR "BUILD_TESTS defined but GOOGLE_FRAMEWORK not defined")
+  endif()
   add_definitions(-DBUILD_TESTS)
   message(STATUS "BUILD_TESTS: defined")
 else()
@@ -101,33 +104,33 @@ if(${GOOGLE_FRAMEWORK})
 
 ######################## glog #####################
 # Google Log
-FetchContent_Declare(
-        glog
-        GIT_REPOSITORY https://github.com/google/glog.git
-        GIT_TAG v0.4.0
-)
-FetchContent_GetProperties(glog)
-if (NOT glog_POPULATED)
-  FetchContent_Populate(glog)
-  set(WITH_GFLAGS OFF CACHE BOOL "we don't use gflags")
-  add_subdirectory(${glog_SOURCE_DIR} ${glog_BINARY_DIR})
-endif ()
+  FetchContent_Declare(
+          glog
+          GIT_REPOSITORY https://github.com/google/glog.git
+          GIT_TAG v0.4.0
+  )
+  FetchContent_GetProperties(glog)
+  if (NOT glog_POPULATED)
+    FetchContent_Populate(glog)
+    set(WITH_GFLAGS OFF CACHE BOOL "we don't use gflags")
+    add_subdirectory(${glog_SOURCE_DIR} ${glog_BINARY_DIR})
+  endif ()
 
 
 ######################## gtest #####################
 # Google Test
-FetchContent_Declare(
-        googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG release-1.8.1
-)
-FetchContent_GetProperties(googletest)
-if (NOT googletest_POPULATED)
-  FetchContent_Populate(googletest)
-  add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
-  include_directories(${googletest_SOURCE_DIR}/GTestExternal/googletest/include)
-endif ()
-include(GoogleTest)
+  FetchContent_Declare(
+          googletest
+          GIT_REPOSITORY https://github.com/google/googletest.git
+          GIT_TAG release-1.8.1
+  )
+  FetchContent_GetProperties(googletest)
+  if (NOT googletest_POPULATED)
+    FetchContent_Populate(googletest)
+    add_subdirectory(${googletest_SOURCE_DIR} ${googletest_BINARY_DIR})
+    include_directories(${googletest_SOURCE_DIR}/GTestExternal/googletest/include)
+  endif ()
+  include(GoogleTest)
 
 endif()
 ####################################################
@@ -149,22 +152,20 @@ get_property(BZTREE_LIB_SRC GLOBAL PROPERTY BZTREE_SRC)
 
 add_library(bztree_static STATIC ${BZTREE_LIB_SRC})
 add_library(bztree SHARED ${BZTREE_LIB_SRC})
+
 add_dependencies(bztree cpplint)
+add_dependencies(bztree_static PMWCAS)
 add_dependencies(bztree PMWCAS)
 
 set (BZTREE_LINK_LIBS
-  bztree
+  pmwcas
 )
 
 if(${GOOGLE_FRAMEWORK})
-
 list(APPEND BZTREE_LINK_LIBS
   glog::glog
   gtest_main
 )
-target_link_libraries(bztree glog::glog gtest_main)
-target_link_libraries(bztree_static glog::glog gtest_main)
-
 endif()
 
 if(${PMEM_BACKEND} STREQUAL "PMDK")
@@ -176,22 +177,23 @@ if(${PMEM_BACKEND} STREQUAL "PMDK")
   )
 endif()
 
+target_link_libraries(bztree ${BZTREE_LINK_LIBS})
+target_link_libraries(bztree_static ${BZTREE_LINK_LIBS})
+set_property(TARGET bztree_static PROPERTY POSITION_INDEPENDENT_CODE ON)
+
 if(${BUILD_TESTS})
   if((${PMEM_BACKEND} STREQUAL "PMDK"))
     add_executable(bztree_pmdk_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_pmdk_tests.cc)
-    target_link_libraries(bztree_pmdk_tests ${BZTREE_LINK_LIBS})
+    target_link_libraries(bztree_pmdk_tests bztree ${BZTREE_LINK_LIBS})
   else()
     add_executable(bztree_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_tests.cc)
     add_executable(bztree_thread_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_multithread_tests.cc)
-    target_link_libraries(bztree_tests ${BZTREE_LINK_LIBS})
-    target_link_libraries(bztree_thread_tests ${BZTREE_LINK_LIBS})
+    target_link_libraries(bztree_tests bztree ${BZTREE_LINK_LIBS})
+    target_link_libraries(bztree_thread_tests bztree ${BZTREE_LINK_LIBS})
     add_dependencies(bztree_tests cpplint)
   endif()
 endif()
 
-target_link_libraries(bztree pmwcas)
-target_link_libraries(bztree_static pmwcas)
-set_property(TARGET bztree_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 add_library(bztree_pibench_wrapper SHARED tests/bztree_pibench_wrapper.cc)
 target_link_libraries(bztree_pibench_wrapper bztree_static)
