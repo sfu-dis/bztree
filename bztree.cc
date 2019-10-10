@@ -829,7 +829,7 @@ ReturnCode LeafNode::RangeScanBySize(const char *key1,
               return cmp < 0;
             });
 
-  for (auto item:tmp_result) {
+  for (auto item : tmp_result) {
     result->emplace_back(item);
   }
   return ReturnCode::Ok();
@@ -1058,8 +1058,8 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     sibling_index = parent_frame->meta_index + 1;
   } else {
     // Both left sibling and right sibling are good, we stay unchanged
-    if (!backoff) {
-    }
+    // if (!backoff) {
+    // }
     return ReturnCode::Ok();
   }
 
