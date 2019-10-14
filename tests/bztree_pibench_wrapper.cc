@@ -99,8 +99,6 @@ bool bztree_wrapper::find(const char *key, size_t key_sz, char *value_out) {
 
 bool bztree_wrapper::insert(const char *key, size_t key_sz, const char *value,
                             size_t value_sz) {
-  // FIXME(tzwang): for now only support 8-byte values
-  assert(value_sz == sizeof(uint64_t));
   uint64_t k = __builtin_bswap64(*reinterpret_cast<const uint64_t *>(key));
 
   if (value_sz <= 8) {
@@ -119,7 +117,7 @@ bool bztree_wrapper::insert(const char *key, size_t key_sz, const char *value,
     PMEMoid ptr;
     int ret = pmemobj_zalloc(pop, &ptr, value_sz + sizeof(value_sz),
                              TOID_TYPE_NUM(char));
-    auto payload = pmemobj_direct(ptr);
+    auto payload = (char *)pmemobj_direct(ptr);
     memcpy(payload, &value_sz, sizeof(value_sz));
     memcpy(payload + sizeof(value_sz), value, value_sz);
     v = reinterpret_cast<uint64_t>(payload);
@@ -146,14 +144,47 @@ bool bztree_wrapper::insert(const char *key, size_t key_sz, const char *value,
 
 bool bztree_wrapper::update(const char *key, size_t key_sz, const char *value,
                             size_t value_sz) {
-  // FIXME(tzwang): for now only support 8-byte values
-  assert(value_sz == sizeof(uint64_t));
   uint64_t k = __builtin_bswap64(*reinterpret_cast<const uint64_t *>(key));
-  uint64_t v = *reinterpret_cast<uint64_t *>(const_cast<char *>(value));
 
-  // Mask out the 3 MSBs
-  v &= 0x1FFFFFFFFFFFFFFF;
+  if (value_sz <= 8) {
+    auto v = *reinterpret_cast<uint64_t *>(const_cast<char *>(value));
+    // Mask out the 3 MSBs
+    v &= 0x1FFFFFFFFFFFFFFF;
+    return tree_->Update(reinterpret_cast<const char *>(&k), key_sz, v).IsOk();
+  }
+
+// longer payload, we use pointers
+#ifdef PMDK
+  auto pop = bztree::Allocator::Get()->GetPool();
+  uint64_t v{0};
+  bool transaction_commited = false;
+  TX_BEGIN(pop) {
+    PMEMoid ptr;
+    int ret = pmemobj_zalloc(pop, &ptr, value_sz + sizeof(value_sz),
+                             TOID_TYPE_NUM(char));
+    auto payload = (char *)pmemobj_direct(ptr);
+    memcpy(payload, &value_sz, sizeof(value_sz));
+    memcpy(payload + sizeof(value_sz), value, value_sz);
+    v = reinterpret_cast<uint64_t>(payload);
+  }
+  TX_ONABORT {
+    LOG(INFO) << "insert faile due to allocation fail" << std::endl;
+    transaction_commited = false;
+  }
+  TX_ONCOMMIT { transaction_commited = true; }
+  TX_END
+  if (transaction_commited) {
+    return tree_->Update(reinterpret_cast<const char *>(&k), key_sz, v).IsOk();
+  } else {
+    return false;
+  }
+#else
+  auto payload = (char *)malloc(value_sz + sizeof(value_sz));
+  memcpy(payload, &value_sz, sizeof(value_sz));
+  memcpy(payload + sizeof(value_sz), value, value_sz);
+  auto v = reinterpret_cast<uint64_t>(payload);
   return tree_->Update(reinterpret_cast<const char *>(&k), key_sz, v).IsOk();
+#endif
 }
 
 bool bztree_wrapper::remove(const char *key, size_t key_sz) {
