@@ -92,9 +92,17 @@ bztree_wrapper::~bztree_wrapper() { pmwcas::Thread::ClearRegistry(); }
 bool bztree_wrapper::find(const char *key, size_t key_sz, char *value_out) {
   // FIXME(tzwang): for now only support 8-byte values
   uint64_t k = __builtin_bswap64(*reinterpret_cast<const uint64_t *>(key));
-  return tree_
-      ->Read(reinterpret_cast<const char *>(&k), key_sz, (uint64_t *)value_out)
-      .IsOk();
+  uint64_t payload = 0;
+  auto ok =
+      tree_->Read(reinterpret_cast<const char *>(&k), key_sz, &payload).IsOk();
+
+  if (ok) {
+    size_t payload_sz = *((uint64_t *)payload);
+    memcpy(value_out, (char *)payload + sizeof(size_t), payload_sz);
+    return ok;
+  } else {
+    return false;
+  }
 }
 
 bool bztree_wrapper::insert(const char *key, size_t key_sz, const char *value,
@@ -206,14 +214,13 @@ int bztree_wrapper::scan(const char *key, size_t key_sz, int scan_sz,
     auto record = iter->GetNext();
     if (record == nullptr) break;
 
-    uint64_t result_key = __builtin_bswap64(
-        *reinterpret_cast<const uint64_t *>(record->GetKey()));
-    memcpy(dst, &result_key, sizeof(uint64_t));
-    dst += sizeof(uint64_t);
+    memcpy(dst, record->GetKey(), record->meta.GetKeyLength());
+    dst += record->meta.GetKeyLength();
 
     auto payload = record->GetPayload();
-    memcpy(dst, &payload, sizeof(uint64_t));
-    dst += sizeof(uint64_t);
+    size_t payload_sz = *(uint64_t *)(payload);
+    memcpy(dst, (char *)payload + payload_sz, payload_sz);
+    dst += payload_sz;
   }
   values_out = results.data();
   return scanned;
