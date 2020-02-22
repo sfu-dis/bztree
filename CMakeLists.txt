@@ -54,31 +54,26 @@ else()
   message(STATUS "GOOGLE_FRAMEWORK is not defined, will not use glog, gflags and gtest")
 endif()
 
-option(BUILD_TESTS, "Build test cases using gflags, glog and gtest" ON)
-if(${BUILD_TESTS})
-  if(NOT ${GOOGLE_FRAMEWORK})
-    message(FATAL_ERROR "BUILD_TESTS defined but GOOGLE_FRAMEWORK not defined")
-  endif()
-  add_definitions(-DBUILD_TESTS)
-  message(STATUS "BUILD_TESTS: defined")
-else()
-  message(STATUS "BUILD_TESTS: not defined")
+if(NOT ${GOOGLE_FRAMEWORK})
+  message(FATAL_ERROR "BUILD_TESTS defined but GOOGLE_FRAMEWORK not defined")
 endif()
+add_definitions(-DBUILD_TESTS)
+message(STATUS "BUILD_TESTS: defined")
 
 ##################### PMwCAS #########################
-add_definitions(-DDESC_CAP=16)
-set(PMWCAS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/pmwcas")
-ExternalProject_Add(PMWCAS
-  PREFIX "${PMWCAS_PREFIX}"
-  GIT_REPOSITORY git@github.com:XiangpengHao/pmwcas.git
-  GIT_TAG master
-  INSTALL_COMMAND ""
-  BUILD_COMMAND $(MAKE)
-  CMAKE_ARGS -DPMEM_BACKEND=${PMEM_BACKEND} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DDESC_CAP=16 -DBUILD_APPS=${BUILD_TESTS} -DGOOGLE_FRAMEWORK=${GOOGLE_FRAMEWORK}
-  LOG_DOWNLOAD ON
-  LOG_CONFIGURE ON
-  LOG_BUILD ON
+FetchContent_Declare(
+        pmwcas
+        GIT_REPOSITORY https://github.com/XiangpengHao/pmwcas.git
+        GIT_TAG dev
 )
+FetchContent_GetProperties(pmwcas)
+if (NOT pmwcas_POPULATED)
+    FetchContent_Populate(pmwcas)
+    add_subdirectory(${pmwcas_SOURCE_DIR})
+    include_directories(${pmwcas_SOURCE_DIR} ${pmwcas_SOURCE_DIR}/src ${pmwcas_SOURCE_DIR}/include)
+    PMWCAS_DEFINE_ENV()
+endif()
+
 
 ##################### PiBench #########################
 FetchContent_Declare(
@@ -90,15 +85,6 @@ if (NOT pibench_POPULATED)
   FetchContent_Populate(pibench)
   include_directories(${pibench_SOURCE_DIR}/include)
 endif ()
-
-
-# PMwCAS
-include_directories(
-  ${PMWCAS_PREFIX}/src/PMWCAS
-  ${PMWCAS_PREFIX}/src/PMWCAS/src/
-  ${PMWCAS_PREFIX}/src/PMWCAS/include
-)
-link_directories(${PMWCAS_PREFIX}/src/PMWCAS-build/)
 
 if(${GOOGLE_FRAMEWORK})
 
@@ -153,10 +139,6 @@ get_property(BZTREE_LIB_SRC GLOBAL PROPERTY BZTREE_SRC)
 add_library(bztree_static STATIC ${BZTREE_LIB_SRC})
 add_library(bztree SHARED ${BZTREE_LIB_SRC})
 
-add_dependencies(bztree cpplint)
-add_dependencies(bztree_static PMWCAS)
-add_dependencies(bztree PMWCAS)
-
 set (BZTREE_LINK_LIBS
   pmwcas
 )
@@ -181,33 +163,20 @@ target_link_libraries(bztree ${BZTREE_LINK_LIBS})
 target_link_libraries(bztree_static ${BZTREE_LINK_LIBS})
 set_property(TARGET bztree_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-if(${BUILD_TESTS})
-  if((${PMEM_BACKEND} STREQUAL "PMDK"))
-    add_executable(bztree_pmdk_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_pmdk_tests.cc)
-    target_link_libraries(bztree_pmdk_tests bztree ${BZTREE_LINK_LIBS})
-  else()
-    add_executable(bztree_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_tests.cc)
-    add_executable(bztree_thread_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_multithread_tests.cc)
-    target_link_libraries(bztree_tests bztree ${BZTREE_LINK_LIBS})
-    target_link_libraries(bztree_thread_tests bztree ${BZTREE_LINK_LIBS})
-    add_dependencies(bztree_tests cpplint)
-  endif()
+if((${PMEM_BACKEND} STREQUAL "PMDK"))
+  add_executable(bztree_pmdk_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_pmdk_tests.cc)
+  target_link_libraries(bztree_pmdk_tests bztree ${BZTREE_LINK_LIBS})
+else()
+  add_executable(bztree_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_tests.cc)
+  add_executable(bztree_thread_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_multithread_tests.cc)
+  target_link_libraries(bztree_tests bztree ${BZTREE_LINK_LIBS})
+  target_link_libraries(bztree_thread_tests bztree ${BZTREE_LINK_LIBS})
+  add_dependencies(bztree_tests cpplint)
 endif()
 
 
 add_library(bztree_pibench_wrapper SHARED tests/bztree_pibench_wrapper.cc)
 target_link_libraries(bztree_pibench_wrapper bztree_static)
-
-add_custom_target(
-  cpplint ALL
-  COMMAND python2 ${CMAKE_CURRENT_SOURCE_DIR}/third-party/cpplint/cpplint.py
-    --linelength=100
-    --filter=-runtime/references,-build/header_guard,-build/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/bztree.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/bztree.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_tests.cc
-  || (exit 0)
-)
 
 set(MAX_FREEZE_RETRY 1 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
