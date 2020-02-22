@@ -12,7 +12,6 @@
 #include <optional>
 
 #include <pmwcas.h>
-#include <mwcas/mwcas.h>
 
 #ifndef ALWAYS_ASSERT
 #define ALWAYS_ASSERT(expr) (expr) ? (void)0 : abort()
