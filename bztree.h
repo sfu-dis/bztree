@@ -211,7 +211,7 @@ class BaseNode {
   bool is_leaf;
   NodeHeader header;
   RecordMetadata record_metadata[0];
-  void Dump(pmwcas::EpochManager *epoch);
+  void Dump();
 
   // Check if the key in a range, inclusive
   // -1 if smaller than left key
@@ -379,7 +379,7 @@ class InternalNode : public BaseNode {
     return reinterpret_cast<BaseNode *> (child_addr);
 #endif
   }
-  void Dump(pmwcas::EpochManager *epoch, bool dump_children = false);
+  void Dump(bool dump_children = false);
 
   // delete a child from internal node
   // | key0, val0 | key1, val1 | key2, val2 | key3, val3 |
@@ -507,7 +507,7 @@ class LeafNode : public BaseNode {
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
                              bool visible_only,
                              pmwcas::EpochManager *epoch);
-  void Dump(pmwcas::EpochManager *epoch);
+  void Dump();
 
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck, NodeFrozen };
@@ -651,9 +651,10 @@ class BzTree {
   ParameterSet parameters;
   bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
 
+  pmwcas::DescriptorPool *pmwcas_pool;
+
  private:
   BaseNode *root;
-  pmwcas::DescriptorPool *pmwcas_pool;
   uint64_t pmdk_addr;
   uint64_t index_epoch;
 

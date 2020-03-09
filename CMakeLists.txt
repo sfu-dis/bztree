@@ -64,7 +64,7 @@ message(STATUS "BUILD_TESTS: defined")
 FetchContent_Declare(
         pmwcas
         GIT_REPOSITORY https://github.com/XiangpengHao/pmwcas.git
-        GIT_TAG dev
+        GIT_TAG v2.0 
 )
 FetchContent_GetProperties(pmwcas)
 if (NOT pmwcas_POPULATED)
@@ -171,7 +171,6 @@ else()
   add_executable(bztree_thread_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/bztree_multithread_tests.cc)
   target_link_libraries(bztree_tests bztree ${BZTREE_LINK_LIBS})
   target_link_libraries(bztree_thread_tests bztree ${BZTREE_LINK_LIBS})
-  add_dependencies(bztree_tests cpplint)
 endif()
 
 
