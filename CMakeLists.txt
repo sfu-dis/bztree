@@ -64,7 +64,7 @@ message(STATUS "BUILD_TESTS: defined")
 FetchContent_Declare(
         pmwcas
         GIT_REPOSITORY https://github.com/XiangpengHao/pmwcas.git
-        GIT_TAG v2.0.1
+        GIT_TAG v2.0
 )
 FetchContent_GetProperties(pmwcas)
 if (NOT pmwcas_POPULATED)

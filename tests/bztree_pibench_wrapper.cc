@@ -26,14 +26,17 @@ bztree::BzTree *create_new_tree(const tree_options_t &opt) {
 
   auto *bztree = reinterpret_cast<bztree::BzTree *>(
       pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  pmwcas::DescriptorPool *pool = nullptr;
-  pmdk_allocator->Allocate((void **)&pool, sizeof(pmwcas::DescriptorPool));
-  new (pool) pmwcas::DescriptorPool(100000, opt.num_threads, false);
+  pmdk_allocator->Allocate((void **)&bztree->pmwcas_pool,
+                           sizeof(pmwcas::DescriptorPool));
+  new (bztree->pmwcas_pool)
+      pmwcas::DescriptorPool(100000, opt.num_threads, false);
 
-  new (bztree) bztree::BzTree(
-      param, pool, reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));
+  new (bztree)
+      bztree::BzTree(param, bztree->pmwcas_pool,
+                     reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));
   pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
-  pmdk_allocator->PersistPtr(pool, sizeof(pmwcas::DescriptorPool));
+  pmdk_allocator->PersistPtr(bztree->pmwcas_pool,
+                             sizeof(pmwcas::DescriptorPool));
 #else
   // Volatile variant
   // pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
