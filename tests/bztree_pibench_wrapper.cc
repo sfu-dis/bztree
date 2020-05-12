@@ -16,7 +16,7 @@ bztree::BzTree *create_new_tree(const tree_options_t &opt) {
 
 #ifdef PMDK
   pmwcas::InitLibrary(
-      pmwcas::PMDKAllocator::Create(opt.pool_path.c_str(), "bztree_layout",
+      pmwcas::PMDKAllocator::Create(opt.pool_path.c_str(), TEST_LAYOUT_NAME,
                                     opt.pool_size),
       pmwcas::PMDKAllocator::Destroy, pmwcas::LinuxEnvironment::Create,
       pmwcas::LinuxEnvironment::Destroy);
@@ -34,9 +34,6 @@ bztree::BzTree *create_new_tree(const tree_options_t &opt) {
   new (bztree)
       bztree::BzTree(param, bztree->pmwcas_pool,
                      reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));
-  pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
-  pmdk_allocator->PersistPtr(bztree->pmwcas_pool,
-                             sizeof(pmwcas::DescriptorPool));
 #else
   // Volatile variant
   // pmwcas::InitLibrary(pmwcas::DefaultAllocator::Create,
@@ -91,24 +88,20 @@ bool bztree_wrapper::insert(const char *key, size_t key_sz, const char *value,
                             size_t value_sz) {
   // FIXME(tzwang): for now only support 8-byte values
   assert(value_sz == sizeof(uint64_t));
-  uint64_t k = __builtin_bswap64(*reinterpret_cast<const uint64_t *>(key));
-  uint64_t v = *reinterpret_cast<uint64_t *>(const_cast<char *>(value));
+  uint64_t v = reinterpret_cast<uint64_t>(const_cast<char *>(value));
+  auto rv = tree_->Insert(reinterpret_cast<const char *>(key), key_sz, v);
 
-  // Mask out the 3 MSBs
-  v &= 0x1FFFFFFFFFFFFFFF;
-  return tree_->Insert(reinterpret_cast<const char *>(&k), key_sz, v).IsOk();
+  LOG_IF(INFO, !rv.IsOk()) << "insert failed!" << std::endl;
+  return rv.IsOk();
 }
 
 bool bztree_wrapper::update(const char *key, size_t key_sz, const char *value,
                             size_t value_sz) {
   // FIXME(tzwang): for now only support 8-byte values
   assert(value_sz == sizeof(uint64_t));
-  uint64_t k = __builtin_bswap64(*reinterpret_cast<const uint64_t *>(key));
-  uint64_t v = *reinterpret_cast<uint64_t *>(const_cast<char *>(value));
+  uint64_t v = reinterpret_cast<uint64_t>(const_cast<char *>(value));
 
-  // Mask out the 3 MSBs
-  v &= 0x1FFFFFFFFFFFFFFF;
-  return tree_->Update(reinterpret_cast<const char *>(&k), key_sz, v).IsOk();
+  return tree_->Update(reinterpret_cast<const char *>(key), key_sz, v).IsOk();
 }
 
 bool bztree_wrapper::remove(const char *key, size_t key_sz) {
