@@ -1,7 +1,10 @@
 # BzTree
-An open-source BzTree implementation 
+An open-source [BzTree](https://dl.acm.org/citation.cfm?id=3164147) implementation, used in our [VLDB paper](http://www.vldb.org/pvldb/vol13/p574-lersch.pdf):
 
-https://dl.acm.org/citation.cfm?id=3164147
+```
+Lucas Lersch, Xiangpeng Hao, Ismail Oukid, Tianzheng Wang, Thomas Willhalm:
+Evaluating Persistent Memory Range Indexes. PVLDB 13(4): 574-587 (2019)
+```
 
 ## Build
 
