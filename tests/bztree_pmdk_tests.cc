@@ -13,7 +13,7 @@
 #include "../bztree.h"
 #include "util/performance_test.h"
 
-#define TEST_POOL_NAME "pool_bztree"
+#define TEST_POOL_NAME "/mnt/pmem0/hao/pool_bztree"
 #define TEST_LAYOUT_NAME "layout_bztree"
 
 class BzTreePMEMTest : public ::testing::Test {
@@ -42,8 +42,13 @@ TEST_F(BzTreePMEMTest, InsertTest) {
                            sizeof(pmwcas::DescriptorPool));
 
   new (bztree->pmwcas_pool) pmwcas::DescriptorPool(100000, 1, false);
+  pmdk_allocator->PersistPtr(bztree->pmwcas_pool,
+                             sizeof(pmwcas::DescriptorPool));
+
   bztree::BzTree::ParameterSet param(3072, 0, 4096);
-  new (bztree) bztree::BzTree(param, bztree->pmwcas_pool);
+  new (bztree)
+      bztree::BzTree(param, bztree->pmwcas_pool,
+                     reinterpret_cast<uint64_t>(pmdk_allocator->GetPool()));
   pmdk_allocator->PersistPtr(bztree, sizeof(bztree::BzTree));
 
   tree = bztree;
@@ -66,15 +71,11 @@ TEST_F(BzTreePMEMTest, ReadTest) {
   // Read everything back
   auto pmdk_allocator =
       reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
-  auto root_obj = reinterpret_cast<bztree::BzTree *>(
-      pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-
   bztree::Allocator::Init(pmdk_allocator);
 
-  pmdk_allocator->Allocate((void **)&root_obj->pmwcas_pool, sizeof(pmwcas::DescriptorPool));
-  new (root_obj->pmwcas_pool) pmwcas::DescriptorPool(2000, 1, false);
-
-  tree = root_obj;
+  auto tree = reinterpret_cast<bztree::BzTree *>(
+      pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
+  tree->Recovery();
 
   const uint32_t kMaxKey = 20000;
   for (uint32_t i = 1; i < kMaxKey; ++i) {
