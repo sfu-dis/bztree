@@ -21,10 +21,12 @@ uint64_t global_epoch = 0;
 
 void InternalNode::New(bztree::InternalNode **mem, uint32_t alloc_size) {
 #ifdef PMDK
-  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
-  memset(*mem, 0, alloc_size);
-  (*mem)->header.size = alloc_size;
-  *mem = Allocator::Get()->GetOffset(*mem);
+  auto addr = reinterpret_cast<uint64_t *>(mem);
+  auto allocator = Allocator::Get();
+  allocator->AllocateOffset(addr, alloc_size, false);
+  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  memset(node, 0, alloc_size);
+  node->header.size = alloc_size;
 #else
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(mem),
                                      alloc_size);
@@ -43,13 +45,15 @@ void InternalNode::New(InternalNode *src_node, const char *key,
                         sizeof(right_child_addr) + sizeof(RecordMetadata);
 
 #ifdef PMDK
-  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
-  memset(*mem, 0, alloc_size);
-  new (*mem)
+  auto addr = reinterpret_cast<uint64_t *>(mem);
+  auto allocator = Allocator::Get();
+  allocator->AllocateOffset(addr, alloc_size, false);
+  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  memset(node, 0, alloc_size);
+  new (node)
       InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count, key,
                    key_size, left_child_addr, right_child_addr);
-  pmwcas::NVRAM::Flush(alloc_size, *mem);
-  *mem = Allocator::Get()->GetOffset(*mem);
+  pmwcas::NVRAM::Flush(alloc_size, node);
 #else
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(mem),
                                      alloc_size);
@@ -72,12 +76,14 @@ void InternalNode::New(const char *key, uint32_t key_size,
                         sizeof(left_child_addr) + sizeof(right_child_addr) +
                         sizeof(RecordMetadata) * 2;
 #ifdef PMDK
-  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), alloc_size);
-  memset(*mem, 0, alloc_size);
-  new (*mem) InternalNode(alloc_size, key, key_size, left_child_addr,
+  auto addr = reinterpret_cast<uint64_t *>(mem);
+  auto allocator = Allocator::Get();
+  allocator->AllocateOffset(addr, alloc_size, false);
+  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  memset(node, 0, alloc_size);
+  new (node) InternalNode(alloc_size, key, key_size, left_child_addr,
                           right_child_addr);
-  pmwcas::NVRAM::Flush(alloc_size, *mem);
-  *mem = Allocator::Get()->GetOffset(*mem);
+  pmwcas::NVRAM::Flush(alloc_size, node);
 #else
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(mem),
                                      alloc_size);
@@ -119,14 +125,15 @@ void InternalNode::New(InternalNode *src_node, uint32_t begin_meta_idx,
   }
 
 #ifdef PMDK
-  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(new_node),
-                                   alloc_size);
-  memset(*new_node, 0, alloc_size);
-  new (*new_node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
+  auto addr = reinterpret_cast<uint64_t *>(new_node);
+  auto allocator = Allocator::Get();
+  allocator->AllocateOffset(addr, alloc_size, false);
+  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  memset(node, 0, alloc_size);
+  new (node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                                key, key_size, left_child_addr, right_child_addr,
                                left_most_child_addr);
-  pmwcas::NVRAM::Flush(alloc_size, new_node);
-  *new_node = Allocator::Get()->GetOffset(*new_node);
+  pmwcas::NVRAM::Flush(alloc_size, node);
 #else
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(new_node),
                                      alloc_size);
@@ -284,7 +291,7 @@ bool InternalNode::PrepareForSplit(
     Stack &stack, uint32_t split_threshold, const char *key, uint32_t key_size,
     uint64_t left_child_addr,   // [key]'s left child pointer
     uint64_t right_child_addr,  // [key]'s right child pointer
-    InternalNode **new_node, pmwcas::Descriptor *pd,
+    InternalNode **new_node, pmwcas::DescriptorGuard &pd,
     pmwcas::DescriptorPool *pool, bool backoff) {
   uint32_t data_size = header.size + key_size + sizeof(right_child_addr) +
                        sizeof(RecordMetadata);
@@ -302,16 +309,16 @@ bool InternalNode::PrepareForSplit(
   ALWAYS_ASSERT(header.sorted_count >= 2);
   uint32_t n_left = header.sorted_count >> 1;
 
-  auto i_left = pd->ReserveAndAddEntry(
-      reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+  auto i_left = pd.ReserveAndAddEntry(
+      pmwcas::Descriptor::kAllocNullAddress,
       reinterpret_cast<uint64_t>(nullptr),
       pmwcas::Descriptor::kRecycleOnRecovery);
-  auto i_right = pd->ReserveAndAddEntry(
-      reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+  auto i_right = pd.ReserveAndAddEntry(
+      pmwcas::Descriptor::kAllocNullAddress,
       reinterpret_cast<uint64_t>(nullptr),
       pmwcas::Descriptor::kRecycleOnRecovery);
-  uint64_t *ptr_l = pd->GetNewValuePtr(i_left);
-  uint64_t *ptr_r = pd->GetNewValuePtr(i_right);
+  uint64_t *ptr_l = pd.GetNewValuePtr(i_left);
+  uint64_t *ptr_r = pd.GetNewValuePtr(i_right);
 
   // Figure out where the new key will go
   auto separator_meta = record_metadata[n_left];
@@ -379,11 +386,13 @@ bool InternalNode::PrepareForSplit(
 
 void LeafNode::New(LeafNode **mem, uint32_t node_size) {
 #ifdef PMDK
-  Allocator::Get()->AllocateDirect(reinterpret_cast<void **>(mem), node_size);
-  memset(*mem, 0, node_size);
-  new (*mem) LeafNode(node_size);
-  pmwcas::NVRAM::Flush(node_size, *mem);
-  *mem = Allocator::Get()->GetOffset(*mem);
+  auto addr = reinterpret_cast<uint64_t *>(mem);
+  auto allocator = Allocator::Get();
+  allocator->AllocateOffset(addr, node_size, false);
+  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  memset(node, 0, node_size);
+  new (node) LeafNode(node_size);
+  pmwcas::NVRAM::Flush(node_size, node);
 #else
   pmwcas::Allocator::Get()->Allocate(reinterpret_cast<void **>(mem), node_size);
   memset(*mem, 0, node_size);
@@ -475,7 +484,7 @@ void InternalNode::Dump(bool dump_children) {
       uint64_t node_addr = *GetPayloadPtr(record_metadata[i]);
 #ifdef PMDK
       BaseNode *node =
-          Allocator::Get()->GetDirect(reinterpret_cast<BaseNode *>(node_addr));
+          Allocator::Get()->GetDirect<BaseNode>(node_addr);
 #else
       BaseNode *node = reinterpret_cast<BaseNode *>(node_addr);
 #endif
@@ -535,11 +544,11 @@ retry:
   desired_meta.PrepareForInsert();
 
   // Now do the PMwCAS
-  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&(&header.status)->word, expected_status.word,
+  auto pd = pmwcas_pool->AllocateDescriptor();
+  pd.AddEntry(&(&header.status)->word, expected_status.word,
                desired_status.word);
-  pd->AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
-  if (!pd->MwCAS()) {
+  pd.AddEntry(&meta_ptr->meta, expected_meta.meta, desired_meta.meta);
+  if (!pd.MwCAS()) {
     goto retry;
   }
 
@@ -580,10 +589,10 @@ retry_phase2:
   if (s.IsFrozen()) {
     return ReturnCode::NodeFrozen();
   }
-  pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&(&header.status)->word, s.word, s.word);
-  pd->AddEntry(&meta_ptr->meta, desired_meta.meta, new_meta.meta);
-  if (pd->MwCAS()) {
+  auto pd2 = pmwcas_pool->AllocateDescriptor();
+  pd2.AddEntry(&(&header.status)->word, s.word, s.word);
+  pd2.AddEntry(&meta_ptr->meta, desired_meta.meta, new_meta.meta);
+  if (pd2.MwCAS()) {
     return ReturnCode::Ok();
   } else {
     goto retry_phase2;
@@ -698,13 +707,13 @@ retry:
   // 2. Make sure meta data is not changed
   // 3. Make sure status word is not changed
   auto pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(
+  pd.AddEntry(
       reinterpret_cast<uint64_t *>(record_key + metadata.GetPaddedKeyLength()),
       record_payload, payload);
-  pd->AddEntry(&meta_ptr->meta, metadata.meta, metadata.meta);
-  pd->AddEntry(&(&header.status)->word, old_status.word, old_status.word);
+  pd.AddEntry(&meta_ptr->meta, metadata.meta, metadata.meta);
+  pd.AddEntry(&(&header.status)->word, old_status.word, old_status.word);
 
-  if (!pd->MwCAS()) {
+  if (!pd.MwCAS()) {
     goto retry;
   }
   return ReturnCode::Ok();
@@ -790,10 +799,10 @@ retry:
   auto old_delete_size = old_status.GetDeletedSize();
   new_status.SetDeleteSize(old_delete_size + metadata.GetTotalLength());
 
-  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&(&header.status)->word, old_status.word, new_status.word);
-  pd->AddEntry(&meta_ptr->meta, metadata.meta, new_meta.meta);
-  if (!pd->MwCAS()) {
+  auto pd = pmwcas_pool->AllocateDescriptor();
+  pd.AddEntry(&(&header.status)->word, old_status.word, new_status.word);
+  pd.AddEntry(&meta_ptr->meta, metadata.meta, new_meta.meta);
+  if (!pd.MwCAS()) {
     goto retry;
   }
   return ReturnCode::Ok();
@@ -897,9 +906,9 @@ bool BaseNode::Freeze(pmwcas::DescriptorPool *pmwcas_pool) {
     return false;
   }
 
-  pmwcas::Descriptor *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&(&header.status)->word, expected.word, expected.Freeze().word);
-  return pd->MwCAS();
+  auto pd = pmwcas_pool->AllocateDescriptor();
+  pd.AddEntry(&(&header.status)->word, expected.word, expected.Freeze().word);
+  return pd.MwCAS();
 }
 
 LeafNode *LeafNode::Consolidate(pmwcas::DescriptorPool *pmwcas_pool) {
@@ -1097,29 +1106,29 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     return ReturnCode::NodeFrozen();
   }
 
-  auto *pd = pmwcas_pool->AllocateDescriptor();
-  pd->AddEntry(&(&this->GetHeader()->status)->word, node_status.word,
+  auto pd = pmwcas_pool->AllocateDescriptor();
+  pd.AddEntry(&(&this->GetHeader()->status)->word, node_status.word,
                node_status.Freeze().word);
-  pd->AddEntry(&(&sibling->GetHeader()->status)->word, sibling_status.word,
+  pd.AddEntry(&(&sibling->GetHeader()->status)->word, sibling_status.word,
                sibling_status.Freeze().word);
-  pd->AddEntry(&(&parent->GetHeader()->status)->word, parent_status.word,
+  pd.AddEntry(&(&parent->GetHeader()->status)->word, parent_status.word,
                parent_status.Freeze().word);
-  if (!pd->MwCAS()) {
+  if (!pd.MwCAS()) {
     return ReturnCode::PMWCASFailure();
   }
 
   // Phase 2: allocate parent and new node
-  pd = pmwcas_pool->AllocateDescriptor();
-  pd->ReserveAndAddEntry(
-      reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+  auto pd2 = pmwcas_pool->AllocateDescriptor();
+  pd2.ReserveAndAddEntry(
+      pmwcas::Descriptor::kAllocNullAddress,
       reinterpret_cast<uint64_t>(nullptr),
       pmwcas::Descriptor::kRecycleOnRecovery);
-  pd->ReserveAndAddEntry(
-      reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+  pd2.ReserveAndAddEntry(
+      pmwcas::Descriptor::kAllocNullAddress,
       reinterpret_cast<uint64_t>(nullptr),
       pmwcas::Descriptor::kRecycleOnRecovery);
-  auto *new_parent = reinterpret_cast<InternalNode **>(pd->GetNewValuePtr(0));
-  auto *new_node = reinterpret_cast<BaseNode **>(pd->GetNewValuePtr(1));
+  auto *new_parent = reinterpret_cast<InternalNode **>(pd2.GetNewValuePtr(0));
+  auto *new_node = reinterpret_cast<BaseNode **>(pd2.GetNewValuePtr(1));
 
   // lambda wrapper for merge leaf nodes
   auto merge_leaf_nodes = [&](uint32_t left_index, LeafNode *left_node,
@@ -1167,7 +1176,7 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   ReturnCode rc;
   if (!grandpa_frame) {
     rc = stack->tree->ChangeRoot(reinterpret_cast<uint64_t>(stack->GetRoot()),
-                                 reinterpret_cast<uint64_t>(*new_parent), pd)
+                                 reinterpret_cast<uint64_t>(*new_parent), pd2)
              ? ReturnCode::Ok()
              : ReturnCode::PMWCASFailure();
     return rc;
@@ -1175,7 +1184,7 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     InternalNode *grandparent = grandpa_frame->node;
     rc =
         grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index),
-                            parent, *new_parent, pd, pmwcas_pool);
+                            parent, *new_parent, pd2, pmwcas_pool);
     if (!rc.IsOk()) {
       return rc;
     }
@@ -1207,7 +1216,7 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
 }
 
 ReturnCode InternalNode::Update(RecordMetadata meta, InternalNode *old_child,
-                                InternalNode *new_child, pmwcas::Descriptor *pd,
+                                InternalNode *new_child, pmwcas::DescriptorGuard &pd,
                                 pmwcas::DescriptorPool *pmwcas_pool) {
   auto status = header.GetStatus();
   if (status.IsFrozen()) {
@@ -1216,11 +1225,11 @@ ReturnCode InternalNode::Update(RecordMetadata meta, InternalNode *old_child,
 
   // Conduct a 2-word PMwCAS to swap in the new child pointer while ensuring the
   // node isn't frozen by a concurrent thread
-  pd->AddEntry(&(&header.status)->word, status.word, status.word);
-  pd->AddEntry(GetPayloadPtr(meta), reinterpret_cast<uint64_t>(old_child),
+  pd.AddEntry(&(&header.status)->word, status.word, status.word);
+  pd.AddEntry(GetPayloadPtr(meta), reinterpret_cast<uint64_t>(old_child),
                reinterpret_cast<uint64_t>(new_child),
                pmwcas::Descriptor::kRecycleOnRecovery);
-  if (pd->MwCAS()) {
+  if (pd.MwCAS()) {
     return ReturnCode::Ok();
   } else {
     return ReturnCode::PMWCASFailure();
@@ -1385,7 +1394,7 @@ bool LeafNode::MergeNodes(LeafNode *left_node, LeafNode *right_node,
 }
 
 bool LeafNode::PrepareForSplit(Stack &stack, uint32_t split_threshold,
-                               pmwcas::Descriptor *pd,
+                               pmwcas::DescriptorGuard &pd,
                                pmwcas::DescriptorPool *pmwcas_pool,
                                LeafNode **left, LeafNode **right,
                                InternalNode **new_parent, bool backoff) {
@@ -1416,9 +1425,9 @@ bool LeafNode::PrepareForSplit(Stack &stack, uint32_t split_threshold,
   // TODO(tzwang): also put the new insert here to save some cycles
   auto left_end_it = meta_vec.begin() + nleft;
 #ifdef PMDK
-  (Allocator::Get()->GetDirect(*left))
+  (Allocator::Get()->GetDirect<LeafNode>(reinterpret_cast<uint64_t>(*left)))
       ->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
-  (Allocator::Get()->GetDirect(*right))
+  (Allocator::Get()->GetDirect<LeafNode>(reinterpret_cast<uint64_t>(*right)))
       ->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
 #else
   (*left)->CopyFrom(this, meta_vec.begin(), left_end_it,
@@ -1558,23 +1567,23 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size,
     // 3. We have a grandparent - update the child pointer in the grandparent
     //    to point to the new [parent] (might further cause splits up the tree)
 
-    auto *pd = GetPMWCASPool()->AllocateDescriptor();
+    auto pd = GetPMWCASPool()->AllocateDescriptor();
     // TODO(hao): should implement a cascading memory recycle callback
-    pd->ReserveAndAddEntry(
-        reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+    pd.ReserveAndAddEntry(
+        pmwcas::Descriptor::kAllocNullAddress,
         reinterpret_cast<uint64_t>(nullptr),
         pmwcas::Descriptor::kRecycleOnRecovery);
-    pd->ReserveAndAddEntry(
-        reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+    pd.ReserveAndAddEntry(
+        pmwcas::Descriptor::kAllocNullAddress,
         reinterpret_cast<uint64_t>(nullptr),
         pmwcas::Descriptor::kRecycleOnRecovery);
-    pd->ReserveAndAddEntry(
-        reinterpret_cast<uint64_t *>(pmwcas::Descriptor::kAllocNullAddress),
+    pd.ReserveAndAddEntry(
+        pmwcas::Descriptor::kAllocNullAddress,
         reinterpret_cast<uint64_t>(nullptr),
         pmwcas::Descriptor::kRecycleOnRecovery);
-    uint64_t *ptr_r = pd->GetNewValuePtr(0);
-    uint64_t *ptr_l = pd->GetNewValuePtr(1);
-    uint64_t *ptr_parent = pd->GetNewValuePtr(2);
+    uint64_t *ptr_r = pd.GetNewValuePtr(0);
+    uint64_t *ptr_l = pd.GetNewValuePtr(1);
+    uint64_t *ptr_parent = pd.GetNewValuePtr(2);
 
     // Note that when we split internal nodes (if needed), stack will get
     // Pop()'ed recursively, leaving the grantparent as the top (if any) here.
@@ -1597,7 +1606,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size,
         reinterpret_cast<LeafNode **>(ptr_r),
         reinterpret_cast<InternalNode **>(ptr_parent), backoff);
     if (!should_proceed) {
-      pd->Abort();
+      pd.Abort();
       // TODO(tzwang): free memory allocated in ptr_l, ptr_r, and ptr_parent
       continue;
     }
@@ -1623,7 +1632,7 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size,
 #ifdef PMDK
       auto result = grand_parent->Update(
           top->node->GetMetadata(top->meta_index),
-          Allocator::Get()->GetOffset(old_parent),
+          reinterpret_cast<InternalNode *>(Allocator::Get()->GetOffset(old_parent)),
           reinterpret_cast<InternalNode *>(*ptr_parent), pd, GetPMWCASPool());
 #else
       auto result = grand_parent->Update(
@@ -1646,13 +1655,13 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size,
 }
 
 bool BzTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr,
-                        pmwcas::Descriptor *pd) {
+                        pmwcas::DescriptorGuard &pd) {
   // Memory policy here is "Never" because the memory was allocated in
   // PrepareForInsert/BzTree::Insert which uses a descriptor that specifies
   // policy RecycleOnRecovery
-  pd->AddEntry(reinterpret_cast<uint64_t *>(&root), expected_root_addr,
+  pd.AddEntry(reinterpret_cast<uint64_t *>(&root), expected_root_addr,
                new_root_addr, pmwcas::Descriptor::kRecycleNever);
-  return pd->MwCAS();
+  return pd.MwCAS();
 }
 
 ReturnCode BzTree::Read(const char *key, uint16_t key_size, uint64_t *payload) {

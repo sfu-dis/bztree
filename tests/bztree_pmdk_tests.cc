@@ -13,7 +13,7 @@
 #include "../bztree.h"
 #include "util/performance_test.h"
 
-#define TEST_POOL_NAME "/mnt/pmem0/hao/pool_bztree"
+#define TEST_POOL_NAME "/mnt/pmem0/geshi/pool_bztree"
 #define TEST_LAYOUT_NAME "layout_bztree"
 
 class BzTreePMEMTest : public ::testing::Test {

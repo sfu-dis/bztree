@@ -63,8 +63,8 @@ message(STATUS "BUILD_TESTS: defined")
 ##################### PMwCAS #########################
 FetchContent_Declare(
         pmwcas
-        GIT_REPOSITORY https://github.com/XiangpengHao/pmwcas.git
-        GIT_TAG v2.0
+        GIT_REPOSITORY https://github.com/sfu-dis/pmwcas.git
+        GIT_TAG reclamation-upon-recovery
 )
 FetchContent_GetProperties(pmwcas)
 if (NOT pmwcas_POPULATED)
@@ -121,7 +121,7 @@ if(${GOOGLE_FRAMEWORK})
 endif()
 ####################################################
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 set(LINK_FLAGS "-lnuma -lpthread -pthread -lrt")
 link_libraries(${LINK_FLAGS})
 
