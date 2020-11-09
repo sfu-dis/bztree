@@ -23,8 +23,9 @@ void InternalNode::New(bztree::InternalNode **mem, uint32_t alloc_size) {
 #ifdef PMDK
   auto addr = reinterpret_cast<uint64_t *>(mem);
   auto allocator = Allocator::Get();
-  allocator->AllocateOffset(addr, alloc_size, false);
-  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  allocator->AllocateOffset(addr, alloc_size);
+  uint64_t offset = (*addr) & ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
+  auto node = allocator->GetDirect<bztree::InternalNode>(offset);
   memset(node, 0, alloc_size);
   node->header.size = alloc_size;
 #else
@@ -47,8 +48,9 @@ void InternalNode::New(InternalNode *src_node, const char *key,
 #ifdef PMDK
   auto addr = reinterpret_cast<uint64_t *>(mem);
   auto allocator = Allocator::Get();
-  allocator->AllocateOffset(addr, alloc_size, false);
-  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  allocator->AllocateOffset(addr, alloc_size);
+  uint64_t offset = (*addr) & ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
+  auto node = allocator->GetDirect<bztree::InternalNode>(offset);
   memset(node, 0, alloc_size);
   new (node)
       InternalNode(alloc_size, src_node, 0, src_node->header.sorted_count, key,
@@ -78,8 +80,9 @@ void InternalNode::New(const char *key, uint32_t key_size,
 #ifdef PMDK
   auto addr = reinterpret_cast<uint64_t *>(mem);
   auto allocator = Allocator::Get();
-  allocator->AllocateOffset(addr, alloc_size, false);
-  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  allocator->AllocateOffset(addr, alloc_size);
+  uint64_t offset = (*addr) & ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
+  auto node = allocator->GetDirect<bztree::InternalNode>(offset);
   memset(node, 0, alloc_size);
   new (node) InternalNode(alloc_size, key, key_size, left_child_addr,
                           right_child_addr);
@@ -127,8 +130,9 @@ void InternalNode::New(InternalNode *src_node, uint32_t begin_meta_idx,
 #ifdef PMDK
   auto addr = reinterpret_cast<uint64_t *>(new_node);
   auto allocator = Allocator::Get();
-  allocator->AllocateOffset(addr, alloc_size, false);
-  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  allocator->AllocateOffset(addr, alloc_size);
+  uint64_t offset = (*addr) & ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
+  auto node = allocator->GetDirect<bztree::InternalNode>(offset);
   memset(node, 0, alloc_size);
   new (node) InternalNode(alloc_size, src_node, begin_meta_idx, nr_records,
                                key, key_size, left_child_addr, right_child_addr,
@@ -312,11 +316,11 @@ bool InternalNode::PrepareForSplit(
   auto i_left = pd.ReserveAndAddEntry(
       pmwcas::Descriptor::kAllocNullAddress,
       reinterpret_cast<uint64_t>(nullptr),
-      pmwcas::Descriptor::kRecycleOnRecovery);
+      pmwcas::Descriptor::kRecycleNewOnFailure);
   auto i_right = pd.ReserveAndAddEntry(
       pmwcas::Descriptor::kAllocNullAddress,
       reinterpret_cast<uint64_t>(nullptr),
-      pmwcas::Descriptor::kRecycleOnRecovery);
+      pmwcas::Descriptor::kRecycleNewOnFailure);
   uint64_t *ptr_l = pd.GetNewValuePtr(i_left);
   uint64_t *ptr_r = pd.GetNewValuePtr(i_right);
 
@@ -352,6 +356,8 @@ bool InternalNode::PrepareForSplit(
   }
   assert(*ptr_l);
   assert(*ptr_r);
+  uint64_t node_l = *ptr_l & ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
+  uint64_t node_r = *ptr_r & ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
 
   // Pop here as if this were a leaf node so that when we get back to the
   // original caller, we get stack top as the "parent"
@@ -361,8 +367,8 @@ bool InternalNode::PrepareForSplit(
   InternalNode *parent = stack.Top() ? stack.Top()->node : nullptr;
   if (parent == nullptr) {
     // Good!
-    InternalNode::New(separator_key, separator_key_size, (uint64_t)*ptr_l,
-                      (uint64_t)*ptr_r, new_node);
+    InternalNode::New(separator_key, separator_key_size, (uint64_t)node_l,
+                      (uint64_t)node_r, new_node);
     return true;
   }
   __builtin_prefetch((const void *)(parent), 0, 2);
@@ -380,16 +386,17 @@ bool InternalNode::PrepareForSplit(
   }
 
   return parent->PrepareForSplit(stack, split_threshold, separator_key,
-                                 separator_key_size, (uint64_t)*ptr_l,
-                                 (uint64_t)*ptr_r, new_node, pd, pool, backoff);
+                                 separator_key_size, (uint64_t)node_l,
+                                 (uint64_t)node_r, new_node, pd, pool, backoff);
 }
 
 void LeafNode::New(LeafNode **mem, uint32_t node_size) {
 #ifdef PMDK
   auto addr = reinterpret_cast<uint64_t *>(mem);
   auto allocator = Allocator::Get();
-  allocator->AllocateOffset(addr, node_size, false);
-  auto node = allocator->GetDirect<bztree::InternalNode>(*addr);
+  allocator->AllocateOffset(addr, node_size);
+  uint64_t offset = (*addr) & ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
+  auto node = allocator->GetDirect<bztree::InternalNode>(offset);
   memset(node, 0, node_size);
   new (node) LeafNode(node_size);
   pmwcas::NVRAM::Flush(node_size, node);
@@ -1135,7 +1142,9 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
                               LeafNode *right_node) {
     LeafNode::MergeNodes(left_node, right_node,
                          reinterpret_cast<LeafNode **>(new_node));
-    parent->DeleteRecord(left_index, reinterpret_cast<uint64_t>(*new_node),
+    parent->DeleteRecord(left_index,
+                         reinterpret_cast<uint64_t>(*new_node) &
+                             ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag,
                          new_parent);
   };
   // lambda wrapper for merge internal nodes
@@ -1150,7 +1159,9 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     InternalNode::MergeNodes(left_node, right_node, new_key,
                              right_meta.GetKeyLength(),
                              reinterpret_cast<InternalNode **>(new_node));
-    parent->DeleteRecord(left_node_index, reinterpret_cast<uint64_t>(*new_node),
+    parent->DeleteRecord(left_node_index,
+                         reinterpret_cast<uint64_t>(*new_node) &
+                             ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag,
                          new_parent);
   };
 
@@ -1172,19 +1183,21 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
   }
 
   // Phase 4: install new nodes
+  uint64_t node_parent = reinterpret_cast<uint64_t>(*new_parent) &
+                         ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
   auto grandpa_frame = stack->Top();
   ReturnCode rc;
   if (!grandpa_frame) {
     rc = stack->tree->ChangeRoot(reinterpret_cast<uint64_t>(stack->GetRoot()),
-                                 reinterpret_cast<uint64_t>(*new_parent), pd2)
+                                 node_parent, pd2)
              ? ReturnCode::Ok()
              : ReturnCode::PMWCASFailure();
     return rc;
   } else {
     InternalNode *grandparent = grandpa_frame->node;
-    rc =
-        grandparent->Update(grandparent->GetMetadata(grandpa_frame->meta_index),
-                            parent, *new_parent, pd2, pmwcas_pool);
+    rc = grandparent->Update(
+        grandparent->GetMetadata(grandpa_frame->meta_index), parent,
+        reinterpret_cast<InternalNode *>(node_parent), pd2, pmwcas_pool);
     if (!rc.IsOk()) {
       return rc;
     }
@@ -1192,7 +1205,7 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
     uint32_t freeze_retry = 0;
     do {
       // if previous merge succeeded, we move on to check new_parent
-      rc = (*new_parent)
+      rc = (reinterpret_cast<InternalNode *>(node_parent))
                ->CheckMerge(stack, key, key_size,
                             freeze_retry < MAX_FREEZE_RETRY);
       if (rc.IsOk()) {
@@ -1200,9 +1213,9 @@ ReturnCode BaseNode::CheckMerge(bztree::Stack *stack, const char *key,
       }
       freeze_retry += 1;
       stack->Clear();
-      BaseNode *landed_on =
-          stack->tree->TraverseToNode(stack, key, key_size, *new_parent);
-      if (landed_on != *new_parent) {
+      BaseNode *landed_on = stack->tree->TraverseToNode(
+          stack, key, key_size, reinterpret_cast<InternalNode *>(node_parent));
+      if (landed_on != reinterpret_cast<InternalNode *>(node_parent)) {
         // we landed on a leaf node
         // means the *new_parent has been swapped out
         // either splitted or merged
@@ -1228,7 +1241,7 @@ ReturnCode InternalNode::Update(RecordMetadata meta, InternalNode *old_child,
   pd.AddEntry(&(&header.status)->word, status.word, status.word);
   pd.AddEntry(GetPayloadPtr(meta), reinterpret_cast<uint64_t>(old_child),
                reinterpret_cast<uint64_t>(new_child),
-               pmwcas::Descriptor::kRecycleOnRecovery);
+               pmwcas::Descriptor::kRecycleOldOnSuccess);
   if (pd.MwCAS()) {
     return ReturnCode::Ok();
   } else {
@@ -1425,11 +1438,17 @@ bool LeafNode::PrepareForSplit(Stack &stack, uint32_t split_threshold,
   // TODO(tzwang): also put the new insert here to save some cycles
   auto left_end_it = meta_vec.begin() + nleft;
 #ifdef PMDK
-  (Allocator::Get()->GetDirect<LeafNode>(reinterpret_cast<uint64_t>(*left)))
+  auto node_left = reinterpret_cast<uint64_t>(*left) &
+                   ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
+  auto node_right = reinterpret_cast<uint64_t>(*right) &
+                    ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
+  (Allocator::Get()->GetDirect<LeafNode>(node_left))
       ->CopyFrom(this, meta_vec.begin(), left_end_it, pmwcas_pool->GetEpoch());
-  (Allocator::Get()->GetDirect<LeafNode>(reinterpret_cast<uint64_t>(*right)))
+  (Allocator::Get()->GetDirect<LeafNode>(node_right))
       ->CopyFrom(this, left_end_it, meta_vec.end(), pmwcas_pool->GetEpoch());
 #else
+  auto node_left = *left;
+  auto node_right = *right;
   (*left)->CopyFrom(this, meta_vec.begin(), left_end_it,
                     pmwcas_pool->GetEpoch());
   (*right)->CopyFrom(this, left_end_it, meta_vec.end(),
@@ -1448,8 +1467,8 @@ bool LeafNode::PrepareForSplit(Stack &stack, uint32_t split_threshold,
   if (parent == nullptr) {
     // Good boy!
     InternalNode::New(key, separator_meta.GetKeyLength(),
-                      reinterpret_cast<uint64_t>(*left),
-                      reinterpret_cast<uint64_t>(*right), new_parent);
+                      reinterpret_cast<uint64_t>(node_left),
+                      reinterpret_cast<uint64_t>(node_right), new_parent);
     return true;
   }
 
@@ -1466,7 +1485,7 @@ bool LeafNode::PrepareForSplit(Stack &stack, uint32_t split_threshold,
     // parent node that needs to be installed to its parent
     return parent->PrepareForSplit(
         stack, split_threshold, key, separator_meta.GetKeyLength(),
-        reinterpret_cast<uint64_t>(*left), reinterpret_cast<uint64_t>(*right),
+        reinterpret_cast<uint64_t>(node_left), reinterpret_cast<uint64_t>(node_right),
         new_parent, pd, pmwcas_pool, backoff);
   }
 }
@@ -1572,15 +1591,15 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size,
     pd.ReserveAndAddEntry(
         pmwcas::Descriptor::kAllocNullAddress,
         reinterpret_cast<uint64_t>(nullptr),
-        pmwcas::Descriptor::kRecycleOnRecovery);
+        pmwcas::Descriptor::kRecycleNewOnFailure);
     pd.ReserveAndAddEntry(
         pmwcas::Descriptor::kAllocNullAddress,
         reinterpret_cast<uint64_t>(nullptr),
-        pmwcas::Descriptor::kRecycleOnRecovery);
+        pmwcas::Descriptor::kRecycleNewOnFailure);
     pd.ReserveAndAddEntry(
         pmwcas::Descriptor::kAllocNullAddress,
         reinterpret_cast<uint64_t>(nullptr),
-        pmwcas::Descriptor::kRecycleOnRecovery);
+        pmwcas::Descriptor::kRecycleNewOnFailure);
     uint64_t *ptr_r = pd.GetNewValuePtr(0);
     uint64_t *ptr_l = pd.GetNewValuePtr(1);
     uint64_t *ptr_parent = pd.GetNewValuePtr(2);
@@ -1612,6 +1631,8 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size,
     }
 
     assert(*ptr_parent);
+    uint64_t node_parent =
+      (*ptr_parent) & ~pmwcas::Descriptor::WordDescriptor::kRecycleFlag;
 
     auto *top = stack.Pop();
     InternalNode *old_parent = nullptr;
@@ -1633,11 +1654,11 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size,
       auto result = grand_parent->Update(
           top->node->GetMetadata(top->meta_index),
           reinterpret_cast<InternalNode *>(Allocator::Get()->GetOffset(old_parent)),
-          reinterpret_cast<InternalNode *>(*ptr_parent), pd, GetPMWCASPool());
+          reinterpret_cast<InternalNode *>(node_parent), pd, GetPMWCASPool());
 #else
       auto result = grand_parent->Update(
           top->node->GetMetadata(top->meta_index), old_parent,
-          reinterpret_cast<InternalNode *>(*ptr_parent), pd, GetPMWCASPool());
+          reinterpret_cast<InternalNode *>(node_parent), pd, GetPMWCASPool());
 #endif
     } else {
       // No grand parent or already popped out by during split propagation
@@ -1646,9 +1667,9 @@ ReturnCode BzTree::Insert(const char *key, uint16_t key_size,
 #ifdef PMDK
       ChangeRoot(reinterpret_cast<uint64_t>(
                      Allocator::Get()->GetOffset(stack.GetRoot())),
-                 *ptr_parent, pd);
+                 node_parent, pd);
 #else
-      ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()), *ptr_parent, pd);
+      ChangeRoot(reinterpret_cast<uint64_t>(stack.GetRoot()), node_parent, pd);
 #endif
     }
   }
@@ -1659,8 +1680,9 @@ bool BzTree::ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr,
   // Memory policy here is "Never" because the memory was allocated in
   // PrepareForInsert/BzTree::Insert which uses a descriptor that specifies
   // policy RecycleOnRecovery
+  // FIXME(shiges): Why not kRecycleOldOnSuccess?
   pd.AddEntry(reinterpret_cast<uint64_t *>(&root), expected_root_addr,
-               new_root_addr, pmwcas::Descriptor::kRecycleNever);
+               new_root_addr, pmwcas::Descriptor::kRecycleOldOnSuccess);
   return pd.MwCAS();
 }
 

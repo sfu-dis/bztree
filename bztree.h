@@ -576,7 +576,7 @@ class BzTree {
     auto pd = pool->AllocateDescriptor();
     auto index = pd.ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&root),
                                         reinterpret_cast<uint64_t>(nullptr),
-                                        pmwcas::Descriptor::kRecycleOnRecovery);
+                                        pmwcas::Descriptor::kRecycleNewOnFailure);
     auto root_ptr = pd.GetNewValuePtr(index);
     LeafNode::New(reinterpret_cast<LeafNode **>(root_ptr), param.leaf_node_size);
     pd.MwCAS();
