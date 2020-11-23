@@ -60,7 +60,7 @@ bztree::BzTree *recovery_from_pool(const tree_options_t &opt) {
 
   auto tree = reinterpret_cast<bztree::BzTree *>(
       pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  tree->Recovery();
+  tree->Recovery(opt.num_threads);
   return tree;
 }
 

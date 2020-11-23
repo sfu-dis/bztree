@@ -583,14 +583,14 @@ class BzTree {
   }
 
 #ifdef PMEM
-  void Recovery() {
+  void Recovery(size_t num_threads = 0) {
     index_epoch += 1;
     // avoid multiple increment if there are multiple bztrees
     if (global_epoch != index_epoch) {
       global_epoch = index_epoch;
     }
     pmwcas::DescriptorPool *pool = GetPMWCASPool();
-    pool->Recovery(false);
+    pool->Recovery(num_threads, false);
 
     pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
   }
