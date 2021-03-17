@@ -2,6 +2,8 @@
 
 #define TEST_LAYOUT_NAME "bztree_layout"
 
+static constexpr uint32_t kDescriptorsPerThread = 1024;
+
 extern "C" tree_api *create_tree(const tree_options_t &opt) {
   return new bztree_wrapper(opt);
 }
@@ -13,6 +15,8 @@ static bool FileExists(const char *pool_path) {
 
 bztree::BzTree *create_new_tree(const tree_options_t &opt) {
   bztree::BzTree::ParameterSet param(1024, 512, 1024);
+  uint32_t num_threads = opt.num_threads + 1; // account for the loading thread
+  uint32_t desc_pool_size = kDescriptorsPerThread * num_threads;
 
 #ifdef PMDK
   pmwcas::InitLibrary(
@@ -29,7 +33,7 @@ bztree::BzTree *create_new_tree(const tree_options_t &opt) {
   pmdk_allocator->Allocate((void **)&bztree->pmwcas_pool,
                            sizeof(pmwcas::DescriptorPool));
   new (bztree->pmwcas_pool)
-      pmwcas::DescriptorPool(100000, opt.num_threads, false);
+      pmwcas::DescriptorPool(desc_pool_size, num_threads, false);
 
   new (bztree)
       bztree::BzTree(param, bztree->pmwcas_pool,
@@ -41,7 +45,7 @@ bztree::BzTree *create_new_tree(const tree_options_t &opt) {
   pmwcas::InitLibrary(
       pmwcas::TlsAllocator::Create, pmwcas::TlsAllocator::Destroy,
       pmwcas::LinuxEnvironment::Create, pmwcas::LinuxEnvironment::Destroy);
-  auto pool = new pmwcas::DescriptorPool(100000, opt.num_threads, false);
+  auto pool = new pmwcas::DescriptorPool(desc_pool_size, num_threads, false);
   auto *bztree = bztree::BzTree::New(param, pool);
 #endif
 
@@ -49,6 +53,9 @@ bztree::BzTree *create_new_tree(const tree_options_t &opt) {
 }
 
 bztree::BzTree *recovery_from_pool(const tree_options_t &opt) {
+  uint32_t num_threads = opt.num_threads + 1; // account for the loading thread
+  uint32_t desc_pool_size = kDescriptorsPerThread * num_threads;
+
   pmwcas::InitLibrary(
       pmwcas::PMDKAllocator::Create(opt.pool_path.c_str(), TEST_LAYOUT_NAME,
                                     opt.pool_size),
@@ -60,7 +67,12 @@ bztree::BzTree *recovery_from_pool(const tree_options_t &opt) {
 
   auto tree = reinterpret_cast<bztree::BzTree *>(
       pmdk_allocator->GetRoot(sizeof(bztree::BzTree)));
-  tree->Recovery(opt.num_threads);
+  tree->Recovery(num_threads);
+
+  pmdk_allocator->Allocate((void **)&tree->pmwcas_pool,
+                           sizeof(pmwcas::DescriptorPool));
+  tree->SetPMWCASPool(tree->pmwcas_pool);
+
   return tree;
 }
 
@@ -74,7 +86,16 @@ bztree_wrapper::bztree_wrapper(const tree_options_t &opt) {
   }
 }
 
-bztree_wrapper::~bztree_wrapper() { pmwcas::Thread::ClearRegistry(); }
+bztree_wrapper::~bztree_wrapper() {
+  pmwcas::Thread::ClearRegistry();
+#ifdef PMEM
+  tree_->~BzTree();
+  auto pmdk_allocator =
+      reinterpret_cast<pmwcas::PMDKAllocator *>(pmwcas::Allocator::Get());
+  auto *pool = tree_->GetPMWCASPool();
+  pool->~DescriptorPool();
+#endif
+}
 
 bool bztree_wrapper::find(const char *key, size_t key_sz, char *value_out) {
   // FIXME(tzwang): for now only support 8-byte values
