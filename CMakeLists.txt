@@ -64,7 +64,7 @@ message(STATUS "BUILD_TESTS: defined")
 FetchContent_Declare(
         pmwcas
         GIT_REPOSITORY https://github.com/sfu-dis/pmwcas.git
-        GIT_TAG reclamation-upon-recovery
+        GIT_TAG master
 )
 FetchContent_GetProperties(pmwcas)
 if (NOT pmwcas_POPULATED)
