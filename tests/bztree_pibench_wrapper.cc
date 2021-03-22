@@ -71,6 +71,9 @@ bztree::BzTree *recovery_from_pool(const tree_options_t &opt) {
 
   pmdk_allocator->Allocate((void **)&tree->pmwcas_pool,
                            sizeof(pmwcas::DescriptorPool));
+  new (tree->pmwcas_pool)
+      pmwcas::DescriptorPool(desc_pool_size, num_threads, false);
+
   tree->SetPMWCASPool(tree->pmwcas_pool);
 
   return tree;
