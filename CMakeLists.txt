@@ -70,7 +70,7 @@ add_definitions(-DDESC_CAP=16)
 set(PMWCAS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/pmwcas")
 ExternalProject_Add(PMWCAS
   PREFIX "${PMWCAS_PREFIX}"
-  GIT_REPOSITORY git@github.com:XiangpengHao/pmwcas.git
+  GIT_REPOSITORY https://github.com/sfu-dis/pmwcas.git
   GIT_TAG master
   INSTALL_COMMAND ""
   BUILD_COMMAND $(MAKE)
@@ -83,7 +83,7 @@ ExternalProject_Add(PMWCAS
 ##################### PiBench #########################
 FetchContent_Declare(
         pibench 
-        GIT_REPOSITORY git@github.com:wangtzh/pibench.git
+        GIT_REPOSITORY https://github.com/sfu-dis/pibench.git
         GIT_TAG master 
 )
 if (NOT pibench_POPULATED)
