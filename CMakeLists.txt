@@ -150,11 +150,11 @@ set_property(GLOBAL APPEND PROPERTY BZTREE_SRC
 )
 get_property(BZTREE_LIB_SRC GLOBAL PROPERTY BZTREE_SRC)
 
-add_library(bztree_static STATIC ${BZTREE_LIB_SRC})
+#add_library(bztree_static STATIC ${BZTREE_LIB_SRC})
 add_library(bztree SHARED ${BZTREE_LIB_SRC})
 
 add_dependencies(bztree cpplint)
-add_dependencies(bztree_static PMWCAS)
+#add_dependencies(bztree_static PMWCAS)
 add_dependencies(bztree PMWCAS)
 
 set (BZTREE_LINK_LIBS
@@ -170,16 +170,16 @@ endif()
 
 if(${PMEM_BACKEND} STREQUAL "PMDK")
   set(PMDK_LIB_PATH "/usr/local/lib" CACHE STRING "PMDK lib install path")
-  add_library(pmemobj STATIC IMPORTED)
-  set_property(TARGET pmemobj PROPERTY IMPORTED_LOCATION ${PMDK_LIB_PATH}/libpmemobj.a)
+  #add_library(pmemobj STATIC IMPORTED)
+  #set_property(TARGET pmemobj PROPERTY IMPORTED_LOCATION ${PMDK_LIB_PATH}/libpmemobj.a)
   list(APPEND BZTREE_LINK_LIBS
     pmemobj
   )
 endif()
 
 target_link_libraries(bztree ${BZTREE_LINK_LIBS})
-target_link_libraries(bztree_static ${BZTREE_LINK_LIBS})
-set_property(TARGET bztree_static PROPERTY POSITION_INDEPENDENT_CODE ON)
+#target_link_libraries(bztree_static ${BZTREE_LINK_LIBS})
+#set_property(TARGET bztree_static PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 if(${BUILD_TESTS})
   if((${PMEM_BACKEND} STREQUAL "PMDK"))
@@ -196,7 +196,7 @@ endif()
 
 
 add_library(bztree_pibench_wrapper SHARED tests/bztree_pibench_wrapper.cc)
-target_link_libraries(bztree_pibench_wrapper bztree_static)
+target_link_libraries(bztree_pibench_wrapper bztree)
 
 add_custom_target(
   cpplint ALL
@@ -211,9 +211,9 @@ add_custom_target(
 
 set(MAX_FREEZE_RETRY 1 CACHE STRING "MAX retry on frozen node")
 target_compile_definitions(bztree PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
-target_compile_definitions(bztree_static PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
+#target_compile_definitions(bztree_static PRIVATE MAX_FREEZE_RETRY=${MAX_FREEZE_RETRY})
 
 set(ENABLE_MERGE 0 CACHE STRING "MAX retry on frozen node")
 message(STATUS "ENABLE_MERGE: " ${ENABLE_MERGE})
 target_compile_definitions(bztree PRIVATE ENABLE_MERGE=${ENABLE_MERGE})
-target_compile_definitions(bztree_static PUBLIC ENABLE_MERGE=${ENABLE_MERGE})
+#target_compile_definitions(bztree_static PUBLIC ENABLE_MERGE=${ENABLE_MERGE})
