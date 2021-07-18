@@ -12,7 +12,7 @@
 #include "util/performance_test.h"
 #include "../bztree.h"
 
-uint32_t descriptor_pool_size = 50000;
+uint32_t descriptor_pool_size = 500000;
 
 struct MultiThreadRead : public pmwcas::PerformanceTest {
   bztree::BzTree *tree;
@@ -73,7 +73,7 @@ struct MultiThreadInsertTest : public pmwcas::PerformanceTest {
     for (const auto &pair:value_missing) {
       std::cout << "Value missing i = " << pair.first << std::endl
                 << "=================" << std::endl;
-      pair.second->Dump(tree->GetPMWCASPool()->GetEpoch(), true);
+      pair.second->Dump(true);
     }
     if (value_missing.size() > 0) {
       ASSERT_TRUE(false);
@@ -191,7 +191,7 @@ GTEST_TEST(BztreeTest, MultiThreadInsertInternalSplitTest) {
 
 GTEST_TEST(BztreeTest, MiltiUpsertTest) {
   uint32_t thread_count = 50;
-  uint32_t item_per_thread = 1000;
+  uint32_t item_per_thread = 100000;
   std::unique_ptr<pmwcas::DescriptorPool> pool(
       new pmwcas::DescriptorPool(descriptor_pool_size, thread_count, false)
   );
