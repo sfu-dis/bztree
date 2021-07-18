@@ -12,7 +12,6 @@
 #include <optional>
 
 #include <pmwcas.h>
-#include <mwcas/mwcas.h>
 
 #ifndef ALWAYS_ASSERT
 #define ALWAYS_ASSERT(expr) (expr) ? (void)0 : abort()
@@ -212,7 +211,7 @@ class BaseNode {
   bool is_leaf;
   NodeHeader header;
   RecordMetadata record_metadata[0];
-  void Dump(pmwcas::EpochManager *epoch);
+  void Dump();
 
   // Check if the key in a range, inclusive
   // -1 if smaller than left key
@@ -357,7 +356,7 @@ class InternalNode : public BaseNode {
   bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
                        const char *key, uint32_t key_size,
                        uint64_t left_child_addr, uint64_t right_child_addr,
-                       InternalNode **new_node, pmwcas::Descriptor *pd,
+                       InternalNode **new_node, pmwcas::DescriptorGuard &pd,
                        pmwcas::DescriptorPool *pool, bool backoff);
 
   inline uint64_t *GetPayloadPtr(RecordMetadata meta) {
@@ -365,7 +364,7 @@ class InternalNode : public BaseNode {
     return reinterpret_cast<uint64_t *>(ptr);
   }
   ReturnCode Update(RecordMetadata meta, InternalNode *old_child, InternalNode *new_child,
-                    pmwcas::Descriptor *pd, pmwcas::DescriptorPool *pmwcas_pool);
+                    pmwcas::DescriptorGuard &pd, pmwcas::DescriptorPool *pmwcas_pool);
   uint32_t GetChildIndex(const char *key, uint16_t key_size, bool get_le = true);
 
   // epoch here is required: record ptr might be a desc due to UPDATE operation
@@ -375,12 +374,12 @@ class InternalNode : public BaseNode {
     GetRawRecord(record_metadata[index], nullptr, nullptr, &child_addr, epoch);
 
 #ifdef PMDK
-    return Allocator::Get()->GetDirect<BaseNode>(reinterpret_cast<BaseNode *> (child_addr));
+    return Allocator::Get()->GetDirect<BaseNode>(child_addr);
 #else
     return reinterpret_cast<BaseNode *> (child_addr);
 #endif
   }
-  void Dump(pmwcas::EpochManager *epoch, bool dump_children = false);
+  void Dump(bool dump_children = false);
 
   // delete a child from internal node
   // | key0, val0 | key1, val1 | key2, val2 | key3, val3 |
@@ -446,7 +445,7 @@ class LeafNode : public BaseNode {
   ReturnCode Insert(const char *key, uint16_t key_size, uint64_t payload,
                     pmwcas::DescriptorPool *pmwcas_pool, uint32_t split_threshold);
   bool PrepareForSplit(Stack &stack, uint32_t split_threshold,
-                       pmwcas::Descriptor *pd,
+                       pmwcas::DescriptorGuard &pd,
                        pmwcas::DescriptorPool *pmwcas_pool,
                        LeafNode **left, LeafNode **right,
                        InternalNode **new_parent, bool backoff);
@@ -508,7 +507,7 @@ class LeafNode : public BaseNode {
   uint32_t SortMetadataByKey(std::vector<RecordMetadata> &vec,
                              bool visible_only,
                              pmwcas::EpochManager *epoch);
-  void Dump(pmwcas::EpochManager *epoch);
+  void Dump();
 
  private:
   enum Uniqueness { IsUnique, Duplicate, ReCheck, NodeFrozen };
@@ -574,24 +573,24 @@ class BzTree {
     global_epoch = index_epoch;
     SetPMWCASPool(pool);
     pmwcas::EpochGuard guard(GetPMWCASPool()->GetEpoch());
-    auto *pd = pool->AllocateDescriptor();
-    auto index = pd->ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&root),
+    auto pd = pool->AllocateDescriptor();
+    auto index = pd.ReserveAndAddEntry(reinterpret_cast<uint64_t *>(&root),
                                         reinterpret_cast<uint64_t>(nullptr),
-                                        pmwcas::Descriptor::kRecycleOnRecovery);
-    auto root_ptr = pd->GetNewValuePtr(index);
+                                        pmwcas::Descriptor::kRecycleNewOnFailure);
+    auto root_ptr = pd.GetNewValuePtr(index);
     LeafNode::New(reinterpret_cast<LeafNode **>(root_ptr), param.leaf_node_size);
-    pd->MwCAS();
+    pd.MwCAS();
   }
 
 #ifdef PMEM
-  void Recovery() {
+  void Recovery(size_t num_threads = 0) {
     index_epoch += 1;
     // avoid multiple increment if there are multiple bztrees
     if (global_epoch != index_epoch) {
       global_epoch = index_epoch;
     }
     pmwcas::DescriptorPool *pool = GetPMWCASPool();
-    pool->Recovery(false);
+    pool->Recovery(num_threads, false);
 
     pmwcas::NVRAM::Flush(sizeof(bztree::BzTree), this);
   }
@@ -627,7 +626,8 @@ class BzTree {
 
   void SetPMWCASPool(pmwcas::DescriptorPool *pool) {
 #ifdef PMDK
-    this->pmwcas_pool = Allocator::Get()->GetOffset(pool);
+    this->pmwcas_pool = reinterpret_cast<pmwcas::DescriptorPool *>(
+        Allocator::Get()->GetOffset(pool));
 #else
     this->pmwcas_pool = pool;
 #endif
@@ -635,7 +635,8 @@ class BzTree {
 
   inline pmwcas::DescriptorPool *GetPMWCASPool() {
 #ifdef PMDK
-    return Allocator::Get()->GetDirect(pmwcas_pool);
+    return Allocator::Get()->GetDirect<pmwcas::DescriptorPool>(
+        reinterpret_cast<uint64_t>(pmwcas_pool));
 #else
     return pmwcas_pool;
 #endif
@@ -650,11 +651,12 @@ class BzTree {
   }
 
   ParameterSet parameters;
-  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::Descriptor *pd);
+  bool ChangeRoot(uint64_t expected_root_addr, uint64_t new_root_addr, pmwcas::DescriptorGuard &pd);
+
+  pmwcas::DescriptorPool *pmwcas_pool;
 
  private:
   BaseNode *root;
-  pmwcas::DescriptorPool *pmwcas_pool;
   uint64_t pmdk_addr;
   uint64_t index_epoch;
 
@@ -662,7 +664,7 @@ class BzTree {
     auto root_node = reinterpret_cast<pmwcas::MwcTargetField<uint64_t> *>(
         &root)->GetValueProtected();
 #ifdef PMDK
-    return Allocator::Get()->GetDirect(reinterpret_cast<BaseNode *>(root_node));
+    return Allocator::Get()->GetDirect<BaseNode>(root_node);
 #else
     return reinterpret_cast<BaseNode *>(root_node);
 #endif
