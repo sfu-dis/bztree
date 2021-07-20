@@ -195,8 +195,10 @@ if(${BUILD_TESTS})
 endif()
 
 
-add_library(bztree_pibench_wrapper SHARED tests/bztree_pibench_wrapper.cc)
-target_link_libraries(bztree_pibench_wrapper bztree)
+if(${PMEM_BACKEND} STREQUAL "PMDK")
+  add_library(bztree_pibench_wrapper SHARED tests/bztree_pibench_wrapper.cc)
+  target_link_libraries(bztree_pibench_wrapper bztree)
+endif()
 
 add_custom_target(
   cpplint ALL
