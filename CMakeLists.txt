@@ -54,7 +54,7 @@ else()
   message(STATUS "GOOGLE_FRAMEWORK is not defined, will not use glog, gflags and gtest")
 endif()
 
-option(BUILD_TESTS, "Build test cases using gflags, glog and gtest" ON)
+option(BUILD_TESTS "Build test cases using gflags, glog and gtest" ON)
 if(${BUILD_TESTS})
   if(NOT ${GOOGLE_FRAMEWORK})
     message(FATAL_ERROR "BUILD_TESTS defined but GOOGLE_FRAMEWORK not defined")
