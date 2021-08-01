@@ -13,7 +13,7 @@
 #include "../bztree.h"
 #include "util/performance_test.h"
 
-#define TEST_POOL_NAME "/mnt/pmem0/geshi/pool_bztree"
+#define TEST_POOL_NAME "/mnt/pmem0/pool_bztree"
 #define TEST_LAYOUT_NAME "layout_bztree"
 
 class BzTreePMEMTest : public ::testing::Test {
@@ -23,7 +23,7 @@ class BzTreePMEMTest : public ::testing::Test {
   void SetUp() override {
     pmwcas::InitLibrary(
         pmwcas::PMDKAllocator::Create(TEST_POOL_NAME, TEST_LAYOUT_NAME,
-                                      1024 * 1024 * 1024),
+                                      10ull * 1024 * 1024 * 1024),
         pmwcas::PMDKAllocator::Destroy, pmwcas::LinuxEnvironment::Create,
         pmwcas::LinuxEnvironment::Destroy);
   }
