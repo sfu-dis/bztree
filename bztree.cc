@@ -735,7 +735,7 @@ RecordMetadata BaseNode::SearchRecordMeta(pmwcas::EpochManager *epoch,
   for (uint32_t i = 0; i < header.sorted_count; i++) {
     RecordMetadata current = GetMetadata(i);
     char *current_key = GetKey(current);
-    assert(current_key || !is_leaf);
+    // assert(current_key || !is_leaf);
     auto cmp_result =
         KeyCompare(key, key_size, current_key, current.GetKeyLength());
     if (cmp_result == 0) {
